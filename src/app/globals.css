@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-base: #12181c;
+  --bg-surface: #1c242a;
+  --bg-surface-alt: #232c33;
+  --accent-primary: #f1592a;
+  --accent-primary-dark: #c94a22;
+  --accent-compras: #3b7dd8;
+  --accent-success: #2fae66;
+  --accent-alert: #f4b400;
+  --accent-danger: #e5484d;
+  --text-primary: #e8ebed;
+  --text-muted: #8a939b;
+
+  /* Diz ao navegador para usar a variante escura da UI nativa (inputs,
+     seletor de data, scrollbar) em vez do branco padrão — sem isso, o
+     fundo de <input>/<select> renderiza claro mesmo com classes de cor
+     do Tailwind aplicadas, deixando texto claro ilegível sobre fundo claro. */
+  color-scheme: dark;
+}
+
+body {
+  color: var(--text-primary);
+  background: var(--bg-base);
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+}
+
+/* Foco de teclado visível em qualquer elemento interativo. */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Classe única para todo input/select/textarea do sistema — fundo, texto,
+   placeholder, borda e foco centralizados aqui. */
+.input-field {
+  background-color: var(--bg-surface-alt);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.input-field::placeholder {
+  color: var(--text-muted);
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(241, 89, 42, 0.25);
+}
+
+/* Evita o flash de fundo branco do autofill do Chrome. */
+.input-field:-webkit-autofill,
+.input-field:-webkit-autofill:hover,
+.input-field:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text-primary);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-surface-alt) inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
