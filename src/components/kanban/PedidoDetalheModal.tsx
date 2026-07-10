@@ -29,11 +29,13 @@ export function PedidoDetalheModal({
   const [pedido, setPedido] = useState<Pedido | null>(null)
   const [itens, setItens] = useState<PedidoItem[]>([])
   const [carregando, setCarregando] = useState(false)
-  const [previsaoChegada, setPrevisaoChegada] = useState('')
 
   const vePainelCompras = setor === 'compras' || setor === 'gestor'
   const veMargem = setor !== 'compras'
-  const totalPedido = itens.reduce((soma, item) => soma + (item.preco_venda ?? 0), 0)
+  // Number(...) é obrigatório aqui: o Postgres devolve `preco_venda` (numeric)
+  // como string (ex: "150.00"), e `soma + item.preco_venda` faria concatenação
+  // de string em vez de soma quando o valor chega assim.
+  const totalPedido = itens.reduce((soma, item) => soma + Number(item.preco_venda ?? 0), 0)
 
   function handleItemAtualizado(itemAtualizado: PedidoItem) {
     setItens((atual) =>
@@ -65,7 +67,6 @@ export function PedidoDetalheModal({
       if (!ativo) return
       setPedido(pedidoData ?? null)
       setItens(itensData ?? [])
-      setPrevisaoChegada(pedidoData?.previsao_chegada?.slice(0, 10) ?? '')
       setCarregando(false)
     }
 
@@ -76,26 +77,12 @@ export function PedidoDetalheModal({
     }
   }, [pedidoId, supabase])
 
-  async function salvarPrevisaoChegada(valor: string) {
-    if (!pedido) return
-    const novoValor = valor || null
-
-    const { error } = await supabase
-      .from('pedidos')
-      .update({ previsao_chegada: novoValor })
-      .eq('id', pedido.id)
-
-    if (!error) {
-      setPedido((atual) => (atual ? { ...atual, previsao_chegada: novoValor } : atual))
-    }
-  }
-
   return (
     <Modal
       open={pedidoId !== null}
       onClose={onClose}
       title={pedido ? `Pedido #${pedido.numero}` : 'Pedido'}
-      widthClassName="max-w-3xl"
+      widthClassName="max-w-5xl"
     >
       {carregando || !pedido ? (
         <div className="py-8 text-center text-sm text-muted">Carregando…</div>
@@ -166,22 +153,6 @@ export function PedidoDetalheModal({
                 </dd>
               </div>
               <div>
-                <dt className="text-muted">Previsão de chegada</dt>
-                {vePainelCompras ? (
-                  <input
-                    type="date"
-                    value={previsaoChegada}
-                    onChange={(e) => setPrevisaoChegada(e.target.value)}
-                    onBlur={(e) => salvarPrevisaoChegada(e.target.value)}
-                    className="input-field mt-1 w-full rounded-md px-2 py-1 text-sm"
-                  />
-                ) : (
-                  <dd className="font-medium text-primary">
-                    {formatarDataSomente(pedido.previsao_chegada)}
-                  </dd>
-                )}
-              </div>
-              <div>
                 <dt className="text-muted">Entrega ao cliente</dt>
                 <dd className="font-medium text-primary">
                   {formatarDataSomente(pedido.data_entrega_cliente)}
@@ -196,6 +167,7 @@ export function PedidoDetalheModal({
               itens={itens}
               setor={setor}
               onPedidoAtualizado={setPedido}
+              onItemAtualizado={handleItemAtualizado}
             />
           )}
 

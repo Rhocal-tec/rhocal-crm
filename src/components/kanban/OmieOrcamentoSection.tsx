@@ -22,7 +22,21 @@ interface ClienteOmie {
   cnpjCpf: string | null
 }
 
-type Etapa = 'idle' | 'buscando' | 'selecionar_cliente' | 'criando' | 'sucesso'
+interface ProdutoOmie {
+  codigoProduto: number
+  codigo: string
+  descricao: string
+}
+
+type Etapa =
+  | 'idle'
+  | 'buscando_produtos'
+  | 'selecionar_produtos'
+  | 'salvando_produtos'
+  | 'buscando'
+  | 'selecionar_cliente'
+  | 'criando'
+  | 'sucesso'
 
 async function chamarApiOmie(payload: Record<string, unknown>) {
   const resposta = await fetch('/api/omie/orcamento', {
@@ -37,22 +51,42 @@ async function chamarApiOmie(payload: Record<string, unknown>) {
   return dados
 }
 
+async function chamarApiOmieProdutos(payload: Record<string, unknown>) {
+  const resposta = await fetch('/api/omie/buscar-produtos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const dados = await resposta.json().catch(() => null)
+  if (!resposta.ok || !dados || dados.erro) {
+    throw new Error(dados?.erro ?? 'Erro inesperado ao buscar produtos no Omie.')
+  }
+  return dados
+}
+
 export function OmieOrcamentoSection({
   pedido,
   itens,
   setor,
   onPedidoAtualizado,
+  onItemAtualizado,
 }: {
   pedido: Pedido
   itens: PedidoItem[]
   setor: SetorTipo
   onPedidoAtualizado: (pedido: Pedido) => void
+  onItemAtualizado: (item: PedidoItem) => void
 }) {
   const [supabase] = useState(() => createClient())
   const [etapa, setEtapa] = useState<Etapa>('idle')
   const [clientes, setClientes] = useState<ClienteOmie[]>([])
   const [buscaSemResultado, setBuscaSemResultado] = useState(false)
   const [clienteEscolhido, setClienteEscolhido] = useState<number | null>(null)
+  const [itensParaVincular, setItensParaVincular] = useState<PedidoItem[]>([])
+  const [candidatosPorItem, setCandidatosPorItem] = useState<Record<string, ProdutoOmie[]>>({})
+  const [produtoEscolhidoPorItem, setProdutoEscolhidoPorItem] = useState<Record<string, number>>(
+    {},
+  )
   const [erro, setErro] = useState<string | null>(null)
 
   const podeGerar = setor === 'comercial' || setor === 'gestor'
@@ -94,6 +128,69 @@ export function OmieOrcamentoSection({
         </span>
       </div>
     )
+  }
+
+  // Ponto de entrada do botão principal: primeiro garante que todo item está
+  // vinculado a um produto do Omie, só então segue pro fluxo de cliente.
+  async function iniciarFluxo() {
+    setErro(null)
+    const pendentes = itens.filter((item) => item.codigo_produto_omie === null)
+    if (pendentes.length > 0) {
+      await buscarProdutosPendentes(pendentes)
+      return
+    }
+    prosseguirParaCliente()
+  }
+
+  function prosseguirParaCliente() {
+    if (pedido.cliente_omie_id !== null) {
+      confirmarCriacao(pedido.cliente_omie_id)
+    } else {
+      iniciarBusca()
+    }
+  }
+
+  async function buscarProdutosPendentes(pendentes: PedidoItem[]) {
+    setItensParaVincular(pendentes)
+    setEtapa('buscando_produtos')
+
+    const resultados: Record<string, ProdutoOmie[]> = {}
+    try {
+      for (const item of pendentes) {
+        const dados = await chamarApiOmieProdutos({ descricao: item.descricao })
+        resultados[item.id] = dados.produtos ?? []
+      }
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : 'Erro ao buscar produtos no Omie.')
+      setEtapa('idle')
+      return
+    }
+
+    setCandidatosPorItem(resultados)
+    setProdutoEscolhidoPorItem({})
+    setEtapa('selecionar_produtos')
+  }
+
+  async function confirmarVinculoProdutos() {
+    setErro(null)
+    setEtapa('salvando_produtos')
+
+    for (const item of itensParaVincular) {
+      const codigoProduto = produtoEscolhidoPorItem[item.id]
+      const { error } = await supabase
+        .from('pedido_itens')
+        .update({ codigo_produto_omie: codigoProduto })
+        .eq('id', item.id)
+
+      if (error) {
+        setErro(`Não foi possível salvar o produto vinculado ao item "${item.descricao}".`)
+        setEtapa('idle')
+        return
+      }
+      onItemAtualizado({ ...item, codigo_produto_omie: codigoProduto })
+    }
+
+    prosseguirParaCliente()
   }
 
   async function iniciarBusca() {
@@ -148,6 +245,11 @@ export function OmieOrcamentoSection({
     }
   }
 
+  const todosItensVinculados = itensParaVincular.every((item) => {
+    const candidatos = candidatosPorItem[item.id] ?? []
+    return candidatos.length > 0 && produtoEscolhidoPorItem[item.id] !== undefined
+  })
+
   return (
     <div className="mt-4 rounded-md border border-white/10 bg-surface-alt p-3">
       {erro && (
@@ -164,7 +266,7 @@ export function OmieOrcamentoSection({
       ) : etapa === 'idle' ? (
         <div>
           <button
-            onClick={iniciarBusca}
+            onClick={iniciarFluxo}
             disabled={!pedidoPronto}
             title={
               !pedidoPronto
@@ -195,6 +297,80 @@ export function OmieOrcamentoSection({
             </div>
           )}
         </div>
+      ) : etapa === 'buscando_produtos' ? (
+        <p className="text-sm text-muted">Buscando produtos correspondentes no Omie…</p>
+      ) : etapa === 'salvando_produtos' ? (
+        <p className="text-sm text-muted">Salvando produtos vinculados…</p>
+      ) : etapa === 'selecionar_produtos' ? (
+        <div>
+          <p className="text-sm font-medium text-primary">Vincule cada item a um produto do Omie</p>
+          <p className="mt-1 text-xs text-muted">
+            Nenhum desses itens tem produto vinculado ainda. Escolha o produto correspondente no
+            Omie para cada um antes de continuar.
+          </p>
+
+          <div className="mt-3 flex flex-col gap-3">
+            {itensParaVincular.map((item) => {
+              const candidatos = candidatosPorItem[item.id] ?? []
+              return (
+                <div key={item.id} className="rounded-md border border-white/10 bg-base p-3">
+                  <p className="text-sm font-medium text-primary">{item.descricao}</p>
+
+                  {candidatos.length === 0 ? (
+                    <p className="mt-1 text-sm text-accent-danger" role="alert">
+                      Nenhum produto encontrado no Omie para este item. Cadastre o produto no
+                      Omie antes de continuar.
+                    </p>
+                  ) : (
+                    <div className="mt-2 flex flex-col gap-1.5">
+                      {candidatos.map((produto) => (
+                        <label
+                          key={produto.codigoProduto}
+                          className="flex cursor-pointer items-center gap-2 rounded-md border border-white/10 bg-surface-alt px-3 py-2 text-sm text-primary hover:border-accent-primary/50"
+                        >
+                          <input
+                            type="radio"
+                            name={`produto-${item.id}`}
+                            checked={produtoEscolhidoPorItem[item.id] === produto.codigoProduto}
+                            onChange={() =>
+                              setProdutoEscolhidoPorItem((atual) => ({
+                                ...atual,
+                                [item.id]: produto.codigoProduto,
+                              }))
+                            }
+                            className="accent-accent-primary"
+                          />
+                          <span>
+                            {produto.descricao}{' '}
+                            <span className="font-mono text-xs text-muted">
+                              ({produto.codigo})
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={confirmarVinculoProdutos}
+              disabled={!todosItensVinculados}
+              className="rounded-md bg-accent-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-primary-dark disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Confirmar produtos e continuar
+            </button>
+            <button
+              onClick={() => setEtapa('idle')}
+              className="rounded-md px-3 py-1.5 text-xs font-medium text-muted hover:text-primary"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
       ) : etapa === 'buscando' ? (
         <p className="text-sm text-muted">Buscando cliente no Omie…</p>
       ) : etapa === 'criando' ? (
@@ -205,8 +381,9 @@ export function OmieOrcamentoSection({
 
           {buscaSemResultado ? (
             <p className="mt-1 text-sm text-muted">
-              Cliente não encontrado no Omie. O ideal é cadastrar o cliente no Omie antes, mas
-              você pode seguir sem vincular.
+              Cliente &apos;{pedido.cliente_nome}&apos; não encontrado no Omie. Você pode
+              cadastrá-lo no Omie antes de continuar, ou gerar o orçamento sem vincular a um
+              cliente (não recomendado, pois dificulta o controle financeiro depois).
             </p>
           ) : (
             <div className="mt-2 flex flex-col gap-1.5">
@@ -246,7 +423,7 @@ export function OmieOrcamentoSection({
               onClick={() => confirmarCriacao(null)}
               className="rounded-md border border-white/15 px-3 py-1.5 text-xs font-medium text-primary/80 hover:bg-white/5"
             >
-              {buscaSemResultado ? 'Continuar sem vincular' : 'Gerar sem vincular cliente'}
+              {buscaSemResultado ? 'Gerar mesmo assim, sem vincular cliente' : 'Gerar sem vincular cliente'}
             </button>
             <button
               onClick={() => setEtapa('idle')}

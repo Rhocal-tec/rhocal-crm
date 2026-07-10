@@ -73,11 +73,21 @@ export function AppHeader() {
           ))}
         </nav>
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <span className="text-sm text-primary/70">
           {profile?.nome ?? user?.email}{' '}
           <span className="text-muted">({profile ? SETOR_LABEL[profile.setor] : '—'})</span>
         </span>
+        <Link
+          href="/configuracoes"
+          aria-label="Configurações"
+          title="Configurações"
+          className={`rounded-md p-2 text-lg leading-none transition-colors hover:bg-white/5 ${
+            pathname === '/configuracoes' ? 'bg-white/5' : ''
+          }`}
+        >
+          <span aria-hidden="true">⚙️</span>
+        </Link>
         <button
           onClick={handleLogout}
           className="rounded-md border border-white/15 px-3 py-1.5 text-sm text-primary/80 transition-colors hover:bg-white/5"

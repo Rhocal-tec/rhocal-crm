@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 // Nunca expor OMIE_APP_KEY/OMIE_APP_SECRET no client — só lidas aqui, server-side.
 const OMIE_CLIENTES_URL = 'https://app.omie.com.br/api/v1/geral/clientes/'
 const OMIE_PEDIDO_URL = 'https://app.omie.com.br/api/v1/produtos/pedido/'
+const OMIE_CATEGORIAS_URL = 'https://app.omie.com.br/api/v1/geral/categorias/'
+const OMIE_CONTA_CORRENTE_URL = 'https://app.omie.com.br/api/v1/geral/contacorrente/'
 
 interface ClienteOmie {
   codigoClienteOmie: number
@@ -53,6 +55,73 @@ function formatarDataOmie(data: Date): string {
   return `${dia}/${mes}/${data.getFullYear()}`
 }
 
+// Cache simples em memória do processo — evita chamar ListarCategorias a cada
+// orçamento gerado. Sem TTL: a categoria financeira padrão da conta Omie não
+// muda com frequência: reiniciar o servidor já é o suficiente para renovar.
+let categoriaReceitaCache: string | null = null
+
+// Busca a primeira categoria financeira do tipo RECEITA cadastrada na conta
+// Omie, para usar como codigo_categoria padrão dos orçamentos gerados pelo CRM.
+async function obterCategoriaReceitaPadrao(): Promise<string> {
+  if (categoriaReceitaCache) return categoriaReceitaCache
+
+  const resultado = await chamarOmie(OMIE_CATEGORIAS_URL, 'ListarCategorias', {
+    pagina: 1,
+    registros_por_pagina: 50,
+    filtrar_apenas_ativo: 'S',
+    filtrar_por_tipo: 'R',
+  })
+
+  const bruto = Array.isArray(resultado.categoria_cadastro) ? resultado.categoria_cadastro : []
+  const receita = bruto.find((cat: Record<string, unknown>) => {
+    if (cat.totalizadora === 'S') return false // categoria de agrupamento, não usável diretamente
+    if (cat.nao_exibir === 'S') return false
+    if (cat.conta_inativa === 'S') return false
+    if (cat.conta_receita !== undefined && cat.conta_receita !== 'S') return false
+    return true
+  })
+
+  const codigo = receita?.codigo
+  if (typeof codigo !== 'string' || !codigo) {
+    throw new Error(
+      'Não foi possível determinar a categoria financeira no Omie. Contate o administrador da conta Omie para verificar o cadastro de categorias.',
+    )
+  }
+
+  categoriaReceitaCache = codigo
+  return codigo
+}
+
+// Mesmo cache simples em memória do processo, para a conta corrente padrão.
+let contaCorrentePadraoCache: { codigo: number; descricao: string } | null = null
+
+// Busca a primeira conta corrente ATIVA cadastrada na conta Omie, para usar
+// como codigo_conta_corrente padrão dos orçamentos gerados pelo CRM.
+async function obterContaCorrentePadrao(): Promise<{ codigo: number; descricao: string }> {
+  if (contaCorrentePadraoCache) return contaCorrentePadraoCache
+
+  const resultado = await chamarOmie(OMIE_CONTA_CORRENTE_URL, 'ListarContasCorrentes', {
+    pagina: 1,
+    registros_por_pagina: 50,
+    apenas_importado_api: 'N',
+  })
+
+  const bruto = Array.isArray(resultado.ListarContasCorrentes)
+    ? resultado.ListarContasCorrentes
+    : []
+  const ativa = bruto.find((c: Record<string, unknown>) => c.inativo !== 'S')
+
+  const codigo = ativa?.nCodCC
+  if (typeof codigo !== 'number') {
+    throw new Error(
+      'Não foi possível determinar a conta corrente no Omie. Contate o administrador da conta Omie para verificar o cadastro de contas correntes.',
+    )
+  }
+
+  contaCorrentePadraoCache = { codigo, descricao: (ativa.descricao as string) ?? '' }
+  return contaCorrentePadraoCache
+}
+
 export async function POST(request: Request) {
   const supabase = createClient()
 
@@ -88,12 +157,25 @@ export async function POST(request: Request) {
         return NextResponse.json({ erro: 'Nome do cliente não informado.' }, { status: 400 })
       }
 
-      const resultado = await chamarOmie(OMIE_CLIENTES_URL, 'ListarClientes', {
-        pagina: 1,
-        registros_por_pagina: 10,
-        apenas_importado_api: 'N',
-        clientesFiltro: { razao_social: clienteNome },
-      })
+      let resultado: Record<string, unknown>
+      try {
+        resultado = await chamarOmie(OMIE_CLIENTES_URL, 'ListarClientes', {
+          pagina: 1,
+          registros_por_pagina: 10,
+          apenas_importado_api: 'N',
+          clientesFiltro: { razao_social: clienteNome },
+        })
+      } catch (err) {
+        // O Omie sinaliza "nenhum cliente bate com o filtro" como uma falha
+        // (faultstring "Não existem registros para a página...") em vez de uma
+        // lista vazia. Trata como resultado vazio — outros erros (credenciais,
+        // rede, etc.) continuam propagando normalmente.
+        const mensagem = err instanceof Error ? err.message : ''
+        if (mensagem.toLowerCase().includes('não existem registros')) {
+          return NextResponse.json({ clientes: [] })
+        }
+        throw err
+      }
 
       const bruto = Array.isArray(resultado.clientes_cadastro) ? resultado.clientes_cadastro : []
       const clientes: ClienteOmie[] = bruto.map((c: Record<string, unknown>) => ({
@@ -160,18 +242,43 @@ export async function POST(request: Request) {
           { status: 400 },
         )
       }
+      // Defesa extra além da trava no client: nenhum item pode ir pro Omie
+      // sem estar vinculado a um produto cadastrado lá.
+      const itemSemProduto = itens.find((item) => item.codigo_produto_omie === null)
+      if (itemSemProduto) {
+        return NextResponse.json(
+          {
+            erro: `Todos os itens precisam estar vinculados a um produto do Omie antes de gerar o orçamento. Falta vincular: "${itemSemProduto.descricao}".`,
+          },
+          { status: 400 },
+        )
+      }
+
+      const codigoCategoria = await obterCategoriaReceitaPadrao()
+      const contaCorrente = await obterContaCorrentePadrao()
 
       const resultado = await chamarOmie(OMIE_PEDIDO_URL, 'IncluirPedido', {
+        // codigo_parcela/quantidade_parcelas não pertencem a "cabecalho" — são
+        // campos de condição de pagamento (bloco "condicao_pagamento") e não
+        // são necessários para um orçamento simples.
         cabecalho: {
           codigo_cliente: codigoClienteOmie ?? 0,
           data_previsao: formatarDataOmie(new Date()),
-          etapa: '10',
-          codigo_parcela: '999',
-          quantidade_parcelas: 1,
+          // "00" = Orçamento (não Pedido de Venda completo).
+          etapa: '00',
           origem_pedido: 'API',
+          // Identificador único nosso, exigido pelo Omie para rastrear/evitar
+          // duplicidade — não é o codigo_pedido (esse é gerado pelo Omie na resposta).
+          codigo_pedido_integracao: `RHOCAL-CRM-${pedido.numero}`,
         },
-        det: itens.map((item) => ({
+        det: itens.map((item, index) => ({
+          // Identificador único do item na nossa integração, exigido pelo
+          // Omie — mesmo papel do codigo_pedido_integracao, mas por item.
+          ide: {
+            codigo_item_integracao: `RHOCAL-CRM-${pedido.numero}-${index + 1}`,
+          },
           produto: {
+            codigo_produto: item.codigo_produto_omie,
             descricao: item.descricao,
             quantidade: Number(item.quantidade),
             valor_unitario: Number(item.preco_venda),
@@ -179,6 +286,8 @@ export async function POST(request: Request) {
         })),
         informacoes_adicionais: {
           consumidor_final: 'S',
+          codigo_categoria: codigoCategoria,
+          codigo_conta_corrente: contaCorrente.codigo,
         },
       })
 

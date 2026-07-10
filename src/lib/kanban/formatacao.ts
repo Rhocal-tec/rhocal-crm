@@ -8,7 +8,14 @@ export function formatarDataSomente(valor: string | null): string {
   return `${dia}/${mes}/${ano}`
 }
 
-export function formatarMoeda(valor: number | null): string {
-  if (valor === null || valor === undefined) return '—'
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+// Aceita string além de number porque o Postgres/PostgREST devolve colunas
+// `numeric` como string (ex: "150.00") para não perder precisão — sem essa
+// coerção, valor.toLocaleString(...) em uma string ignora as opções de
+// currency/locale (String.prototype.toLocaleString não formata) e o valor sai
+// cru na tela.
+export function formatarMoeda(valor: number | string | null): string {
+  if (valor === null || valor === undefined || valor === '') return '—'
+  const numero = typeof valor === 'number' ? valor : Number(valor)
+  if (!Number.isFinite(numero)) return '—'
+  return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }

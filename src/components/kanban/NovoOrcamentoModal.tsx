@@ -24,15 +24,59 @@ export function NovoOrcamentoModal({
 }) {
   const { user } = useAuth()
   const [supabase] = useState(() => createClient())
+  const [cnpj, setCnpj] = useState('')
+  const [buscandoCnpj, setBuscandoCnpj] = useState(false)
+  const [avisoCnpj, setAvisoCnpj] = useState<string | null>(null)
+  const [clienteOmieId, setClienteOmieId] = useState<number | null>(null)
   const [clienteNome, setClienteNome] = useState('')
   const [itens, setItens] = useState<ItemForm[]>([itemVazio()])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
   function resetar() {
+    setCnpj('')
+    setBuscandoCnpj(false)
+    setAvisoCnpj(null)
+    setClienteOmieId(null)
     setClienteNome('')
     setItens([itemVazio()])
     setErro(null)
+  }
+
+  async function handleBlurCnpj() {
+    const digitos = cnpj.replace(/\D/g, '')
+    if (digitos.length !== 14) {
+      setAvisoCnpj(null)
+      return
+    }
+
+    setAvisoCnpj(null)
+    setBuscandoCnpj(true)
+    try {
+      const resposta = await fetch('/api/omie/buscar-cliente-cnpj', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cnpj: digitos }),
+      })
+      const dados = await resposta.json().catch(() => null)
+
+      if (!resposta.ok || !dados || dados.erro) {
+        setClienteOmieId(null)
+        setAvisoCnpj('Não foi possível consultar o Omie agora. Preencha o nome manualmente.')
+        return
+      }
+
+      if (dados.encontrado && dados.cliente) {
+        setClienteNome(dados.cliente.razaoSocial)
+        setClienteOmieId(dados.cliente.codigoClienteOmie)
+        setAvisoCnpj(null)
+      } else {
+        setClienteOmieId(null)
+        setAvisoCnpj('CNPJ não encontrado no Omie — preencha o nome manualmente.')
+      }
+    } finally {
+      setBuscandoCnpj(false)
+    }
   }
 
   function fechar() {
@@ -89,7 +133,11 @@ export function NovoOrcamentoModal({
 
     const { data: pedido, error: erroPedido } = await supabase
       .from('pedidos')
-      .insert({ cliente_nome: clienteValido, criado_por: user.id })
+      .insert({
+        cliente_nome: clienteValido,
+        cliente_omie_id: clienteOmieId,
+        criado_por: user.id,
+      })
       .select()
       .single()
 
@@ -124,6 +172,29 @@ export function NovoOrcamentoModal({
   return (
     <Modal open={open} onClose={fechar} title="Novo Orçamento" widthClassName="max-w-2xl">
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        <div>
+          <label className="block text-sm font-medium text-primary/80">CNPJ (opcional)</label>
+          <div className="relative mt-1">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={cnpj}
+              onChange={(e) => setCnpj(e.target.value)}
+              onBlur={handleBlurCnpj}
+              className="input-field w-full rounded-md px-3 py-2 pr-9 text-sm"
+              placeholder="00.000.000/0000-00"
+              disabled={salvando}
+            />
+            {buscandoCnpj && (
+              <span
+                aria-hidden="true"
+                className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin rounded-full border-2 border-white/20 border-t-accent-primary"
+              />
+            )}
+          </div>
+          {avisoCnpj && <p className="mt-1 text-xs text-muted">{avisoCnpj}</p>}
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-primary/80">Nome do cliente</label>
           <input

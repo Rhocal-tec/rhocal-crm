@@ -97,6 +97,7 @@ export interface Database {
           custo_final: number | null
           margem_pct: number | null
           preco_venda: number | null
+          codigo_produto_omie: number | null
           criado_em: string
         }
         Insert: {
@@ -108,6 +109,7 @@ export interface Database {
           custo_final?: number | null
           margem_pct?: number | null
           preco_venda?: number | null
+          codigo_produto_omie?: number | null
           criado_em?: string
         }
         Update: {
@@ -119,6 +121,7 @@ export interface Database {
           custo_final?: number | null
           margem_pct?: number | null
           preco_venda?: number | null
+          codigo_produto_omie?: number | null
           criado_em?: string
         }
         Relationships: []
@@ -131,6 +134,7 @@ export interface Database {
           preco: number
           data_cotacao: string
           validade_cotacao: string
+          previsao_chegada: string | null
           vencedora: boolean
           empresa_faturou: string | null
           criado_por: string
@@ -143,6 +147,7 @@ export interface Database {
           preco: number
           data_cotacao?: string
           validade_cotacao: string
+          previsao_chegada?: string | null
           vencedora?: boolean
           empresa_faturou?: string | null
           criado_por: string
@@ -155,6 +160,7 @@ export interface Database {
           preco?: number
           data_cotacao?: string
           validade_cotacao?: string
+          previsao_chegada?: string | null
           vencedora?: boolean
           empresa_faturou?: string | null
           criado_por?: string

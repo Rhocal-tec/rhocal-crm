@@ -16,6 +16,7 @@ interface NovaCotacaoForm {
   preco: string
   data_cotacao: string
   validade_cotacao: string
+  previsao_chegada: string
   empresa_faturou: string
 }
 
@@ -26,6 +27,7 @@ function formVazio(): NovaCotacaoForm {
     preco: '',
     data_cotacao: hoje,
     validade_cotacao: '',
+    previsao_chegada: '',
     empresa_faturou: '',
   }
 }
@@ -35,6 +37,10 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
   const [supabase] = useState(() => createClient())
   const [cotacoesPorItem, setCotacoesPorItem] = useState<Record<string, Cotacao[]>>({})
   const [custoFinalPorItem, setCustoFinalPorItem] = useState<Record<string, string>>({})
+  // Enquanto o campo está focado, mostra o número puro e editável; ao perder o
+  // foco, mostra formatado como moeda (mesmo padrão de formatarMoeda usado no
+  // total do pedido e no preço de venda de cada item).
+  const [editandoCustoFinal, setEditandoCustoFinal] = useState<Record<string, boolean>>({})
   const [formularios, setFormularios] = useState<Record<string, NovaCotacaoForm>>({})
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
@@ -119,6 +125,7 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
         preco,
         data_cotacao: f.data_cotacao,
         validade_cotacao: f.validade_cotacao,
+        previsao_chegada: f.previsao_chegada || null,
         empresa_faturou: f.empresa_faturou.trim() || null,
         criado_por: user.id,
       })
@@ -218,15 +225,27 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
             <div className="mt-3 flex items-center gap-2">
               <label className="text-sm text-muted">Custo final:</label>
               <input
-                type="number"
+                type={editandoCustoFinal[item.id] ? 'number' : 'text'}
                 step="any"
                 min="0"
-                value={custoFinalPorItem[item.id] ?? ''}
+                value={
+                  editandoCustoFinal[item.id]
+                    ? (custoFinalPorItem[item.id] ?? '')
+                    : custoFinalPorItem[item.id]
+                      ? formatarMoeda(Number(custoFinalPorItem[item.id]))
+                      : ''
+                }
+                onFocus={() =>
+                  setEditandoCustoFinal((atual) => ({ ...atual, [item.id]: true }))
+                }
                 onChange={(e) =>
                   setCustoFinalPorItem((atual) => ({ ...atual, [item.id]: e.target.value }))
                 }
-                onBlur={(e) => salvarCustoFinal(item.id, e.target.value)}
-                placeholder="—"
+                onBlur={(e) => {
+                  salvarCustoFinal(item.id, e.target.value)
+                  setEditandoCustoFinal((atual) => ({ ...atual, [item.id]: false }))
+                }}
+                placeholder="R$ —"
                 className="input-field w-32 rounded-md px-2 py-1 font-mono text-sm"
               />
             </div>
@@ -240,6 +259,7 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
                     <th className="pb-1 pr-2 font-medium">Cotado em</th>
                     <th className="pb-1 pr-2 font-medium">Validade</th>
                     <th className="pb-1 pr-2 font-medium">Empresa fatura</th>
+                    <th className="pb-1 pr-2 font-medium">Previsão de chegada</th>
                     <th className="pb-1 font-medium">Vencedora</th>
                   </tr>
                 </thead>
@@ -272,10 +292,16 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
                       <td className="py-1.5 pr-2 text-primary">
                         {cotacao.empresa_faturou ?? '—'}
                       </td>
+                      <td className="py-1.5 pr-2 text-primary">
+                        {formatarDataSomente(cotacao.previsao_chegada)}
+                      </td>
                       <td className="py-1.5">
                         {cotacao.vencedora ? (
                           <span className="inline-flex items-center gap-1 rounded-full border border-accent-success/40 bg-accent-success/15 px-2 py-0.5 text-xs font-semibold text-accent-success">
                             ✓ Vencedora
+                            {cotacao.previsao_chegada
+                              ? ` — chega ${formatarDataSomente(cotacao.previsao_chegada)}`
+                              : ''}
                           </span>
                         ) : (
                           <button
@@ -290,7 +316,7 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
                   ))}
                   {cotacoes.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-3 text-center text-muted">
+                      <td colSpan={7} className="py-3 text-center text-muted">
                         Nenhuma cotação cadastrada.
                       </td>
                     </tr>
@@ -304,58 +330,73 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
                 Limite de 3 cotações atingido para este item.
               </p>
             ) : (
-              <div className="mt-3 grid grid-cols-6 gap-2 rounded-md bg-surface-alt p-3">
-                <div className="col-span-2">
-                  <label className="block text-xs text-muted">Fornecedor *</label>
-                  <input
-                    type="text"
-                    value={f.fornecedor}
-                    onChange={(e) => atualizarForm(item.id, 'fornecedor', e.target.value)}
-                    className="input-field mt-1 w-full rounded-md px-2 py-1 text-sm"
-                  />
+              <div className="mt-3 flex flex-col gap-3 rounded-md bg-surface-alt p-3">
+                <div className="flex flex-wrap gap-2">
+                  <div className="min-w-[180px] flex-[2]">
+                    <label className="block text-xs text-muted">Fornecedor *</label>
+                    <input
+                      type="text"
+                      value={f.fornecedor}
+                      onChange={(e) => atualizarForm(item.id, 'fornecedor', e.target.value)}
+                      className="input-field mt-1 w-full rounded-md px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div className="min-w-[110px] flex-1">
+                    <label className="block text-xs text-muted">Preço *</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0.01"
+                      value={f.preco}
+                      onChange={(e) => atualizarForm(item.id, 'preco', e.target.value)}
+                      className="input-field mt-1 w-full rounded-md px-2 py-1 font-mono text-sm"
+                    />
+                  </div>
+                  <div className="min-w-[140px] flex-1">
+                    <label className="block text-xs text-muted">Cotado em</label>
+                    <input
+                      type="date"
+                      value={f.data_cotacao}
+                      onChange={(e) => atualizarForm(item.id, 'data_cotacao', e.target.value)}
+                      className="input-field mt-1 w-full min-w-[140px] rounded-md px-2 py-1 text-sm"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs text-muted">Preço *</label>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0.01"
-                    value={f.preco}
-                    onChange={(e) => atualizarForm(item.id, 'preco', e.target.value)}
-                    className="input-field mt-1 w-full rounded-md px-2 py-1 font-mono text-sm"
-                  />
+
+                <div className="flex flex-wrap gap-2">
+                  <div className="min-w-[140px] flex-1">
+                    <label className="block text-xs text-muted">Validade *</label>
+                    <input
+                      type="date"
+                      value={f.validade_cotacao}
+                      onChange={(e) => atualizarForm(item.id, 'validade_cotacao', e.target.value)}
+                      className="input-field mt-1 w-full min-w-[140px] rounded-md px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div className="min-w-[180px] flex-[2]">
+                    <label className="block text-xs text-muted">Empresa que fatura</label>
+                    <input
+                      type="text"
+                      value={f.empresa_faturou}
+                      onChange={(e) => atualizarForm(item.id, 'empresa_faturou', e.target.value)}
+                      className="input-field mt-1 w-full rounded-md px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div className="min-w-[140px] flex-1">
+                    <label className="block text-xs text-muted">Previsão de chegada</label>
+                    <input
+                      type="date"
+                      value={f.previsao_chegada}
+                      onChange={(e) => atualizarForm(item.id, 'previsao_chegada', e.target.value)}
+                      className="input-field mt-1 w-full min-w-[140px] rounded-md px-2 py-1 text-sm"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs text-muted">Cotado em</label>
-                  <input
-                    type="date"
-                    value={f.data_cotacao}
-                    onChange={(e) => atualizarForm(item.id, 'data_cotacao', e.target.value)}
-                    className="input-field mt-1 w-full rounded-md px-2 py-1 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-muted">Validade *</label>
-                  <input
-                    type="date"
-                    value={f.validade_cotacao}
-                    onChange={(e) => atualizarForm(item.id, 'validade_cotacao', e.target.value)}
-                    className="input-field mt-1 w-full rounded-md px-2 py-1 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-muted">Empresa que fatura</label>
-                  <input
-                    type="text"
-                    value={f.empresa_faturou}
-                    onChange={(e) => atualizarForm(item.id, 'empresa_faturou', e.target.value)}
-                    className="input-field mt-1 w-full rounded-md px-2 py-1 text-sm"
-                  />
-                </div>
-                <div className="col-span-6 flex justify-end">
+
+                <div className="flex justify-end">
                   <button
                     onClick={() => adicionarCotacao(item.id)}
-                    className="mt-1 rounded-md bg-accent-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-primary-dark"
+                    className="rounded-md bg-accent-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-primary-dark"
                   >
                     + Adicionar cotação
                   </button>

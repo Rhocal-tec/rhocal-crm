@@ -3,7 +3,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 import type { Database } from '@/types/database'
 
 // Rotas acessíveis sem autenticação.
-const ROTAS_PUBLICAS = ['/login']
+// /redefinir-senha precisa ser pública: o link de recuperação chega sem
+// cookie de sessão, e o Supabase só estabelece a sessão de recuperação no
+// client, após a página carregar.
+const ROTAS_PUBLICAS = ['/login', '/redefinir-senha']
 
 // Atualiza a sessão do usuário a cada requisição e protege as rotas:
 // sem usuário logado -> redireciona para /login.
