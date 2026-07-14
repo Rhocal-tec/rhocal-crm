@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { Suspense, useEffect, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { createClient } from '@/lib/supabase/client'
 import { AppHeader } from '@/components/layout/AppHeader'
@@ -8,6 +9,7 @@ import { FiltroData } from '@/components/busca/FiltroData'
 import { PedidoDetalheModal } from '@/components/kanban/PedidoDetalheModal'
 import { STATUS_LABELS } from '@/lib/kanban/status'
 import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
+import { cotacaoVencida } from '@/lib/kanban/cotacao-vencida'
 import { proximoDia, type ModoFiltroData } from '@/lib/kanban/filtro-data'
 import type { Database, PedidoStatus } from '@/types/database'
 
@@ -24,7 +26,22 @@ interface PedidoResumo {
 type AbaBusca = 'pedido' | 'ca'
 
 export default function BuscaPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-base text-muted">
+          Carregando…
+        </div>
+      }
+    >
+      <BuscaPageConteudo />
+    </Suspense>
+  )
+}
+
+function BuscaPageConteudo() {
   const { profile, loading } = useAuth()
+  const searchParams = useSearchParams()
   const [supabase] = useState(() => createClient())
   const [aba, setAba] = useState<AbaBusca>('pedido')
   const [pedidoAbertoId, setPedidoAbertoId] = useState<string | null>(null)
@@ -120,14 +137,12 @@ export default function BuscaPage() {
     setResultadosPedido(data)
   }
 
-  async function buscarCa(e: FormEvent) {
-    e.preventDefault()
+  async function executarBuscaCa(termo: string) {
     setErroCa(null)
     setResultadosCa(null)
 
     if (!validarFiltroData(setErroCa)) return
 
-    const termo = caInput.trim()
     if (!termo && modoData === 'nenhum') {
       setErroCa('Informe um CA ou um filtro de data.')
       return
@@ -162,6 +177,11 @@ export default function BuscaPage() {
     setResultadosCa(data)
   }
 
+  async function buscarCa(e: FormEvent) {
+    e.preventDefault()
+    await executarBuscaCa(caInput.trim())
+  }
+
   async function abrirPedidoPorNumero(numero: number | null) {
     if (numero === null) return
     const { data } = await supabase
@@ -171,6 +191,18 @@ export default function BuscaPage() {
       .maybeSingle()
     if (data) setPedidoAbertoId(data.id)
   }
+
+  // Chegando de um link "ver histórico completo" (aba Cotações do modal do
+  // pedido): pré-preenche o CA, troca para a aba certa e já dispara a busca.
+  useEffect(() => {
+    if (!veBuscaCa) return
+    const caParam = searchParams.get('ca')
+    if (!caParam) return
+    setAba('ca')
+    setCaInput(caParam)
+    executarBuscaCa(caParam.trim())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [veBuscaCa, searchParams])
 
   if (loading || !profile) {
     return (
@@ -353,8 +385,21 @@ export default function BuscaPage() {
                         <td className="px-3 py-2 text-primary">
                           {formatarDataSomente(linha.data_cotacao)}
                         </td>
-                        <td className="px-3 py-2 text-primary">
-                          {formatarDataSomente(linha.validade_cotacao)}
+                        <td className="px-3 py-2">
+                          <span
+                            className={
+                              cotacaoVencida(linha.validade_cotacao)
+                                ? 'text-accent-danger'
+                                : 'text-primary'
+                            }
+                          >
+                            {formatarDataSomente(linha.validade_cotacao)}
+                          </span>
+                          {cotacaoVencida(linha.validade_cotacao) && (
+                            <span className="ml-1.5 inline-flex items-center rounded-full border border-accent-danger/40 bg-accent-danger/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-danger">
+                              Vencida
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           {linha.vencedora ? (
@@ -387,6 +432,7 @@ export default function BuscaPage() {
       <PedidoDetalheModal
         pedidoId={pedidoAbertoId}
         onClose={() => setPedidoAbertoId(null)}
+        onDuplicado={setPedidoAbertoId}
         setor={profile.setor}
       />
     </div>

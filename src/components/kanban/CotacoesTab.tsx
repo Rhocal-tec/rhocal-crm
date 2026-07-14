@@ -1,13 +1,16 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
+import { cotacaoVencida } from '@/lib/kanban/cotacao-vencida'
 import type { Database } from '@/types/database'
 
 type PedidoItem = Database['public']['Tables']['pedido_itens']['Row']
 type Cotacao = Database['public']['Tables']['cotacoes']['Row']
+type HistoricoCA = Database['public']['Views']['vw_historico_ca']['Row']
 
 const MAX_COTACOES_POR_ITEM = 3
 
@@ -32,10 +35,17 @@ function formVazio(): NovaCotacaoForm {
   }
 }
 
-export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
+export function CotacoesTab({
+  itens,
+  pedidoNumero,
+}: {
+  itens: PedidoItem[]
+  pedidoNumero: number
+}) {
   const { user } = useAuth()
   const [supabase] = useState(() => createClient())
   const [cotacoesPorItem, setCotacoesPorItem] = useState<Record<string, Cotacao[]>>({})
+  const [historicoPorCa, setHistoricoPorCa] = useState<Record<string, HistoricoCA[]>>({})
   const [custoFinalPorItem, setCustoFinalPorItem] = useState<Record<string, string>>({})
   // Enquanto o campo está focado, mostra o número puro e editável; ao perder o
   // foco, mostra formatado como moeda (mesmo padrão de formatarMoeda usado no
@@ -75,6 +85,33 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
 
       if (error) console.error('Erro ao carregar cotações:', error.message)
       setCotacoesPorItem(agrupado)
+
+      // Sugestão automática por CA: busca o histórico de compras/cotações
+      // anteriores para os CAs presentes neste pedido, excluindo o próprio
+      // pedido (mesmo CA em outro item deste ciclo não conta como "anterior").
+      const casUnicos = Array.from(
+        new Set(itens.map((item) => item.ca?.trim()).filter((ca): ca is string => !!ca)),
+      )
+      if (casUnicos.length > 0) {
+        const { data: historico, error: erroHistorico } = await supabase
+          .from('vw_historico_ca')
+          .select('*')
+          .in('ca', casUnicos)
+          .neq('pedido_numero', pedidoNumero)
+          .order('data_cotacao', { ascending: false })
+
+        if (ativo && !erroHistorico && historico) {
+          const agrupadoHistorico: Record<string, HistoricoCA[]> = {}
+          for (const registro of historico) {
+            // Item sem cotação registrada ainda (join da view fica com preço
+            // nulo) não é uma "compra/cotação anterior" de verdade — ignora.
+            if (!registro.ca || registro.preco === null) continue
+            agrupadoHistorico[registro.ca] = [...(agrupadoHistorico[registro.ca] ?? []), registro]
+          }
+          setHistoricoPorCa(agrupadoHistorico)
+        }
+      }
+
       setCarregando(false)
     }
 
@@ -83,7 +120,7 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
     return () => {
       ativo = false
     }
-  }, [itens, supabase])
+  }, [itens, pedidoNumero, supabase])
 
   function form(itemId: string): NovaCotacaoForm {
     return formularios[itemId] ?? formVazio()
@@ -214,6 +251,9 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
         const cotacoes = cotacoesPorItem[item.id] ?? []
         const atingiuLimite = cotacoes.length >= MAX_COTACOES_POR_ITEM
         const f = form(item.id)
+        const ca = item.ca?.trim()
+        const historico = ca ? (historicoPorCa[ca] ?? []) : []
+        const destaque = historico.find((registro) => registro.vencedora) ?? historico[0]
 
         return (
           <div key={item.id} className="rounded-lg border border-white/10 bg-surface p-4">
@@ -221,6 +261,31 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
               <h3 className="font-medium text-primary">{item.descricao}</h3>
               <span className="font-mono text-xs text-muted">Qtd. {item.quantidade}</span>
             </div>
+
+            {destaque && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-accent-compras/25 bg-accent-compras/10 px-3 py-2 text-xs text-primary">
+                <span>
+                  📌 Histórico deste CA: {destaque.vencedora ? 'última cotação vencedora' : 'última cotação'}{' '}
+                  <span className="font-mono font-semibold">{formatarMoeda(destaque.preco)}</span>
+                  {destaque.fornecedor && (
+                    <>
+                      {' '}
+                      — fornecedor <span className="font-medium">{destaque.fornecedor}</span>
+                    </>
+                  )}
+                  {' '}em {formatarDataSomente(destaque.data_cotacao)}
+                  {destaque.pedido_numero !== null && ` (pedido #${destaque.pedido_numero})`}
+                </span>
+                {historico.length > 1 && (
+                  <Link
+                    href={`/busca?aba=ca&ca=${encodeURIComponent(ca as string)}`}
+                    className="shrink-0 font-medium text-accent-compras hover:text-primary"
+                  >
+                    Ver histórico completo →
+                  </Link>
+                )}
+              </div>
+            )}
 
             <div className="mt-3 flex items-center gap-2">
               <label className="text-sm text-muted">Custo final:</label>
@@ -264,7 +329,9 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {cotacoes.map((cotacao) => (
+                  {cotacoes.map((cotacao) => {
+                    const vencida = cotacaoVencida(cotacao.validade_cotacao)
+                    return (
                     <tr
                       key={cotacao.id}
                       className={`border-b border-white/5 ${
@@ -286,8 +353,15 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
                       <td className="py-1.5 pr-2 text-primary">
                         {formatarDataSomente(cotacao.data_cotacao)}
                       </td>
-                      <td className="py-1.5 pr-2 text-primary">
-                        {formatarDataSomente(cotacao.validade_cotacao)}
+                      <td className="py-1.5 pr-2">
+                        <span className={vencida ? 'text-accent-danger' : 'text-primary'}>
+                          {formatarDataSomente(cotacao.validade_cotacao)}
+                        </span>
+                        {vencida && (
+                          <span className="ml-1.5 inline-flex items-center rounded-full border border-accent-danger/40 bg-accent-danger/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-danger">
+                            Vencida
+                          </span>
+                        )}
                       </td>
                       <td className="py-1.5 pr-2 text-primary">
                         {cotacao.empresa_faturou ?? '—'}
@@ -313,7 +387,8 @@ export function CotacoesTab({ itens }: { itens: PedidoItem[] }) {
                         )}
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                   {cotacoes.length === 0 && (
                     <tr>
                       <td colSpan={7} className="py-3 text-center text-muted">

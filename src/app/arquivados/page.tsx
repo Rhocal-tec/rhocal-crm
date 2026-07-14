@@ -8,15 +8,25 @@ import { FiltroData } from '@/components/busca/FiltroData'
 import { PedidoDetalheModal } from '@/components/kanban/PedidoDetalheModal'
 import { MOTIVO_ARQUIVAMENTO_LABELS } from '@/lib/kanban/status'
 import { proximoDia, type ModoFiltroData } from '@/lib/kanban/filtro-data'
-import type { ArquivoMotivo } from '@/types/database'
+import type { ArquivoMotivo, PedidoStatus } from '@/types/database'
 
 interface PedidoArquivadoResumo {
   id: string
   numero: number
   cliente_nome: string
   criado_em: string
+  status: PedidoStatus
   arquivado_motivo: ArquivoMotivo | null
+  motivo_perda: string | null
 }
+
+type FiltroSituacao = 'todos' | 'arquivados' | 'perdidos'
+
+const FILTRO_SITUACAO_OPCOES: { valor: FiltroSituacao; label: string }[] = [
+  { valor: 'todos', label: 'Todos' },
+  { valor: 'arquivados', label: 'Arquivados' },
+  { valor: 'perdidos', label: 'Perdidos' },
+]
 
 export default function ArquivadosPage() {
   const { profile, loading } = useAuth()
@@ -28,65 +38,39 @@ export default function ArquivadosPage() {
   const [dataDe, setDataDe] = useState('')
   const [dataAte, setDataAte] = useState('')
   const [numeroInput, setNumeroInput] = useState('')
+  const [filtroSituacao, setFiltroSituacao] = useState<FiltroSituacao>('todos')
 
   const [resultados, setResultados] = useState<PedidoArquivadoResumo[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
 
-  // Carrega todos os arquivados ao entrar na página (sem filtros).
-  useEffect(() => {
-    let ativo = true
-
-    async function carregarInicial() {
-      const { data, error } = await supabase
-        .from('pedidos')
-        .select('id, numero, cliente_nome, criado_em, arquivado_motivo')
-        .eq('status', 'ARQUIVADO')
-        .order('criado_em', { ascending: false })
-
-      if (!ativo) return
-      if (!error) setResultados(data ?? [])
-      setCarregando(false)
-    }
-
-    carregarInicial()
-
-    return () => {
-      ativo = false
-    }
-  }, [supabase])
-
-  async function buscar(e: FormEvent) {
-    e.preventDefault()
+  async function executarBusca(situacao: FiltroSituacao) {
     setErro(null)
-
-    if (modoData === 'especifica' && !dataEspecifica) {
-      setErro('Selecione a data do filtro.')
-      return
-    }
-    if (modoData === 'intervalo' && !dataDe && !dataAte) {
-      setErro('Selecione ao menos uma data no intervalo.')
-      return
-    }
-
-    let numero: number | null = null
-    const termo = numeroInput.trim()
-    if (termo) {
-      numero = Number(termo)
-      if (!Number.isFinite(numero)) {
-        setErro('Número de pedido inválido.')
-        return
-      }
-    }
-
     setCarregando(true)
+
     let query = supabase
       .from('pedidos')
-      .select('id, numero, cliente_nome, criado_em, arquivado_motivo')
-      .eq('status', 'ARQUIVADO')
+      .select('id, numero, cliente_nome, criado_em, status, arquivado_motivo, motivo_perda')
       .order('criado_em', { ascending: false })
 
-    if (numero !== null) query = query.eq('numero', numero)
+    if (situacao === 'arquivados') {
+      query = query.eq('status', 'ARQUIVADO')
+    } else if (situacao === 'perdidos') {
+      query = query.eq('status', 'PERDIDO')
+    } else {
+      query = query.in('status', ['ARQUIVADO', 'PERDIDO'])
+    }
+
+    const termo = numeroInput.trim()
+    if (termo) {
+      const termoEscapado = termo.replace(/[%,]/g, (c) => `\\${c}`)
+      const condicoes = [`cliente_nome.ilike.%${termoEscapado}%`]
+      const numero = Number(termo)
+      if (Number.isFinite(numero) && /^\d+$/.test(termo)) {
+        condicoes.unshift(`numero.eq.${numero}`)
+      }
+      query = query.or(condicoes.join(','))
+    }
 
     if (modoData === 'especifica' && dataEspecifica) {
       query = query
@@ -107,6 +91,32 @@ export default function ArquivadosPage() {
     setResultados(data ?? [])
   }
 
+  // Carrega tudo (arquivados + perdidos) ao entrar na página, sem filtros.
+  useEffect(() => {
+    executarBusca('todos')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase])
+
+  function selecionarFiltroSituacao(situacao: FiltroSituacao) {
+    setFiltroSituacao(situacao)
+    executarBusca(situacao)
+  }
+
+  async function buscar(e: FormEvent) {
+    e.preventDefault()
+
+    if (modoData === 'especifica' && !dataEspecifica) {
+      setErro('Selecione a data do filtro.')
+      return
+    }
+    if (modoData === 'intervalo' && !dataDe && !dataAte) {
+      setErro('Selecione ao menos uma data no intervalo.')
+      return
+    }
+
+    await executarBusca(filtroSituacao)
+  }
+
   if (loading || !profile) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-base text-muted">
@@ -124,15 +134,30 @@ export default function ArquivadosPage() {
           Arquivados
         </h1>
 
+        <div className="mt-4 flex gap-2">
+          {FILTRO_SITUACAO_OPCOES.map((opcao) => (
+            <button
+              key={opcao.valor}
+              onClick={() => selecionarFiltroSituacao(opcao.valor)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                filtroSituacao === opcao.valor
+                  ? 'bg-accent-primary text-white'
+                  : 'bg-white/5 text-muted hover:bg-white/10 hover:text-primary'
+              }`}
+            >
+              {opcao.label}
+            </button>
+          ))}
+        </div>
+
         <form onSubmit={buscar} className="mt-4 flex flex-col gap-3">
           <div className="flex gap-2">
             <input
               type="text"
-              inputMode="numeric"
               value={numeroInput}
               onChange={(e) => setNumeroInput(e.target.value)}
-              placeholder="Número do pedido (opcional)"
-              className="input-field w-64 rounded-md px-3 py-2 text-sm"
+              placeholder="Buscar por número do pedido ou nome do cliente..."
+              className="input-field w-80 rounded-md px-3 py-2 text-sm"
             />
             <button
               type="submit"
@@ -163,7 +188,8 @@ export default function ArquivadosPage() {
                 <th className="px-3 pb-2 pt-2.5 font-medium">Pedido</th>
                 <th className="px-3 pb-2 pt-2.5 font-medium">Cliente</th>
                 <th className="px-3 pb-2 pt-2.5 font-medium">Criado em</th>
-                <th className="px-3 pb-2 pt-2.5 font-medium">Motivo do arquivamento</th>
+                <th className="px-3 pb-2 pt-2.5 font-medium">Situação</th>
+                <th className="px-3 pb-2 pt-2.5 font-medium">Motivo</th>
               </tr>
             </thead>
             <tbody className="bg-surface">
@@ -181,15 +207,30 @@ export default function ArquivadosPage() {
                   <td className="px-3 py-2 text-primary">
                     {new Date(p.criado_em).toLocaleDateString('pt-BR')}
                   </td>
+                  <td className="px-3 py-2">
+                    {p.status === 'PERDIDO' ? (
+                      <span className="inline-flex rounded-full bg-accent-danger/15 px-2 py-0.5 text-xs font-medium text-accent-danger">
+                        PERDIDO
+                      </span>
+                    ) : (
+                      <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-muted">
+                        ARQUIVADO
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-primary">
-                    {p.arquivado_motivo ? MOTIVO_ARQUIVAMENTO_LABELS[p.arquivado_motivo] : '—'}
+                    {p.status === 'PERDIDO'
+                      ? p.motivo_perda ?? '—'
+                      : p.arquivado_motivo
+                        ? MOTIVO_ARQUIVAMENTO_LABELS[p.arquivado_motivo]
+                        : '—'}
                   </td>
                 </tr>
               ))}
               {!carregando && resultados.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-3 py-4 text-center text-muted">
-                    Nenhum pedido arquivado encontrado.
+                  <td colSpan={5} className="px-3 py-4 text-center text-muted">
+                    Nenhum pedido encontrado.
                   </td>
                 </tr>
               )}
@@ -201,6 +242,7 @@ export default function ArquivadosPage() {
       <PedidoDetalheModal
         pedidoId={pedidoAbertoId}
         onClose={() => setPedidoAbertoId(null)}
+        onDuplicado={setPedidoAbertoId}
         setor={profile.setor}
       />
     </div>

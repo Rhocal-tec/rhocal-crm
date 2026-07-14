@@ -51,13 +51,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let ativo = true
 
-    // Estado inicial ao montar.
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!ativo) return
-      setUser(user)
-      if (user) await carregarProfile(user.id)
-      setLoading(false)
-    })
+    // Estado inicial ao montar. Falha de rede/exceção não pode deixar a tela
+    // travada em "Carregando…" para sempre — por isso o finally garante que
+    // loading sempre chega a false, mesmo se getUser/carregarProfile rejeitar.
+    supabase.auth
+      .getUser()
+      .then(async ({ data: { user } }) => {
+        if (!ativo) return
+        setUser(user)
+        if (user) await carregarProfile(user.id)
+      })
+      .catch((err) => {
+        console.error('Erro ao carregar usuário:', err)
+      })
+      .finally(() => {
+        if (ativo) setLoading(false)
+      })
 
     // Reage a login/logout/refresh de token.
     const {
@@ -66,12 +75,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!ativo) return
       const nextUser = session?.user ?? null
       setUser(nextUser)
-      if (nextUser) {
-        await carregarProfile(nextUser.id)
-      } else {
-        setProfile(null)
+      try {
+        if (nextUser) {
+          await carregarProfile(nextUser.id)
+        } else {
+          setProfile(null)
+        }
+      } finally {
+        if (ativo) setLoading(false)
       }
-      setLoading(false)
     })
 
     return () => {

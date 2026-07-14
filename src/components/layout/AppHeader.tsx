@@ -26,6 +26,8 @@ const LINKS = [
   { href: '/arquivados', label: 'Arquivados' },
 ]
 
+const LINK_GESTOR = { href: '/painel', label: 'Painel' }
+
 export function AppHeader() {
   const pathname = usePathname()
   const router = useRouter()
@@ -71,6 +73,16 @@ export function AppHeader() {
               {link.label}
             </Link>
           ))}
+          {profile?.setor === 'gestor' && (
+            <Link
+              href={LINK_GESTOR.href}
+              className={`text-sm font-medium ${
+                pathname === LINK_GESTOR.href ? 'text-primary' : 'text-muted hover:text-primary/80'
+              }`}
+            >
+              {LINK_GESTOR.label}
+            </Link>
+          )}
         </nav>
       </div>
       <div className="flex items-center gap-3">

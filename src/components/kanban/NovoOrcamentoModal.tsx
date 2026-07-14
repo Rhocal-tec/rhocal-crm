@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { Modal } from '@/components/ui/Modal'
+import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
 
 interface ItemForm {
   descricao: string
@@ -29,6 +30,8 @@ export function NovoOrcamentoModal({
   const [avisoCnpj, setAvisoCnpj] = useState<string | null>(null)
   const [clienteOmieId, setClienteOmieId] = useState<number | null>(null)
   const [clienteNome, setClienteNome] = useState('')
+  const [clienteTelefone, setClienteTelefone] = useState('')
+  const [clienteContato, setClienteContato] = useState('')
   const [itens, setItens] = useState<ItemForm[]>([itemVazio()])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -39,6 +42,8 @@ export function NovoOrcamentoModal({
     setAvisoCnpj(null)
     setClienteOmieId(null)
     setClienteNome('')
+    setClienteTelefone('')
+    setClienteContato('')
     setItens([itemVazio()])
     setErro(null)
   }
@@ -136,6 +141,8 @@ export function NovoOrcamentoModal({
       .insert({
         cliente_nome: clienteValido,
         cliente_omie_id: clienteOmieId,
+        cliente_telefone: clienteTelefone.trim() || null,
+        cliente_contato: clienteContato.trim() || null,
         criado_por: user.id,
       })
       .select()
@@ -205,6 +212,35 @@ export function NovoOrcamentoModal({
             placeholder="Ex: Cliente Teste LTDA"
             disabled={salvando}
           />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-primary/80">
+              Telefone do cliente (opcional)
+            </label>
+            <input
+              type="tel"
+              value={clienteTelefone}
+              onChange={(e) => setClienteTelefone(formatarTelefoneInput(e.target.value))}
+              className="input-field mt-1 w-full rounded-md px-3 py-2 text-sm"
+              placeholder="(11) 91234-5678"
+              disabled={salvando}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-primary/80">
+              Nome do contato (opcional)
+            </label>
+            <input
+              type="text"
+              value={clienteContato}
+              onChange={(e) => setClienteContato(e.target.value)}
+              className="input-field mt-1 w-full rounded-md px-3 py-2 text-sm"
+              placeholder="Ex: Maria Compras"
+              disabled={salvando}
+            />
+          </div>
         </div>
 
         <div>

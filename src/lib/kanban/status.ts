@@ -9,7 +9,26 @@ export const STATUS_LABELS: Record<PedidoStatus, string> = {
   APROVADO_CLIENTE: 'PEDIDO APROVADO',
   PEDIDO_EFETUADO: 'PEDIDO EFETUADO',
   ARQUIVADO: 'ARQUIVADO',
+  PERDIDO: 'PERDIDO',
 }
+
+// Status a partir dos quais um pedido pode ser marcado como perdido (comercial/gestor).
+// Fora do kanban ativo (ARQUIVADO), já efetuado (PEDIDO_EFETUADO) ou já perdido (PERDIDO)
+// não entram aqui.
+export const STATUS_PERMITE_MARCAR_PERDIDO: PedidoStatus[] = [
+  'PEDIDO',
+  'EM_COTACAO',
+  'PEDIDO_COTADO',
+  'APROVADO_CLIENTE',
+]
+
+export const MOTIVO_PERDA_OPCOES = [
+  'Preço',
+  'Prazo de entrega',
+  'Concorrência',
+  'Cliente desistiu',
+  'Outro',
+] as const
 
 // Colunas visíveis no kanban principal, nesta ordem. ARQUIVADO fica de fora
 // (terá página própria com busca).

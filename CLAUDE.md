@@ -388,3 +388,39 @@ Direção visual ancorada na marca real da RHOCAL (logo oficial: "R" branco esti
 9. Arquivamento manual + página de arquivados
 10. Integração Omie (gerar orçamento)
 11. Deploy Vercel
+
+## Fase 13 — Status PERDIDO + motivo da perda
+
+- Novo valor no enum pedido_status: PERDIDO (label UI: PERDIDO)
+- O comercial (e gestor) pode marcar um pedido como perdido a partir de qualquer status ativo (antes de PEDIDO_EFETUADO), via botão "Marcar como perdido" no modal do pedido
+- Ao marcar, abrir um pequeno formulário obrigatório: motivo da perda — select com opções fixas (Preço, Prazo de entrega, Concorrência, Cliente desistiu, Outro) + campo de texto livre opcional para detalhes. Salvar em pedidos.motivo_perda (text)
+- Pedido PERDIDO sai do kanban ativo e aparece na página de arquivados (com badge/filtro distinguindo ARQUIVADO de PERDIDO), permanecendo buscável
+- Regra dos 7 dias de inatividade continua arquivando (não marca como perdido — perda é sempre decisão humana)
+
+## Fase 14 — Painel executivo do GESTOR
+
+Página /painel acessível somente ao perfil gestor (link no header, visível só pra ele). Conteúdo:
+
+- Cards de resumo: total de pedidos ativos por etapa; valor total em negociação (soma de preco_venda dos pedidos ativos); pedidos parados 3+ dias; taxa de conversão (pedidos EFETUADOS dividido por (EFETUADOS + PERDIDOS), no período)
+- Tempo médio por etapa: calculado a partir do audit_log (diferença entre movimentações de status)
+- Motivos de perda: contagem por motivo (gráfico simples ou lista ordenada)
+- Filtro de período (mês atual, últimos 30/90 dias, personalizado)
+- Seguir o design system; gráficos podem usar recharts ou similar, mantendo a paleta
+
+## Fase 15 — Inteligência de CA na cotação + alerta de validade
+
+- Sugestão automática por CA: na aba Cotações, ao abrir um item que tem CA preenchido, buscar automaticamente no histórico (vw_historico_ca) as compras/cotações anteriores daquele CA e exibir um box discreto: "Última compra deste CA: R$ X — fornecedor Y — em DD/MM/AAAA". Só para compras/gestor
+- Alerta de cotação vencida: cotação cuja validade_cotacao já passou deve aparecer visualmente marcada (borda/texto em vermelho suave + tag "Vencida") em todos os lugares onde cotações aparecem. Se a cotação vencedora de um item estiver vencida, mostrar aviso no topo do modal do pedido
+
+## Fase 16 — Entrega real, duplicar pedido e contato do cliente
+
+- Data real de entrega: novo campo data_entrega_real (date) em pedidos, preenchido por compras/gestor quando o pedido chega de fato. Exibir na aba Dados junto da previsão, permitindo comparar prometido × real
+- Duplicar pedido: botão "Duplicar" no modal do pedido (qualquer status, inclusive arquivado), disponível para comercial/gestor. Cria um novo pedido em ORÇAMENTO com o mesmo cliente e os mesmos itens (descrição, quantidade, CA), SEM copiar cotações, custos, margens nem vínculos Omie — esses são refeitos no novo ciclo
+- Contato do cliente: novos campos opcionais em pedidos: cliente_telefone (text) e cliente_contato (text, nome da pessoa de contato). Editáveis na criação e na aba Dados, por comercial/gestor
+
+## Fase 17 — Exibir quem fez a última movimentação
+
+- Nova coluna pedidos.movido_por (uuid, references profiles). A trigger fn_pedido_movimentado (já existente) passa a gravar new.movido_por = auth.uid(), além de atualizar ultima_movimentacao, sempre que o status mudar
+- Card do kanban: texto pequeno e discreto abaixo do indicador de dias parado, mostrando quem moveu por último (ex: "Movido por Ariane"), resolvido via join/lookup com profiles a partir de movido_por
+- Aba Dados do modal do pedido: ao lado de "Última movimentação: DD/MM/AAAA", acrescentar o nome de quem fez (ex: "Última movimentação: 10/07/2026 por Ariane Villariço")
+- Vale para qualquer colaborador e qualquer direção de movimentação, incluindo a criação inicial do pedido — nesse caso (movido_por ainda nulo) usa criado_por, já que não houve mudança de status

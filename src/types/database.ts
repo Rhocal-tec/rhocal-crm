@@ -10,6 +10,7 @@ export type PedidoStatus =
   | 'APROVADO_CLIENTE'
   | 'PEDIDO_EFETUADO'
   | 'ARQUIVADO'
+  | 'PERDIDO'
 
 export type ArquivoMotivo = 'manual' | 'inatividade'
 
@@ -45,45 +46,60 @@ export interface Database {
           numero: number
           cliente_nome: string
           cliente_omie_id: number | null
+          cliente_telefone: string | null
+          cliente_contato: string | null
           status: PedidoStatus
           previsao_chegada: string | null
           data_entrega_cliente: string | null
+          data_entrega_real: string | null
           dados_compra: string | null
           omie_orcamento_id: number | null
           arquivado_motivo: ArquivoMotivo | null
+          motivo_perda: string | null
           criado_por: string
           criado_em: string
           ultima_movimentacao: string
+          movido_por: string | null
         }
         Insert: {
           id?: string
           numero?: number
           cliente_nome: string
           cliente_omie_id?: number | null
+          cliente_telefone?: string | null
+          cliente_contato?: string | null
           status?: PedidoStatus
           previsao_chegada?: string | null
           data_entrega_cliente?: string | null
+          data_entrega_real?: string | null
           dados_compra?: string | null
           omie_orcamento_id?: number | null
           arquivado_motivo?: ArquivoMotivo | null
+          motivo_perda?: string | null
           criado_por: string
           criado_em?: string
           ultima_movimentacao?: string
+          movido_por?: string | null
         }
         Update: {
           id?: string
           numero?: number
           cliente_nome?: string
           cliente_omie_id?: number | null
+          cliente_telefone?: string | null
+          cliente_contato?: string | null
           status?: PedidoStatus
           previsao_chegada?: string | null
           data_entrega_cliente?: string | null
+          data_entrega_real?: string | null
           dados_compra?: string | null
           omie_orcamento_id?: number | null
           arquivado_motivo?: ArquivoMotivo | null
+          motivo_perda?: string | null
           criado_por?: string
           criado_em?: string
           ultima_movimentacao?: string
+          movido_por?: string | null
         }
         Relationships: []
       }

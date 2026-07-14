@@ -9,6 +9,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/contexts/AuthContext'
 import { KANBAN_COLUMNS, STATUS_LABELS } from '@/lib/kanban/status'
 import { podeMoverPara } from '@/lib/kanban/permissions'
 import { validarPedidoParaCotado } from '@/lib/kanban/validacao-cotado'
@@ -20,12 +21,18 @@ import type { Database, PedidoStatus, SetorTipo } from '@/types/database'
 type Pedido = Database['public']['Tables']['pedidos']['Row']
 
 export function KanbanBoard({ setor }: { setor: SetorTipo }) {
+  const { user } = useAuth()
   const [supabase] = useState(() => createClient())
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [loading, setLoading] = useState(true)
   const [aviso, setAviso] = useState<string | null>(null)
   const [novoOrcamentoAberto, setNovoOrcamentoAberto] = useState(false)
   const [pedidoAbertoId, setPedidoAbertoId] = useState<string | null>(null)
+  // Nome de cada colaborador por id — usado para exibir "Movido por X" no
+  // card a partir de pedido.movido_por/criado_por, sem depender de embed do
+  // PostgREST (que não sobrevive aos payloads de Realtime, que trazem só a
+  // linha crua de `pedidos`).
+  const [nomesPorId, setNomesPorId] = useState<Record<string, string>>({})
 
   const podeCriarOrcamento = setor === 'comercial' || setor === 'gestor'
   const podeArquivar = setor === 'comercial' || setor === 'gestor'
@@ -34,7 +41,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   )
 
-  // Carrega os pedidos visíveis no kanban (tudo exceto ARQUIVADO).
+  // Carrega os pedidos visíveis no kanban (tudo exceto ARQUIVADO e PERDIDO).
   useEffect(() => {
     let ativo = true
 
@@ -42,7 +49,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
       const { data, error } = await supabase
         .from('pedidos')
         .select('*')
-        .neq('status', 'ARQUIVADO')
+        .not('status', 'in', '(ARQUIVADO,PERDIDO)')
         .order('criado_em', { ascending: true })
 
       if (!ativo) return
@@ -52,6 +59,23 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
         setPedidos(data ?? [])
       }
       setLoading(false)
+    }
+
+    carregar()
+
+    return () => {
+      ativo = false
+    }
+  }, [supabase])
+
+  // Nomes de todos os colaboradores, para resolver "Movido por X" nos cards.
+  useEffect(() => {
+    let ativo = true
+
+    async function carregar() {
+      const { data } = await supabase.from('profiles').select('id, nome')
+      if (!ativo || !data) return
+      setNomesPorId(Object.fromEntries(data.map((p) => [p.id, p.nome])))
     }
 
     carregar()
@@ -74,7 +98,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
         { event: 'INSERT', schema: 'public', table: 'pedidos' },
         (payload) => {
           const novo = payload.new
-          if (novo.status === 'ARQUIVADO') return
+          if (novo.status === 'ARQUIVADO' || novo.status === 'PERDIDO') return
           setPedidos((atual) => {
             if (atual.some((p) => p.id === novo.id)) return atual
             return [...atual, novo]
@@ -87,7 +111,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
         (payload) => {
           const atualizado = payload.new
           setPedidos((atual) => {
-            if (atualizado.status === 'ARQUIVADO') {
+            if (atualizado.status === 'ARQUIVADO' || atualizado.status === 'PERDIDO') {
               return atual.filter((p) => p.id !== atualizado.id)
             }
             const existe = atual.some((p) => p.id === atualizado.id)
@@ -149,9 +173,15 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
         }
       }
 
-      // Atualização otimista.
+      const pedidoAnterior = pedidos.find((p) => p.id === pedidoId)
+
+      // Atualização otimista. movido_por é setado aqui só para a UI não piscar
+      // com o nome antigo até o eco do Realtime chegar — quem grava de fato é
+      // a trigger fn_pedido_movimentado (auth.uid()), no servidor.
       setPedidos((atual) =>
-        atual.map((p) => (p.id === pedidoId ? { ...p, status: destino } : p)),
+        atual.map((p) =>
+          p.id === pedidoId ? { ...p, status: destino, movido_por: user?.id ?? null } : p,
+        ),
       )
 
       const { error } = await supabase
@@ -163,12 +193,12 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
         console.error('Erro ao mover pedido:', error.message)
         setAviso('Não foi possível mover o pedido. Tente novamente.')
         // Reverte a atualização otimista.
-        setPedidos((atual) =>
-          atual.map((p) => (p.id === pedidoId ? { ...p, status: origem } : p)),
-        )
+        if (pedidoAnterior) {
+          setPedidos((atual) => atual.map((p) => (p.id === pedidoId ? pedidoAnterior : p)))
+        }
       }
     },
-    [setor, supabase],
+    [pedidos, setor, supabase, user],
   )
 
   const handleArquivar = useCallback(
@@ -179,7 +209,9 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
       // Atualização otimista.
       setPedidos((atual) =>
         atual.map((p) =>
-          p.id === pedidoId ? { ...p, status: 'ARQUIVADO', arquivado_motivo: 'manual' } : p,
+          p.id === pedidoId
+            ? { ...p, status: 'ARQUIVADO', arquivado_motivo: 'manual', movido_por: user?.id ?? null }
+            : p,
         ),
       )
 
@@ -195,7 +227,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
         setPedidos((atual) => atual.map((p) => (p.id === pedidoId ? pedidoAnterior : p)))
       }
     },
-    [pedidos, supabase],
+    [pedidos, supabase, user],
   )
 
   if (loading) {
@@ -234,6 +266,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
               onAbrir={setPedidoAbertoId}
               podeArquivar={podeArquivar}
               onArquivar={handleArquivar}
+              nomesPorId={nomesPorId}
             />
           ))}
         </div>
@@ -246,6 +279,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
       <PedidoDetalheModal
         pedidoId={pedidoAbertoId}
         onClose={() => setPedidoAbertoId(null)}
+        onDuplicado={setPedidoAbertoId}
         setor={setor}
       />
     </div>

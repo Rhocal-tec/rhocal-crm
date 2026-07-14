@@ -13,11 +13,13 @@ export function PedidoCard({
   onAbrir,
   podeArquivar,
   onArquivar,
+  nomesPorId,
 }: {
   pedido: Pedido
   onAbrir: (id: string) => void
   podeArquivar: boolean
   onArquivar: (id: string) => void
+  nomesPorId: Record<string, string>
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: pedido.id,
@@ -26,6 +28,8 @@ export function PedidoCard({
 
   const parado = estaParado(pedido.ultima_movimentacao)
   const dias = diasSemMovimentacao(pedido.ultima_movimentacao)
+  // Sem movimentação de status ainda (pedido recém-criado): mostra quem criou.
+  const nomeUltimoResponsavel = nomesPorId[pedido.movido_por ?? pedido.criado_por]
 
   const style = {
     transform: CSS.Translate.toString(transform),
@@ -61,6 +65,11 @@ export function PedidoCard({
           </span>
         )}
       </div>
+      {nomeUltimoResponsavel && (
+        <p className="mt-1 truncate text-[11px] text-muted/80">
+          Movido por {nomeUltimoResponsavel}
+        </p>
+      )}
       {podeArquivar && pedido.status === 'PEDIDO_EFETUADO' && (
         <button
           onPointerDown={(e) => e.stopPropagation()}

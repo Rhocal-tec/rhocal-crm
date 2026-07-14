@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/contexts/AuthContext'
 import { Modal } from '@/components/ui/Modal'
 import { STATUS_LABELS } from '@/lib/kanban/status'
-import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
+import { formatarDataSomente, formatarMoeda, formatarTelefoneInput } from '@/lib/kanban/formatacao'
+import { cotacaoVencida } from '@/lib/kanban/cotacao-vencida'
 import { CotacoesTab } from './CotacoesTab'
 import { ItensTab } from './ItensTab'
+import { MarcarPerdidoSection } from './MarcarPerdidoSection'
 import { OmieOrcamentoSection } from './OmieOrcamentoSection'
 import type { Database, SetorTipo } from '@/types/database'
 
@@ -18,20 +21,34 @@ type Aba = 'dados' | 'itens' | 'cotacoes'
 export function PedidoDetalheModal({
   pedidoId,
   onClose,
+  onDuplicado,
   setor,
 }: {
   pedidoId: string | null
   onClose: () => void
+  onDuplicado?: (novoPedidoId: string) => void
   setor: SetorTipo
 }) {
+  const { user } = useAuth()
   const [supabase] = useState(() => createClient())
   const [aba, setAba] = useState<Aba>('dados')
   const [pedido, setPedido] = useState<Pedido | null>(null)
   const [itens, setItens] = useState<PedidoItem[]>([])
   const [carregando, setCarregando] = useState(false)
+  const [itensComCotacaoVencedoraVencida, setItensComCotacaoVencedoraVencida] = useState<
+    { descricao: string; validade: string }[]
+  >([])
+  const [telefoneInput, setTelefoneInput] = useState('')
+  const [contatoInput, setContatoInput] = useState('')
+  const [duplicando, setDuplicando] = useState(false)
+  const [erroDuplicar, setErroDuplicar] = useState<string | null>(null)
+  const [mensagemSucesso, setMensagemSucesso] = useState<string | null>(null)
+  const [nomeUltimaMovimentacao, setNomeUltimaMovimentacao] = useState<string | null>(null)
 
   const vePainelCompras = setor === 'compras' || setor === 'gestor'
   const veMargem = setor !== 'compras'
+  const podeEditarDadosCliente = setor === 'comercial' || setor === 'gestor'
+  const podeDuplicar = setor === 'comercial' || setor === 'gestor'
   // Number(...) é obrigatório aqui: o Postgres devolve `preco_venda` (numeric)
   // como string (ex: "150.00"), e `soma + item.preco_venda` faria concatenação
   // de string em vez de soma quando o valor chega assim.
@@ -48,6 +65,8 @@ export function PedidoDetalheModal({
       setPedido(null)
       setItens([])
       setAba('dados')
+      setMensagemSucesso(null)
+      setErroDuplicar(null)
       return
     }
 
@@ -67,6 +86,8 @@ export function PedidoDetalheModal({
       if (!ativo) return
       setPedido(pedidoData ?? null)
       setItens(itensData ?? [])
+      setTelefoneInput(pedidoData?.cliente_telefone ?? '')
+      setContatoInput(pedidoData?.cliente_contato ?? '')
       setCarregando(false)
     }
 
@@ -76,6 +97,151 @@ export function PedidoDetalheModal({
       ativo = false
     }
   }, [pedidoId, supabase])
+
+  // Nome de quem fez a última movimentação de status — cai para criado_por
+  // quando o pedido ainda não foi movido (movido_por nulo).
+  const responsavelId = pedido?.movido_por ?? pedido?.criado_por ?? null
+  useEffect(() => {
+    if (!responsavelId) {
+      setNomeUltimaMovimentacao(null)
+      return
+    }
+
+    let ativo = true
+
+    async function carregar() {
+      const { data } = await supabase
+        .from('profiles')
+        .select('nome')
+        .eq('id', responsavelId as string)
+        .maybeSingle()
+      if (ativo) setNomeUltimaMovimentacao(data?.nome ?? null)
+    }
+
+    carregar()
+
+    return () => {
+      ativo = false
+    }
+  }, [responsavelId, supabase])
+
+  // Alerta no topo do modal quando a cotação vencedora de algum item está
+  // vencida — restrito a compras/gestor, que são os únicos perfis que
+  // enxergam datas de validade de cotação.
+  useEffect(() => {
+    if (!vePainelCompras || itens.length === 0) {
+      setItensComCotacaoVencedoraVencida([])
+      return
+    }
+
+    let ativo = true
+
+    async function carregar() {
+      const { data } = await supabase
+        .from('cotacoes')
+        .select('item_id, validade_cotacao')
+        .eq('vencedora', true)
+        .in(
+          'item_id',
+          itens.map((item) => item.id),
+        )
+
+      if (!ativo || !data) return
+
+      const vencidas = data
+        .filter((cotacao) => cotacaoVencida(cotacao.validade_cotacao))
+        .map((cotacao) => ({
+          descricao: itens.find((item) => item.id === cotacao.item_id)?.descricao ?? 'item',
+          validade: cotacao.validade_cotacao,
+        }))
+      setItensComCotacaoVencedoraVencida(vencidas)
+    }
+
+    carregar()
+
+    return () => {
+      ativo = false
+    }
+  }, [itens, vePainelCompras, supabase])
+
+  // Some a mensagem de sucesso de duplicação automaticamente após alguns segundos.
+  useEffect(() => {
+    if (!mensagemSucesso) return
+    const timeout = setTimeout(() => setMensagemSucesso(null), 6000)
+    return () => clearTimeout(timeout)
+  }, [mensagemSucesso])
+
+  async function salvarDataEntregaReal(valor: string) {
+    if (!pedido) return
+    const novaData = valor || null
+    const { error } = await supabase
+      .from('pedidos')
+      .update({ data_entrega_real: novaData })
+      .eq('id', pedido.id)
+    if (!error) setPedido({ ...pedido, data_entrega_real: novaData })
+  }
+
+  async function salvarDadosCliente(campo: 'cliente_telefone' | 'cliente_contato', valor: string) {
+    if (!pedido) return
+    const novoValor = valor.trim() || null
+    const atualizacao =
+      campo === 'cliente_telefone'
+        ? { cliente_telefone: novoValor }
+        : { cliente_contato: novoValor }
+    const { error } = await supabase.from('pedidos').update(atualizacao).eq('id', pedido.id)
+    if (!error) setPedido({ ...pedido, ...atualizacao })
+  }
+
+  async function duplicarPedido() {
+    if (!pedido || !user) return
+    const confirmado = window.confirm('Criar uma cópia deste pedido como novo Orçamento?')
+    if (!confirmado) return
+
+    setDuplicando(true)
+    setErroDuplicar(null)
+
+    const { data: novoPedido, error: erroPedido } = await supabase
+      .from('pedidos')
+      .insert({
+        cliente_nome: pedido.cliente_nome,
+        cliente_omie_id: pedido.cliente_omie_id,
+        cliente_telefone: pedido.cliente_telefone,
+        cliente_contato: pedido.cliente_contato,
+        criado_por: user.id,
+      })
+      .select()
+      .single()
+
+    if (erroPedido || !novoPedido) {
+      setErroDuplicar('Não foi possível duplicar o pedido. Tente novamente.')
+      setDuplicando(false)
+      return
+    }
+
+    if (itens.length > 0) {
+      const { error: erroItens } = await supabase.from('pedido_itens').insert(
+        itens.map((item) => ({
+          pedido_id: novoPedido.id,
+          descricao: item.descricao,
+          quantidade: item.quantidade,
+          ca: item.ca,
+        })),
+      )
+
+      if (erroItens) {
+        setDuplicando(false)
+        setMensagemSucesso(
+          `Pedido duplicado como #${novoPedido.numero}, mas houve um erro ao copiar os itens. Confira e adicione manualmente.`,
+        )
+        onDuplicado?.(novoPedido.id)
+        return
+      }
+    }
+
+    setDuplicando(false)
+    setMensagemSucesso(`Pedido duplicado como #${novoPedido.numero}`)
+    onDuplicado?.(novoPedido.id)
+  }
 
   return (
     <Modal
@@ -88,12 +254,51 @@ export function PedidoDetalheModal({
         <div className="py-8 text-center text-sm text-muted">Carregando…</div>
       ) : (
         <div>
-          {veMargem && (
-            <div className="mb-3 flex items-center justify-between rounded-md bg-surface-alt px-3 py-2 text-sm">
-              <span className="text-muted">Total do pedido (preço de venda)</span>
-              <span className="font-mono font-semibold text-primary">
-                {formatarMoeda(totalPedido)}
-              </span>
+          {mensagemSucesso && (
+            <div className="mb-3 rounded-md border border-accent-success/30 bg-accent-success/10 px-3 py-2 text-sm text-accent-success">
+              ✓ {mensagemSucesso}
+            </div>
+          )}
+
+          {erroDuplicar && (
+            <div className="mb-3 rounded-md border border-accent-danger/30 bg-accent-danger/10 px-3 py-2 text-sm text-accent-danger">
+              {erroDuplicar}
+            </div>
+          )}
+
+          {itensComCotacaoVencedoraVencida.length > 0 && (
+            <div className="mb-3 flex flex-col gap-1.5 rounded-md border border-accent-danger/30 bg-accent-danger/10 px-3 py-2.5 text-sm text-accent-danger">
+              {itensComCotacaoVencedoraVencida.map((item, index) => (
+                <p key={index}>
+                  <strong>Atenção:</strong> a cotação vencedora do item &ldquo;{item.descricao}
+                  &rdquo; está vencida desde {formatarDataSomente(item.validade)} — considere
+                  recotar antes de prosseguir.
+                </p>
+              ))}
+            </div>
+          )}
+
+          {(veMargem || podeDuplicar) && (
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-md bg-surface-alt px-3 py-2 text-sm">
+              {veMargem ? (
+                <>
+                  <span className="text-muted">Total do pedido (preço de venda)</span>
+                  <span className="font-mono font-semibold text-primary">
+                    {formatarMoeda(totalPedido)}
+                  </span>
+                </>
+              ) : (
+                <span />
+              )}
+              {podeDuplicar && (
+                <button
+                  onClick={duplicarPedido}
+                  disabled={duplicando}
+                  className="rounded-md border border-white/15 px-3 py-1.5 text-xs font-medium text-primary/80 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {duplicando ? 'Duplicando…' : 'Duplicar'}
+                </button>
+              )}
             </div>
           )}
 
@@ -143,6 +348,40 @@ export function PedidoDetalheModal({
                 <dd className="font-mono font-medium text-primary">#{pedido.numero}</dd>
               </div>
               <div>
+                <dt className="text-muted">Telefone do cliente</dt>
+                <dd className="font-medium text-primary">
+                  {podeEditarDadosCliente ? (
+                    <input
+                      type="tel"
+                      value={telefoneInput}
+                      onChange={(e) => setTelefoneInput(formatarTelefoneInput(e.target.value))}
+                      onBlur={() => salvarDadosCliente('cliente_telefone', telefoneInput)}
+                      placeholder="(11) 91234-5678"
+                      className="input-field mt-0.5 w-full rounded-md px-2 py-1 text-sm"
+                    />
+                  ) : (
+                    (pedido.cliente_telefone ?? '—')
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted">Contato do cliente</dt>
+                <dd className="font-medium text-primary">
+                  {podeEditarDadosCliente ? (
+                    <input
+                      type="text"
+                      value={contatoInput}
+                      onChange={(e) => setContatoInput(e.target.value)}
+                      onBlur={() => salvarDadosCliente('cliente_contato', contatoInput)}
+                      placeholder="Nome do contato"
+                      className="input-field mt-0.5 w-full rounded-md px-2 py-1 text-sm"
+                    />
+                  ) : (
+                    (pedido.cliente_contato ?? '—')
+                  )}
+                </dd>
+              </div>
+              <div>
                 <dt className="text-muted">Status</dt>
                 <dd className="font-medium text-primary">{STATUS_LABELS[pedido.status]}</dd>
               </div>
@@ -150,14 +389,44 @@ export function PedidoDetalheModal({
                 <dt className="text-muted">Última movimentação</dt>
                 <dd className="font-medium text-primary">
                   {new Date(pedido.ultima_movimentacao).toLocaleDateString('pt-BR')}
+                  {nomeUltimaMovimentacao && ` por ${nomeUltimaMovimentacao}`}
                 </dd>
               </div>
               <div>
-                <dt className="text-muted">Entrega ao cliente</dt>
+                <dt className="text-muted">Previsão de chegada</dt>
+                <dd className="font-medium text-primary">
+                  {formatarDataSomente(pedido.previsao_chegada)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted">Data real de entrega</dt>
+                <dd className="font-medium text-primary">
+                  {vePainelCompras ? (
+                    <input
+                      type="date"
+                      value={pedido.data_entrega_real ?? ''}
+                      onChange={(e) => salvarDataEntregaReal(e.target.value)}
+                      className="input-field mt-0.5 rounded-md px-2 py-1 text-sm"
+                    />
+                  ) : (
+                    formatarDataSomente(pedido.data_entrega_real)
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted">Entrega ao cliente (prometida)</dt>
                 <dd className="font-medium text-primary">
                   {formatarDataSomente(pedido.data_entrega_cliente)}
                 </dd>
               </div>
+              {pedido.status === 'PERDIDO' && (
+                <div className="col-span-2">
+                  <dt className="text-muted">Motivo da perda</dt>
+                  <dd className="font-medium text-accent-danger">
+                    {pedido.motivo_perda ?? '—'}
+                  </dd>
+                </div>
+              )}
             </dl>
           )}
 
@@ -171,11 +440,17 @@ export function PedidoDetalheModal({
             />
           )}
 
+          {aba === 'dados' && (
+            <MarcarPerdidoSection pedido={pedido} setor={setor} onPedidoAtualizado={setPedido} />
+          )}
+
           {aba === 'itens' && (
             <ItensTab itens={itens} setor={setor} onItemAtualizado={handleItemAtualizado} />
           )}
 
-          {aba === 'cotacoes' && vePainelCompras && <CotacoesTab itens={itens} />}
+          {aba === 'cotacoes' && vePainelCompras && (
+            <CotacoesTab itens={itens} pedidoNumero={pedido.numero} />
+          )}
         </div>
       )}
     </Modal>
