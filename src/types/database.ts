@@ -48,6 +48,9 @@ export interface Database {
           cliente_omie_id: number | null
           cliente_telefone: string | null
           cliente_contato: string | null
+          cliente_cnpj: string | null
+          valor_frete: number
+          modo_faturamento: string | null
           status: PedidoStatus
           previsao_chegada: string | null
           data_entrega_cliente: string | null
@@ -56,6 +59,8 @@ export interface Database {
           omie_orcamento_id: number | null
           arquivado_motivo: ArquivoMotivo | null
           motivo_perda: string | null
+          orcamento_direto: boolean
+          omie_convertido_pedido: boolean
           criado_por: string
           criado_em: string
           ultima_movimentacao: string
@@ -68,6 +73,9 @@ export interface Database {
           cliente_omie_id?: number | null
           cliente_telefone?: string | null
           cliente_contato?: string | null
+          cliente_cnpj?: string | null
+          valor_frete?: number
+          modo_faturamento?: string | null
           status?: PedidoStatus
           previsao_chegada?: string | null
           data_entrega_cliente?: string | null
@@ -76,6 +84,8 @@ export interface Database {
           omie_orcamento_id?: number | null
           arquivado_motivo?: ArquivoMotivo | null
           motivo_perda?: string | null
+          orcamento_direto?: boolean
+          omie_convertido_pedido?: boolean
           criado_por: string
           criado_em?: string
           ultima_movimentacao?: string
@@ -88,6 +98,9 @@ export interface Database {
           cliente_omie_id?: number | null
           cliente_telefone?: string | null
           cliente_contato?: string | null
+          cliente_cnpj?: string | null
+          valor_frete?: number
+          modo_faturamento?: string | null
           status?: PedidoStatus
           previsao_chegada?: string | null
           data_entrega_cliente?: string | null
@@ -96,6 +109,8 @@ export interface Database {
           omie_orcamento_id?: number | null
           arquivado_motivo?: ArquivoMotivo | null
           motivo_perda?: string | null
+          orcamento_direto?: boolean
+          omie_convertido_pedido?: boolean
           criado_por?: string
           criado_em?: string
           ultima_movimentacao?: string
@@ -110,6 +125,10 @@ export interface Database {
           descricao: string
           quantidade: number
           ca: string | null
+          observacao: string | null
+          tamanho: string | null
+          numero: string | null
+          cor: string | null
           custo_final: number | null
           margem_pct: number | null
           preco_venda: number | null
@@ -122,6 +141,10 @@ export interface Database {
           descricao: string
           quantidade?: number
           ca?: string | null
+          observacao?: string | null
+          tamanho?: string | null
+          numero?: string | null
+          cor?: string | null
           custo_final?: number | null
           margem_pct?: number | null
           preco_venda?: number | null
@@ -134,6 +157,10 @@ export interface Database {
           descricao?: string
           quantidade?: number
           ca?: string | null
+          observacao?: string | null
+          tamanho?: string | null
+          numero?: string | null
+          cor?: string | null
           custo_final?: number | null
           margem_pct?: number | null
           preco_venda?: number | null

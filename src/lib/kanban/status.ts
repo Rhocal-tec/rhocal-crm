@@ -30,6 +30,8 @@ export const MOTIVO_PERDA_OPCOES = [
   'Outro',
 ] as const
 
+export const MODO_FATURAMENTO_OPCOES = ['21 dias', '30/60/90 dias', 'PIX', 'Cartão'] as const
+
 // Colunas visíveis no kanban principal, nesta ordem. ARQUIVADO fica de fora
 // (terá página própria com busca).
 export const KANBAN_COLUMNS: PedidoStatus[] = [

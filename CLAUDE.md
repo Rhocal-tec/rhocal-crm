@@ -424,3 +424,105 @@ Página /painel acessível somente ao perfil gestor (link no header, visível s�
 - Card do kanban: texto pequeno e discreto abaixo do indicador de dias parado, mostrando quem moveu por último (ex: "Movido por Ariane"), resolvido via join/lookup com profiles a partir de movido_por
 - Aba Dados do modal do pedido: ao lado de "Última movimentação: DD/MM/AAAA", acrescentar o nome de quem fez (ex: "Última movimentação: 10/07/2026 por Ariane Villariço")
 - Vale para qualquer colaborador e qualquer direção de movimentação, incluindo a criação inicial do pedido — nesse caso (movido_por ainda nulo) usa criado_por, já que não houve mudança de status
+
+## Fase 18 — Melhorias pós-treinamento
+
+### 18.1 — Autocomplete de fornecedor (Omie) na aba Cotações
+
+- Campo "Fornecedor", ao adicionar uma nova cotação, ganha autocomplete: a partir de 3 caracteres digitados (mínimo exigido pela própria API do Omie), busca com debounce de 400ms na rota server-side `POST /api/omie/buscar-clientes-nome` com `{ nome, apenasFornecedor: true }`
+- O Omie guarda fornecedores no mesmo cadastro de clientes (`ListarClientes`), diferenciando por uma tag no registro (`tags: [{ tag: "Fornecedor" }, ...]`) — não existe endpoint separado de fornecedores nem campo booleano dedicado; a rota filtra por essa tag no lado do servidor
+- A busca por nome parcial usa `clientesFiltro: { razao_social: <termo> }` do `ListarClientes` — faz correspondência por substring (contém), sem distinção de maiúsculas/minúsculas; comportamento confirmado empiricamente contra a API real, não documentado explicitamente no portal do desenvolvedor Omie
+- Lista suspensa (bg-surface-alt, hover destacado) com os resultados; ao selecionar, preenche o campo com o `razao_social` exato cadastrado no Omie
+- Sem resultado (ou termo abaixo do mínimo): não bloqueia — o usuário pode continuar digitando livremente um fornecedor que ainda não está cadastrado no Omie
+
+### 18.2 — Autocomplete de cliente por nome parcial na criação do pedido
+
+- Campo "Nome do cliente" do Novo Orçamento ganha autocomplete pelo nome (mesma rota `/api/omie/buscar-clientes-nome`, sem `apenasFornecedor`), com o mesmo mínimo de 3 caracteres e debounce de 400ms
+- Convive com a busca por CNPJ exato já existente — são dois caminhos independentes para achar o mesmo cliente; digitar no campo nome depois de uma busca por CNPJ (ou de uma seleção anterior) invalida o `cliente_omie_id` vinculado, exigindo nova seleção
+- Ao selecionar uma sugestão, preenche nome e `cliente_omie_id` (pula a busca de cliente na hora de gerar o orçamento no Omie, igual já acontecia com CNPJ)
+
+### 18.4 — Campo de observação por item
+
+- Nova coluna pedido_itens.observacao (text, opcional)
+- Campo "Observação" (textarea) disponível em todo formulário onde itens são criados ou editados: Novo Orçamento (NovoOrcamentoModal) e aba Itens do modal do pedido (ItensTab)
+- Exibida na aba Itens, em bloco destacado, apenas quando preenchida
+
+### 18.5 — Campo Código com busca automática no Omie
+
+- Campo opcional "Código", posicionado antes de "Descrição", nos mesmos formulários de criação/edição de item (NovoOrcamentoModal e ItensTab)
+- Ao perder o foco (blur) com um código preenchido, chama a rota server-side `POST /api/omie/buscar-produto-codigo`, que usa `ConsultarProduto` do Omie (endpoint `produtos/`) com `{ codigo_produto: 0, codigo }` — não usar `ListarProdutos` com `filtrar_codigo`: esse parâmetro não existe na API do Omie e a chamada falha (fault `SOAP-ENV:Client-5001`)
+- "Não encontrado" chega como fault com a string "não cadastrado" (ex: "Código do Produto não cadastrado para o Código [...]") — tratar como resultado vazio (`encontrado: false`), não como erro
+- Se encontrado: preenche a Descrição automaticamente com o retorno do Omie e salva o vínculo em pedido_itens.codigo_produto_omie — imediatamente via update quando o item já existe (ItensTab), ou junto do insert do pedido quando o item ainda está sendo criado (NovoOrcamentoModal); mostra indicador visual de sucesso (✓ verde)
+- Se não encontrado: mensagem discreta "Código não encontrado no Omie", sem bloquear o preenchimento manual da descrição
+- Itens com codigo_produto_omie já preenchido por este método pulam automaticamente a etapa de vinculação manual por descrição ao gerar o orçamento no Omie (mesma checagem que já existia em OmieOrcamentoSection)
+
+### 18.6 — Alerta de cotação atrasada
+
+- Pedido em EM_COTACAO (ORÇAMENTO EM COTAÇÃO) com ultima_movimentacao 2h ou mais no passado: card do kanban fica vermelho (accent-danger) em vez do âmbar padrão, com o texto "Cotação atrasada — Xh sem movimentação" (horas exatas, calculadas no client)
+- Essa regra tem prioridade sobre o alerta âmbar de 3 dias enquanto o pedido estiver especificamente em EM_COTACAO; nas demais colunas, a regra de 3/7 dias continua normal
+
+### 18.7 — Tamanho, Número e Cor por item
+
+- Novas colunas pedido_itens.tamanho, numero e cor (text, opcionais)
+- Editáveis nos mesmos formulários de criação/edição de item (NovoOrcamentoModal e ItensTab)
+- Exibidos na listagem de itens quando preenchidos (ex: "Tam. G · Nº 42 · Cor Azul"), omitindo os campos vazios sem deixar espaço estranho no layout
+
+### 18.8 — Número Omie visível no cabeçalho do modal
+
+- Se pedidos.omie_orcamento_id estiver preenchido, o cabeçalho do modal do pedido exibe um badge destacado (accent-primary) ao lado de "Pedido #N", ex: "Pedido #12 · Omie #4521"
+
+## Fase 19 — Atalho do Comercial
+
+- Nova coluna pedidos.orcamento_direto (boolean, default false)
+- Toggle "Orçamento direto (sem cotação do Compras)" no topo do formulário Novo Orçamento, disponível para comercial e gestor (o modal já só é aberto por esses dois perfis)
+- Com o toggle ativado, cada item ganha um campo obrigatório "Preço de venda", além dos campos já existentes (descrição, quantidade, CA, código, observação, tamanho/número/cor)
+- Ao salvar com o toggle ativado: o pedido nasce direto com status = APROVADO_CLIENTE (pula PEDIDO e as etapas de cotação) e orcamento_direto = true; cada item salva preco_venda com o valor informado, com custo_final e margem_pct nulos — não fazem sentido nesse fluxo
+- Card do kanban e cabeçalho do modal exibem um badge "DIRETO" (accent-compras) quando orcamento_direto = true, para compras/gestor identificarem de cara que esse pedido pulou a cotação
+- O botão "Gerar orçamento no Omie" já fica disponível imediatamente — a condição existente (status em COTADO/APROVADO/EFETUADO com preco_venda preenchido em todos os itens) já cobre isso automaticamente, sem necessidade de lógica adicional
+- Pedidos criados nesse modo continuam podendo ser movidos, arquivados ou marcados como perdidos normalmente — nenhuma regra de permissão de movimentação distingue orçamento direto do fluxo normal
+- Aba Itens do modal: quando custo_final está nulo mas preco_venda já está preenchido (caso do orçamento direto), exibe "Preço de venda: R$ X (orçamento direto)" em vez do "Aguardando cotação" padrão (que só se aplica a itens realmente esperando cotação de compras)
+
+## Fase 20 — Converter Orçamento em Pedido de Venda no Omie
+
+- Nova coluna pedidos.omie_convertido_pedido (boolean, default false)
+- Etapa "10" = "Pedido de Venda" no Omie desta conta — **confirmado via `ListarEtapasFaturamento`** no endpoint `https://app.omie.com.br/api/v1/produtos/etapafat/` (não em `/produtos/pedido/`), filtrando pela operação `cCodOperacao: "11"` (Venda de Produto). Nunca assumir esse valor sem checar: os códigos de etapa são fixos entre contas, mas a descrição de cada um é customizável por conta — nesta conta, "10" tem `cDescrPadrao: "Pedido de Venda"` e descrição customizada "Pedido + Orçamento", ativa (`cInativo: "N"`)
+- O método correto da API é **`AlterarPedidoVenda`** (não `AlterarPedido`) — mesma estrutura de entrada do `IncluirPedido` (`cabecalho`, `det`, `informacoes_adicionais`, `lista_parcelas`, `frete`, `observacoes`, `departamentos` opcionais). Nunca reenviar `total_pedido`, `infoCadastro` ou `exportacao` — a própria documentação do Omie marca esses blocos como "preenchimento automático - não informar"
+- **`cabecalho` e `det[].ide` (vindos do `ConsultarPedido`) também têm campos calculados/de consulta misturados com os campos de entrada válidos** — ex: `cabecalho.numero_pedido`/`sequencial` e `det[].ide.codigo_item`/`id_ordem_producao` — e reenviá-los faz o `AlterarPedidoVenda` inteiro falhar (ex: "A tag [numero_pedido] não deve ser enviada na alteração!"). A rota usa uma allowlist explícita (`CABECALHO_CAMPOS_ENTRADA`/`IDE_CAMPOS_ENTRADA` em `orcamento/route.ts`) para montar `cabecalho` e cada item de `det` só com os campos de entrada documentados, e nunca reenvia o bloco `det[].imposto` (deixa o Omie recalcular os impostos, como a própria doc recomenda)
+- Botão "Converter em Pedido de Venda" no modal do pedido (aba Dados, componente ConverterPedidoVendaSection), visível para comercial/gestor, só quando: status = APROVADO_CLIENTE E omie_orcamento_id preenchido E omie_convertido_pedido = false
+- Ao clicar, formulário pede a condição de pagamento — escolhida manualmente a cada conversão, sem padrão fixo: à vista (1 parcela, com data de vencimento) ou parcelado (nº de parcelas + intervalo em dias entre elas, ex. 30/60/90). O intervalo é aplicado a partir de hoje (quantidade_dias = intervalo × número da parcela); percentual dividido igualmente entre as parcelas, com o arredondamento absorvido pela última
+- **Cada parcela precisa de 4 campos obrigatórios, não só `numero_parcela`/`percentual`**: `valor` (R$ daquela parcela) e `data_vencimento` (data calendário, formato dd/mm/aaaa) também são obrigatórios — confirmado ao vivo com "O preenchimento da tag [valor] é obrigatório!". `valor` é calculado a partir do total do pedido (somado direto de `det[].produto.quantidade × valor_unitario`, já que `total_pedido` não é reenviado) × percentual da parcela, com o arredondamento de centavos absorvido pela última parcela; `data_vencimento` é `hoje + quantidade_dias`, formatada com o mesmo helper `formatarDataOmie` usado em `data_previsao`
+- Fluxo da conversão (rota `POST /api/omie/orcamento`, ação `converter_pedido_venda`): consulta o pedido atual no Omie via `ConsultarPedido` (preserva qualquer edição feita direto no Omie, em vez de reconstruir o payload do zero a partir do nosso banco) → reaproveita a lógica já existente da Fase 10 (`obterCategoriaReceitaPadrao`/`obterContaCorrentePadrao`) para codigo_categoria/codigo_conta_corrente → monta o payload só com os campos de entrada válidos, sobrescrevendo etapa/codigo_parcela ("999")/qtde_parcelas/lista_parcelas → chama `AlterarPedidoVenda`
+- **Cliente vinculado é obrigatório para converter**, mesmo que o orçamento tenha sido gerado com "Gerar sem vincular cliente" (que manda codigo_cliente = 0 — válido pro Omie na criação do orçamento, mas rejeitado na conversão com o fault "O preenchimento das tags [codigo_cliente] ou [codigo_cliente_integracao] é obrigatório!"). Se pedidos.cliente_omie_id ainda for null quando o comercial clica em "Converter em Pedido de Venda", o próprio ConverterPedidoVendaSection mostra antes um passo de busca/vínculo de cliente (reaproveitando a rota `/api/omie/buscar-clientes-nome` da Fase 18.2), salva cliente_omie_id imediatamente ao selecionar, e só então segue pro formulário de condição de pagamento. A rota sempre sobrescreve cabecalho.codigo_cliente com pedidos.cliente_omie_id (nunca confia no valor que o ConsultarPedido devolveu, que pode ser o 0 antigo)
+- **`informacoes_adicionais.codVend`/`codProj` (vendedor/projeto) são referências opcionais que podem ter virado inválidas** desde que o orçamento foi criado — confirmado ao vivo com o fault "O vendedor está inativo! - tag: [codVend]" ao reenviar o codVend antigo vindo do `ConsultarPedido`. A rota omite os dois na conversão (`codVend`/`codProj` como `undefined`, que o `JSON.stringify` descarta) em vez de arriscar reenviar uma referência que virou inválida — diferente dos casos acima (campo que não pode ser enviado), aqui o campo é aceito, só que seu valor específico não é mais válido
+- Sucesso: grava omie_convertido_pedido = true; cabeçalho do modal passa a exibir, ao lado do número Omie (Fase 18.8), o badge "Convertido em Pedido de Venda ✓" (accent-success)
+- Erros do Omie tratados no mesmo padrão já usado nas outras integrações: mensagem da API exibida em banner accent-danger, nunca trava a UI de forma silenciosa
+
+## Fase 21 — PDF do orçamento, gerado direto no CRM (sem depender do Omie)
+
+Documento comercial pronto para enviar ao cliente, gerado a partir dos dados já existentes no pedido — não depende de o orçamento já ter sido gerado no Omie.
+
+**Layout:** formal e claro (fundo branco, estilo proposta comercial/papel timbrado), não o visual escuro do sistema. Logo da RHOCAL (/public/rhocal-logo.png) no cabeçalho, laranja #F1592A como cor de destaque em títulos/linhas divisórias.
+
+**Dados fixos da RHOCAL (cabeçalho do documento, hardcoded no template):**
+RHOCAL EQUIPAMENTOS DE SEGURANÇA LTDA
+CNPJ: 53.263.859/0001-50
+IE: 206.912.722.113
+Av. Capitão Francisco César, 842 — Vila Pindorama
+Barueri-SP — CEP: 06415-000
+Telefone: (11) 4161-6675
+
+**Novos campos no pedido, necessários para o PDF:**
+- pedidos.valor_frete (numeric, opcional, default 0) — editável por comercial/gestor na aba Dados
+- pedidos.modo_faturamento (text, opcional) — select com opções fixas: "21 dias", "30/60/90 dias", "PIX", "Cartão" — editável por comercial/gestor na aba Dados
+- pedidos.cliente_cnpj (text, opcional) — salvar o CNPJ digitado/buscado do cliente para exibir no documento
+
+**Conteúdo do PDF:**
+- Cabeçalho: logo RHOCAL + dados fixos da RHOCAL (acima) + "Orçamento Nº [número do pedido]" + data e hora de emissão (momento em que o PDF é gerado)
+- Dados do cliente: nome, CNPJ, telefone e contato (quando preenchidos)
+- Tabela de itens: descrição, CA (se preenchido), tamanho/número/cor combinados (se preenchidos), quantidade, preço unitário, subtotal
+- Frete: linha separada abaixo da tabela de itens, mostrando o valor do frete (se maior que zero)
+- Total geral em destaque = soma dos itens + frete
+- Modo de faturamento: exibido em destaque (ex: "Condição de pagamento: 30/60/90 dias")
+- Rodapé/assinatura: nome do vendedor (comercial que criou o pedido, criado_por via join com profiles), data e hora de emissão do documento, e o texto de validade ("Orçamento válido por 7 dias a partir da data de emissão")
+
+**Geração:** botão "Baixar PDF do Orçamento" no modal do pedido (aba Dados), disponível para comercial e gestor, habilitado quando todos os itens tiverem preco_venda preenchido — independente do pedido já ter ou não omie_orcamento_id. Gerar client-side (@react-pdf/renderer ou jsPDF), sem depender de serviço externo.

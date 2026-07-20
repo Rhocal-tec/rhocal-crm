@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
@@ -13,6 +13,17 @@ type Cotacao = Database['public']['Tables']['cotacoes']['Row']
 type HistoricoCA = Database['public']['Views']['vw_historico_ca']['Row']
 
 const MAX_COTACOES_POR_ITEM = 3
+// Só dispara a busca de autocomplete a partir de 3 caracteres — mesmo mínimo
+// exigido pela própria API do Omie (abaixo disso ela retorna erro de validação).
+const MIN_CARACTERES_BUSCA_FORNECEDOR = 3
+const DEBOUNCE_BUSCA_FORNECEDOR_MS = 400
+
+interface FornecedorOmie {
+  codigoClienteOmie: number
+  razaoSocial: string
+  nomeFantasia: string | null
+  cnpjCpf: string | null
+}
 
 interface NovaCotacaoForm {
   fornecedor: string
@@ -54,6 +65,18 @@ export function CotacoesTab({
   const [formularios, setFormularios] = useState<Record<string, NovaCotacaoForm>>({})
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
+
+  // Autocomplete de fornecedor (busca no Omie) — estado por item, já que cada
+  // item tem seu próprio formulário de nova cotação.
+  const [sugestoesFornecedor, setSugestoesFornecedor] = useState<Record<string, FornecedorOmie[]>>(
+    {},
+  )
+  const [buscandoFornecedor, setBuscandoFornecedor] = useState<Record<string, boolean>>({})
+  const [dropdownFornecedorAberto, setDropdownFornecedorAberto] = useState<Record<string, boolean>>(
+    {},
+  )
+  // Timers de debounce não entram no estado — não devem disparar re-render.
+  const debounceFornecedorRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   useEffect(() => {
     let ativo = true
@@ -131,6 +154,51 @@ export function CotacoesTab({
       ...atual,
       [itemId]: { ...form(itemId), [campo]: valor },
     }))
+  }
+
+  async function buscarFornecedores(itemId: string, termo: string) {
+    setBuscandoFornecedor((atual) => ({ ...atual, [itemId]: true }))
+    try {
+      const resposta = await fetch('/api/omie/buscar-clientes-nome', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome: termo, apenasFornecedor: true }),
+      })
+      const dados = await resposta.json().catch(() => null)
+      if (resposta.ok && dados && Array.isArray(dados.clientes)) {
+        setSugestoesFornecedor((atual) => ({ ...atual, [itemId]: dados.clientes }))
+      }
+    } finally {
+      setBuscandoFornecedor((atual) => ({ ...atual, [itemId]: false }))
+    }
+  }
+
+  // Digitar de novo abre o dropdown e reagenda a busca (debounce) — não
+  // dispara uma chamada à API a cada tecla.
+  function atualizarFornecedor(itemId: string, valor: string) {
+    atualizarForm(itemId, 'fornecedor', valor)
+    setDropdownFornecedorAberto((atual) => ({ ...atual, [itemId]: true }))
+
+    if (debounceFornecedorRef.current[itemId]) {
+      clearTimeout(debounceFornecedorRef.current[itemId])
+    }
+
+    const termo = valor.trim()
+    if (termo.length < MIN_CARACTERES_BUSCA_FORNECEDOR) {
+      setSugestoesFornecedor((atual) => ({ ...atual, [itemId]: [] }))
+      return
+    }
+
+    debounceFornecedorRef.current[itemId] = setTimeout(
+      () => buscarFornecedores(itemId, termo),
+      DEBOUNCE_BUSCA_FORNECEDOR_MS,
+    )
+  }
+
+  function selecionarFornecedor(itemId: string, fornecedor: FornecedorOmie) {
+    atualizarForm(itemId, 'fornecedor', fornecedor.razaoSocial)
+    setSugestoesFornecedor((atual) => ({ ...atual, [itemId]: [] }))
+    setDropdownFornecedorAberto((atual) => ({ ...atual, [itemId]: false }))
   }
 
   async function adicionarCotacao(itemId: string) {
@@ -407,14 +475,57 @@ export function CotacoesTab({
             ) : (
               <div className="mt-3 flex flex-col gap-3 rounded-md bg-surface-alt p-3">
                 <div className="flex flex-wrap gap-2">
-                  <div className="min-w-[180px] flex-[2]">
+                  <div className="relative min-w-[180px] flex-[2]">
                     <label className="block text-xs text-muted">Fornecedor *</label>
-                    <input
-                      type="text"
-                      value={f.fornecedor}
-                      onChange={(e) => atualizarForm(item.id, 'fornecedor', e.target.value)}
-                      className="input-field mt-1 w-full rounded-md px-2 py-1 text-sm"
-                    />
+                    <div className="relative mt-1">
+                      <input
+                        type="text"
+                        value={f.fornecedor}
+                        onChange={(e) => atualizarFornecedor(item.id, e.target.value)}
+                        onFocus={() =>
+                          setDropdownFornecedorAberto((atual) => ({ ...atual, [item.id]: true }))
+                        }
+                        onBlur={() =>
+                          setTimeout(
+                            () =>
+                              setDropdownFornecedorAberto((atual) => ({
+                                ...atual,
+                                [item.id]: false,
+                              })),
+                            150,
+                          )
+                        }
+                        autoComplete="off"
+                        className="input-field w-full rounded-md px-2 py-1 pr-7 text-sm"
+                      />
+                      {buscandoFornecedor[item.id] && (
+                        <span
+                          aria-hidden="true"
+                          className="absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin rounded-full border-2 border-white/20 border-t-accent-primary"
+                        />
+                      )}
+                    </div>
+                    {dropdownFornecedorAberto[item.id] &&
+                      (sugestoesFornecedor[item.id]?.length ?? 0) > 0 && (
+                        <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-white/10 bg-surface-alt py-1 shadow-lg">
+                          {sugestoesFornecedor[item.id].map((fornecedor) => (
+                            <li key={fornecedor.codigoClienteOmie}>
+                              <button
+                                type="button"
+                                onMouseDown={() => selecionarFornecedor(item.id, fornecedor)}
+                                className="block w-full truncate px-3 py-1.5 text-left text-sm text-primary hover:bg-white/10"
+                              >
+                                {fornecedor.razaoSocial}
+                                {fornecedor.cnpjCpf && (
+                                  <span className="ml-1.5 text-xs text-muted">
+                                    — {fornecedor.cnpjCpf}
+                                  </span>
+                                )}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                   </div>
                   <div className="min-w-[110px] flex-1">
                     <label className="block text-xs text-muted">Preço *</label>

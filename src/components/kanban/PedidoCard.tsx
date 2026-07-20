@@ -4,6 +4,7 @@ import { useDraggable } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import { STATUS_LABELS } from '@/lib/kanban/status'
 import { diasSemMovimentacao, estaParado } from '@/lib/kanban/dias-parado'
+import { cotacaoAtrasada, horasSemMovimentacao } from '@/lib/kanban/cotacao-atrasada'
 import type { Database } from '@/types/database'
 
 type Pedido = Database['public']['Tables']['pedidos']['Row']
@@ -26,8 +27,12 @@ export function PedidoCard({
     data: { status: pedido.status },
   })
 
-  const parado = estaParado(pedido.ultima_movimentacao)
+  // Cotação atrasada (EM_COTACAO, 2h+ sem movimentação) tem prioridade sobre
+  // o alerta âmbar padrão de 3 dias enquanto o pedido estiver nessa coluna.
+  const atrasada = cotacaoAtrasada(pedido.status, pedido.ultima_movimentacao)
+  const parado = !atrasada && estaParado(pedido.ultima_movimentacao)
   const dias = diasSemMovimentacao(pedido.ultima_movimentacao)
+  const horasAtraso = Math.floor(horasSemMovimentacao(pedido.ultima_movimentacao))
   // Sem movimentação de status ainda (pedido recém-criado): mostra quem criou.
   const nomeUltimoResponsavel = nomesPorId[pedido.movido_por ?? pedido.criado_por]
 
@@ -44,25 +49,41 @@ export function PedidoCard({
       {...attributes}
       onClick={() => onAbrir(pedido.id)}
       className={`cursor-grab touch-none rounded-lg border p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing ${
-        parado
-          ? 'border-accent-alert/60 bg-accent-alert/10'
-          : 'border-white/10 bg-surface'
+        atrasada
+          ? 'border-accent-danger/60 bg-accent-danger/10'
+          : parado
+            ? 'border-accent-alert/60 bg-accent-alert/10'
+            : 'border-white/10 bg-surface'
       }`}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-sm font-semibold text-primary">
           Pedido #{pedido.numero}
         </span>
+        {pedido.orcamento_direto && (
+          <span
+            title="Orçamento direto — sem cotação do Compras"
+            className="inline-flex shrink-0 rounded-full border border-accent-compras/40 bg-accent-compras/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-compras"
+          >
+            Direto
+          </span>
+        )}
       </div>
       <p className="mt-1 truncate text-sm text-primary/80">{pedido.cliente_nome}</p>
       <div className="mt-2 flex items-center justify-between">
         <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-muted">
           {STATUS_LABELS[pedido.status]}
         </span>
-        {parado && (
-          <span className="text-xs font-medium text-accent-alert">
-            há {dias} {dias === 1 ? 'dia' : 'dias'} sem movimentação
+        {atrasada ? (
+          <span className="text-xs font-semibold text-accent-danger">
+            Cotação atrasada — {horasAtraso}h sem movimentação
           </span>
+        ) : (
+          parado && (
+            <span className="text-xs font-medium text-accent-alert">
+              há {dias} {dias === 1 ? 'dia' : 'dias'} sem movimentação
+            </span>
+          )
         )}
       </div>
       {nomeUltimoResponsavel && (

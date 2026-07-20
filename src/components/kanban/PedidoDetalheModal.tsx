@@ -4,13 +4,15 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { Modal } from '@/components/ui/Modal'
-import { STATUS_LABELS } from '@/lib/kanban/status'
+import { MODO_FATURAMENTO_OPCOES, STATUS_LABELS } from '@/lib/kanban/status'
 import { formatarDataSomente, formatarMoeda, formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { cotacaoVencida } from '@/lib/kanban/cotacao-vencida'
+import { ConverterPedidoVendaSection } from './ConverterPedidoVendaSection'
 import { CotacoesTab } from './CotacoesTab'
 import { ItensTab } from './ItensTab'
 import { MarcarPerdidoSection } from './MarcarPerdidoSection'
 import { OmieOrcamentoSection } from './OmieOrcamentoSection'
+import { OrcamentoPdfButton } from './OrcamentoPdfButton'
 import type { Database, SetorTipo } from '@/types/database'
 
 type Pedido = Database['public']['Tables']['pedidos']['Row']
@@ -40,6 +42,8 @@ export function PedidoDetalheModal({
   >([])
   const [telefoneInput, setTelefoneInput] = useState('')
   const [contatoInput, setContatoInput] = useState('')
+  const [cnpjInput, setCnpjInput] = useState('')
+  const [freteInput, setFreteInput] = useState('')
   const [duplicando, setDuplicando] = useState(false)
   const [erroDuplicar, setErroDuplicar] = useState<string | null>(null)
   const [mensagemSucesso, setMensagemSucesso] = useState<string | null>(null)
@@ -88,6 +92,12 @@ export function PedidoDetalheModal({
       setItens(itensData ?? [])
       setTelefoneInput(pedidoData?.cliente_telefone ?? '')
       setContatoInput(pedidoData?.cliente_contato ?? '')
+      setCnpjInput(pedidoData?.cliente_cnpj ?? '')
+      setFreteInput(
+        pedidoData?.valor_frete !== undefined && pedidoData?.valor_frete !== null
+          ? String(pedidoData.valor_frete)
+          : '0',
+      )
       setCarregando(false)
     }
 
@@ -181,15 +191,39 @@ export function PedidoDetalheModal({
     if (!error) setPedido({ ...pedido, data_entrega_real: novaData })
   }
 
-  async function salvarDadosCliente(campo: 'cliente_telefone' | 'cliente_contato', valor: string) {
+  async function salvarDadosCliente(
+    campo: 'cliente_telefone' | 'cliente_contato' | 'cliente_cnpj',
+    valor: string,
+  ) {
     if (!pedido) return
     const novoValor = valor.trim() || null
-    const atualizacao =
-      campo === 'cliente_telefone'
-        ? { cliente_telefone: novoValor }
-        : { cliente_contato: novoValor }
+    const atualizacao: Partial<Pedido> = { [campo]: novoValor }
     const { error } = await supabase.from('pedidos').update(atualizacao).eq('id', pedido.id)
     if (!error) setPedido({ ...pedido, ...atualizacao })
+  }
+
+  async function salvarFrete(valor: string) {
+    if (!pedido) return
+    const numero = valor.trim() === '' ? 0 : Number(valor)
+    if (!Number.isFinite(numero) || numero < 0) return
+    const { error } = await supabase
+      .from('pedidos')
+      .update({ valor_frete: numero })
+      .eq('id', pedido.id)
+    if (!error) {
+      setPedido({ ...pedido, valor_frete: numero })
+      setFreteInput(String(numero))
+    }
+  }
+
+  async function salvarModoFaturamento(valor: string) {
+    if (!pedido) return
+    const novoValor = valor || null
+    const { error } = await supabase
+      .from('pedidos')
+      .update({ modo_faturamento: novoValor })
+      .eq('id', pedido.id)
+    if (!error) setPedido({ ...pedido, modo_faturamento: novoValor })
   }
 
   async function duplicarPedido() {
@@ -248,6 +282,33 @@ export function PedidoDetalheModal({
       open={pedidoId !== null}
       onClose={onClose}
       title={pedido ? `Pedido #${pedido.numero}` : 'Pedido'}
+      titleExtra={
+        pedido && (pedido.orcamento_direto || pedido.omie_orcamento_id !== null) ? (
+          <span className="flex items-center gap-2">
+            {pedido.orcamento_direto && (
+              <span
+                title="Orçamento direto — sem cotação do Compras"
+                className="inline-flex items-center rounded-full border border-accent-compras/40 bg-accent-compras/15 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-accent-compras"
+              >
+                Direto
+              </span>
+            )}
+            {pedido.omie_orcamento_id !== null && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-accent-primary/40 bg-accent-primary/10 px-2 py-0.5 font-mono text-xs font-semibold text-accent-primary">
+                Omie #{pedido.omie_orcamento_id}
+              </span>
+            )}
+            {pedido.omie_convertido_pedido && (
+              <span
+                title="Já convertido em Pedido de Venda no Omie"
+                className="inline-flex items-center gap-1 rounded-full border border-accent-success/40 bg-accent-success/15 px-2 py-0.5 text-xs font-semibold text-accent-success"
+              >
+                Convertido em Pedido de Venda ✓
+              </span>
+            )}
+          </span>
+        ) : undefined
+      }
       widthClassName="max-w-5xl"
     >
       {carregando || !pedido ? (
@@ -382,8 +443,64 @@ export function PedidoDetalheModal({
                 </dd>
               </div>
               <div>
+                <dt className="text-muted">CNPJ do cliente</dt>
+                <dd className="font-medium text-primary">
+                  {podeEditarDadosCliente ? (
+                    <input
+                      type="text"
+                      value={cnpjInput}
+                      onChange={(e) => setCnpjInput(e.target.value)}
+                      onBlur={() => salvarDadosCliente('cliente_cnpj', cnpjInput)}
+                      placeholder="00.000.000/0000-00"
+                      className="input-field mt-0.5 w-full rounded-md px-2 py-1 font-mono text-sm"
+                    />
+                  ) : (
+                    (pedido.cliente_cnpj ?? '—')
+                  )}
+                </dd>
+              </div>
+              <div>
                 <dt className="text-muted">Status</dt>
                 <dd className="font-medium text-primary">{STATUS_LABELS[pedido.status]}</dd>
+              </div>
+              <div>
+                <dt className="text-muted">Frete</dt>
+                <dd className="font-medium text-primary">
+                  {podeEditarDadosCliente ? (
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={freteInput}
+                      onChange={(e) => setFreteInput(e.target.value)}
+                      onBlur={() => salvarFrete(freteInput)}
+                      className="input-field mt-0.5 w-full rounded-md px-2 py-1 font-mono text-sm"
+                    />
+                  ) : (
+                    formatarMoeda(pedido.valor_frete)
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted">Modo de faturamento</dt>
+                <dd className="font-medium text-primary">
+                  {podeEditarDadosCliente ? (
+                    <select
+                      value={pedido.modo_faturamento ?? ''}
+                      onChange={(e) => salvarModoFaturamento(e.target.value)}
+                      className="input-field mt-0.5 w-full rounded-md px-2 py-1 text-sm"
+                    >
+                      <option value="">—</option>
+                      {MODO_FATURAMENTO_OPCOES.map((opcao) => (
+                        <option key={opcao} value={opcao}>
+                          {opcao}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    (pedido.modo_faturamento ?? '—')
+                  )}
+                </dd>
               </div>
               <div>
                 <dt className="text-muted">Última movimentação</dt>
@@ -430,6 +547,8 @@ export function PedidoDetalheModal({
             </dl>
           )}
 
+          {aba === 'dados' && <OrcamentoPdfButton pedido={pedido} itens={itens} setor={setor} />}
+
           {aba === 'dados' && (
             <OmieOrcamentoSection
               pedido={pedido}
@@ -437,6 +556,14 @@ export function PedidoDetalheModal({
               setor={setor}
               onPedidoAtualizado={setPedido}
               onItemAtualizado={handleItemAtualizado}
+            />
+          )}
+
+          {aba === 'dados' && (
+            <ConverterPedidoVendaSection
+              pedido={pedido}
+              setor={setor}
+              onPedidoAtualizado={setPedido}
             />
           )}
 

@@ -55,6 +55,61 @@ function formatarDataOmie(data: Date): string {
   return `${dia}/${mes}/${data.getFullYear()}`
 }
 
+// A resposta de ConsultarPedido devolve, dentro de cabecalho e de cada
+// det.ide, campos calculados/de auditoria (numero_pedido, sequencial,
+// codigo_item, etc.) que a própria documentação do Omie marca como
+// "preenchimento automático - não informar" — só que, diferente de
+// total_pedido/infoCadastro/exportacao (que ficam fora desses blocos e por
+// isso é fácil não reenviar), esses ficam misturados com campos válidos
+// dentro de cabecalho/ide. Reenviá-los faz o AlterarPedidoVenda rejeitar a
+// chamada inteira (ex: "A tag [numero_pedido] não deve ser enviada na
+// alteração!"). Allowlist explícita em vez de excluir campo por campo — mais
+// seguro contra campos novos que a Omie venha a adicionar no futuro.
+const CABECALHO_CAMPOS_ENTRADA = [
+  'codigo_pedido',
+  'codigo_pedido_integracao',
+  'codigo_cliente',
+  'codigo_cliente_integracao',
+  'data_previsao',
+  'etapa',
+  'codigo_parcela',
+  'qtde_parcelas',
+  'codigo_cenario_impostos',
+  'tipo_desconto_pedido',
+  'perc_desconto_pedido',
+  'valor_desconto_pedido',
+  'nao_gerar_boleto',
+] as const
+
+const IDE_CAMPOS_ENTRADA = ['codigo_item_integracao', 'simples_nacional', 'acao_item'] as const
+
+function filtrarCamposEntrada(
+  origem: Record<string, unknown>,
+  campos: readonly string[],
+): Record<string, unknown> {
+  const filtrado: Record<string, unknown> = {}
+  for (const campo of campos) {
+    if (origem[campo] !== undefined) filtrado[campo] = origem[campo]
+  }
+  return filtrado
+}
+
+// Mesma lógica para cada item de "det": mantém ide/produto/observacao/inf_adic
+// (campos de entrada válidos), descarta os campos calculados de "ide", e
+// nunca reenvia o bloco "imposto" — a própria documentação recomenda omiti-lo
+// para o Omie recalcular os impostos, em vez de travar valores computados
+// numa consulta anterior (que aqui vieram todos zerados, por ser um orçamento
+// simples sem cenário fiscal definido).
+function filtrarItemEntrada(item: Record<string, unknown>): Record<string, unknown> {
+  const filtrado: Record<string, unknown> = {}
+  const ide = item.ide as Record<string, unknown> | undefined
+  if (ide) filtrado.ide = filtrarCamposEntrada(ide, IDE_CAMPOS_ENTRADA)
+  if (item.produto) filtrado.produto = item.produto
+  if (item.observacao) filtrado.observacao = item.observacao
+  if (item.inf_adic) filtrado.inf_adic = item.inf_adic
+  return filtrado
+}
+
 // Cache simples em memória do processo — evita chamar ListarCategorias a cada
 // orçamento gerado. Sem TTL: a categoria financeira padrão da conta Omie não
 // muda com frequência: reiniciar o servidor já é o suficiente para renovar.
@@ -300,6 +355,227 @@ export async function POST(request: Request) {
       }
 
       return NextResponse.json({ codigoPedido })
+    }
+
+    if (body.acao === 'converter_pedido_venda') {
+      const pedidoId = typeof body.pedidoId === 'string' ? body.pedidoId : null
+      if (!pedidoId) {
+        return NextResponse.json({ erro: 'Pedido não informado.' }, { status: 400 })
+      }
+
+      const condicao = body.condicaoPagamento as
+        | { tipo: 'a_vista'; dataVencimento?: unknown }
+        | { tipo: 'parcelado'; numeroParcelas?: unknown; intervaloDias?: unknown }
+        | undefined
+      if (!condicao || (condicao.tipo !== 'a_vista' && condicao.tipo !== 'parcelado')) {
+        return NextResponse.json({ erro: 'Condição de pagamento inválida.' }, { status: 400 })
+      }
+
+      const { data: pedido, error: erroPedido } = await supabase
+        .from('pedidos')
+        .select('*')
+        .eq('id', pedidoId)
+        .single()
+
+      if (erroPedido || !pedido) {
+        return NextResponse.json({ erro: 'Pedido não encontrado.' }, { status: 404 })
+      }
+      if (pedido.status !== 'APROVADO_CLIENTE') {
+        return NextResponse.json(
+          { erro: 'O pedido precisa estar em PEDIDO APROVADO para ser convertido em Pedido de Venda.' },
+          { status: 409 },
+        )
+      }
+      if (pedido.omie_orcamento_id === null) {
+        return NextResponse.json(
+          { erro: 'Este pedido ainda não tem um orçamento gerado no Omie.' },
+          { status: 409 },
+        )
+      }
+      if (pedido.omie_convertido_pedido) {
+        return NextResponse.json(
+          { erro: 'Este pedido já foi convertido em Pedido de Venda.' },
+          { status: 409 },
+        )
+      }
+      // O Omie aceita codigo_cliente = 0 ("sem vincular cliente") ao criar um
+      // orçamento, mas exige um cliente real ao converter em Pedido de Venda
+      // (fault "O preenchimento das tags [codigo_cliente] ou
+      // [codigo_cliente_integracao] é obrigatório!"). O client já deve
+      // vincular um cliente antes de chegar aqui — checagem de defesa.
+      if (pedido.cliente_omie_id === null) {
+        return NextResponse.json(
+          {
+            erro:
+              'Este pedido precisa estar vinculado a um cliente cadastrado no Omie antes de virar Pedido de Venda.',
+          },
+          { status: 409 },
+        )
+      }
+
+      // Monta o esqueleto das parcelas (percentual + prazo) a partir da
+      // condição de pagamento escolhida manualmente pelo comercial nesta
+      // conversão — nunca um padrão fixo. O valor em R$ de cada parcela só dá
+      // pra calcular depois de saber o total do pedido (mais abaixo).
+      const hoje = new Date()
+      hoje.setHours(0, 0, 0, 0)
+
+      let parcelasBase: { numero_parcela: number; percentual: number; quantidade_dias: number }[]
+      if (condicao.tipo === 'a_vista') {
+        const dataVencimento =
+          typeof condicao.dataVencimento === 'string' ? condicao.dataVencimento : ''
+        if (!dataVencimento) {
+          return NextResponse.json({ erro: 'Informe a data de vencimento.' }, { status: 400 })
+        }
+        const vencimento = new Date(`${dataVencimento}T00:00:00`)
+        if (Number.isNaN(vencimento.getTime())) {
+          return NextResponse.json({ erro: 'Data de vencimento inválida.' }, { status: 400 })
+        }
+        const dias = Math.max(0, Math.round((vencimento.getTime() - hoje.getTime()) / 86400000))
+        parcelasBase = [{ numero_parcela: 1, percentual: 100, quantidade_dias: dias }]
+      } else {
+        const numeroParcelas = Number(condicao.numeroParcelas)
+        const intervaloDias = Number(condicao.intervaloDias)
+        if (!Number.isFinite(numeroParcelas) || numeroParcelas < 2 || numeroParcelas > 999) {
+          return NextResponse.json({ erro: 'Número de parcelas inválido.' }, { status: 400 })
+        }
+        if (!Number.isFinite(intervaloDias) || intervaloDias <= 0) {
+          return NextResponse.json(
+            { erro: 'Informe um intervalo em dias maior que zero entre as parcelas.' },
+            { status: 400 },
+          )
+        }
+        // Divide o percentual igualmente entre as parcelas, jogando o
+        // arredondamento (centavos) inteiro pra última — garante que a soma
+        // bate exatamente 100%, como o Omie exige.
+        const percentualBase = Math.floor((100 / numeroParcelas) * 100) / 100
+        parcelasBase = Array.from({ length: numeroParcelas }, (_, i) => ({
+          numero_parcela: i + 1,
+          percentual:
+            i === numeroParcelas - 1
+              ? Math.round((100 - percentualBase * (numeroParcelas - 1)) * 100) / 100
+              : percentualBase,
+          quantidade_dias: intervaloDias * (i + 1),
+        }))
+      }
+
+      // Busca o pedido como está hoje no Omie — preserva qualquer edição feita
+      // manualmente lá (endereço, frete, itens) em vez de reconstruir tudo do
+      // zero a partir do nosso banco, que poderia estar desatualizado.
+      const atual = await chamarOmie(OMIE_PEDIDO_URL, 'ConsultarPedido', {
+        codigo_pedido: pedido.omie_orcamento_id,
+      })
+      const pedidoOmie = atual.pedido_venda_produto as Record<string, unknown> | undefined
+      if (!pedidoOmie || !pedidoOmie.cabecalho || !pedidoOmie.det) {
+        return NextResponse.json(
+          { erro: 'Não foi possível consultar o pedido no Omie antes de convertê-lo.' },
+          { status: 502 },
+        )
+      }
+
+      // total_pedido é "preenchimento automático - não informar" (não
+      // reenviamos), mas soma quantidade × valor_unitário de cada item dá o
+      // mesmo valor e serve pra calcular o "valor" (R$) de cada parcela —
+      // campo obrigatório em "parcela", separado do "percentual".
+      const totalPedido = (pedidoOmie.det as Record<string, unknown>[]).reduce((soma, item) => {
+        const produto = item.produto as Record<string, unknown> | undefined
+        const quantidade = Number(produto?.quantidade ?? 0)
+        const valorUnitario = Number(produto?.valor_unitario ?? 0)
+        return soma + quantidade * valorUnitario
+      }, 0)
+      if (!(totalPedido > 0)) {
+        return NextResponse.json(
+          { erro: 'Não foi possível calcular o valor total do pedido para montar as parcelas.' },
+          { status: 502 },
+        )
+      }
+
+      // Completa cada parcela com "valor" (R$) e "data_vencimento" — os dois
+      // também obrigatórios e ausentes até aqui. O valor é derivado do
+      // percentual, com o arredondamento (centavos) jogado pra última parcela
+      // pra bater exatamente o total, em vez de acumular diferença de centavos.
+      let valorAcumulado = 0
+      const parcelas = parcelasBase.map((p, i) => {
+        const vencimento = new Date(hoje)
+        vencimento.setDate(vencimento.getDate() + p.quantidade_dias)
+        const ehUltima = i === parcelasBase.length - 1
+        const valor = ehUltima
+          ? Math.round((totalPedido - valorAcumulado) * 100) / 100
+          : Math.round(((totalPedido * p.percentual) / 100) * 100) / 100
+        valorAcumulado += valor
+        return { ...p, valor, data_vencimento: formatarDataOmie(vencimento) }
+      })
+
+      const codigoCategoria = await obterCategoriaReceitaPadrao()
+      const contaCorrente = await obterContaCorrentePadrao()
+
+      // Só os campos de ENTRADA aceitos por AlterarPedidoVenda — nunca reenviar
+      // os blocos que o próprio Omie devolve como calculados/de auditoria na
+      // consulta (total_pedido, infoCadastro, exportacao): a documentação do
+      // Omie marca esses como "preenchimento automático - não informar", e
+      // reenviá-los arriscaria corromper o pedido.
+      const detEntrada = Array.isArray(pedidoOmie.det)
+        ? pedidoOmie.det.map((item) => filtrarItemEntrada(item as Record<string, unknown>))
+        : pedidoOmie.det
+
+      const payload: Record<string, unknown> = {
+        cabecalho: {
+          ...filtrarCamposEntrada(
+            pedidoOmie.cabecalho as Record<string, unknown>,
+            CABECALHO_CAMPOS_ENTRADA,
+          ),
+          // "10" = "Pedido de Venda" nesta conta — confirmado via
+          // ListarEtapasFaturamento (operação "Venda de Produto"), não assumido.
+          etapa: '10',
+          codigo_parcela: '999',
+          qtde_parcelas: parcelas.length,
+          // Sempre a partir do nosso banco, nunca do que o Omie devolveu na
+          // consulta: se o orçamento foi gerado sem vincular cliente,
+          // codigo_cliente volta como 0 e a conversão falha (ver checagem
+          // acima). Como cliente_omie_id já foi validado como não-nulo, este
+          // é sempre um código de cliente real.
+          codigo_cliente: pedido.cliente_omie_id,
+        },
+        det: detEntrada,
+        informacoes_adicionais: {
+          ...(pedidoOmie.informacoes_adicionais as Record<string, unknown>),
+          codigo_categoria: codigoCategoria,
+          codigo_conta_corrente: contaCorrente.codigo,
+          // codVend (vendedor) e codProj (projeto) são referências opcionais
+          // a cadastros que podem ter sido desativados desde que o orçamento
+          // foi criado — confirmado ao vivo com "O vendedor está inativo!
+          // - tag: [codVend]" ao reenviar o codVend antigo do pedido. Omitir
+          // (undefined some do JSON.stringify) em vez de arriscar reenviar
+          // uma referência que virou inválida.
+          codVend: undefined,
+          codProj: undefined,
+        },
+        lista_parcelas: { parcela: parcelas },
+      }
+      if (pedidoOmie.frete) payload.frete = pedidoOmie.frete
+      if (Array.isArray(pedidoOmie.departamentos) && pedidoOmie.departamentos.length > 0) {
+        payload.departamentos = pedidoOmie.departamentos
+      }
+      if (pedidoOmie.observacoes) payload.observacoes = pedidoOmie.observacoes
+
+      await chamarOmie(OMIE_PEDIDO_URL, 'AlterarPedidoVenda', payload)
+
+      const { error: erroUpdate } = await supabase
+        .from('pedidos')
+        .update({ omie_convertido_pedido: true })
+        .eq('id', pedidoId)
+
+      if (erroUpdate) {
+        return NextResponse.json(
+          {
+            erro:
+              'O pedido foi convertido no Omie, mas houve um erro ao atualizar o status no CRM. Recarregue a página para conferir.',
+          },
+          { status: 500 },
+        )
+      }
+
+      return NextResponse.json({ ok: true })
     }
 
     return NextResponse.json({ erro: 'Ação inválida.' }, { status: 400 })

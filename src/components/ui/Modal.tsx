@@ -6,12 +6,14 @@ export function Modal({
   open,
   onClose,
   title,
+  titleExtra,
   children,
   widthClassName = 'max-w-lg',
 }: {
   open: boolean
   onClose: () => void
   title: string
+  titleExtra?: ReactNode
   children: ReactNode
   widthClassName?: string
 }) {
@@ -43,9 +45,12 @@ export function Modal({
           style={{ backgroundColor: 'var(--bg-surface)' }}
           className="flex shrink-0 items-center justify-between border-b border-white/10 bg-surface px-5 py-4"
         >
-          <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">
-            {title}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">
+              {title}
+            </h2>
+            {titleExtra}
+          </div>
           <button
             onClick={onClose}
             aria-label="Fechar"
