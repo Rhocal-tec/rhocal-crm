@@ -64,6 +64,13 @@ const styles = StyleSheet.create({
   colQtd: { flex: 0.7, textAlign: 'right' },
   colUnit: { flex: 1.1, textAlign: 'right' },
   colSubtotal: { flex: 1.1, textAlign: 'right' },
+  observacaoLinha: {
+    paddingHorizontal: 4,
+    paddingBottom: 5,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#dddddd',
+  },
+  observacaoTexto: { fontSize: 7.5, color: '#666666', fontFamily: 'Helvetica-Oblique' },
   freteLinha: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -185,17 +192,31 @@ export function OrcamentoPdfDocument({
         {itens.map((item, index) => {
           const precoUnit = Number(item.preco_venda ?? 0)
           const subtotal = precoUnit * Number(item.quantidade)
+          const observacao = item.observacao?.trim()
+          const estiloAlt = index % 2 === 1 ? styles.tabelaRowAlt : {}
           return (
-            <View
-              key={item.id}
-              style={index % 2 === 1 ? [styles.tabelaRow, styles.tabelaRowAlt] : styles.tabelaRow}
-            >
-              <Text style={[styles.celTexto, styles.colDescricao]}>{item.descricao}</Text>
-              <Text style={[styles.celTexto, styles.colCa]}>{item.ca || '—'}</Text>
-              <Text style={[styles.celTexto, styles.colDetalhes]}>{combinarDetalhes(item) || '—'}</Text>
-              <Text style={[styles.celTexto, styles.colQtd]}>{item.quantidade}</Text>
-              <Text style={[styles.celTexto, styles.colUnit]}>{formatarMoeda(precoUnit)}</Text>
-              <Text style={[styles.celTexto, styles.colSubtotal]}>{formatarMoeda(subtotal)}</Text>
+            <View key={item.id}>
+              <View
+                style={[
+                  styles.tabelaRow,
+                  estiloAlt,
+                  observacao ? { borderBottomWidth: 0 } : {},
+                ]}
+              >
+                <Text style={[styles.celTexto, styles.colDescricao]}>{item.descricao}</Text>
+                <Text style={[styles.celTexto, styles.colCa]}>{item.ca || '—'}</Text>
+                <Text style={[styles.celTexto, styles.colDetalhes]}>
+                  {combinarDetalhes(item) || '—'}
+                </Text>
+                <Text style={[styles.celTexto, styles.colQtd]}>{item.quantidade}</Text>
+                <Text style={[styles.celTexto, styles.colUnit]}>{formatarMoeda(precoUnit)}</Text>
+                <Text style={[styles.celTexto, styles.colSubtotal]}>{formatarMoeda(subtotal)}</Text>
+              </View>
+              {observacao && (
+                <View style={[styles.observacaoLinha, estiloAlt]}>
+                  <Text style={styles.observacaoTexto}>Obs.: {observacao}</Text>
+                </View>
+              )}
             </View>
           )
         })}

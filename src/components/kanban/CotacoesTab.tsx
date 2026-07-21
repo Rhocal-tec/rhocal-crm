@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { MoedaInput } from '@/components/ui/MoedaInput'
 import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
 import { cotacaoVencida } from '@/lib/kanban/cotacao-vencida'
 import type { Database } from '@/types/database'
@@ -58,10 +59,10 @@ export function CotacoesTab({
   const [cotacoesPorItem, setCotacoesPorItem] = useState<Record<string, Cotacao[]>>({})
   const [historicoPorCa, setHistoricoPorCa] = useState<Record<string, HistoricoCA[]>>({})
   const [custoFinalPorItem, setCustoFinalPorItem] = useState<Record<string, string>>({})
-  // Enquanto o campo está focado, mostra o número puro e editável; ao perder o
-  // foco, mostra formatado como moeda (mesmo padrão de formatarMoeda usado no
-  // total do pedido e no preço de venda de cada item).
-  const [editandoCustoFinal, setEditandoCustoFinal] = useState<Record<string, boolean>>({})
+  // Preço de cada cotação já cadastrada, editável a qualquer momento (fase
+  // 22.2) — mesmo padrão de moeda usado no custo final, mantido em um estado
+  // à parte por cotação (chave = id da cotação, não do item).
+  const [precoCotacaoInput, setPrecoCotacaoInput] = useState<Record<string, string>>({})
   const [formularios, setFormularios] = useState<Record<string, NovaCotacaoForm>>({})
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
@@ -108,6 +109,9 @@ export function CotacoesTab({
 
       if (error) console.error('Erro ao carregar cotações:', error.message)
       setCotacoesPorItem(agrupado)
+      setPrecoCotacaoInput(
+        Object.fromEntries((data ?? []).map((cotacao) => [cotacao.id, cotacao.preco.toString()])),
+      )
 
       // Sugestão automática por CA: busca o histórico de compras/cotações
       // anteriores para os CAs presentes neste pedido, excluindo o próprio
@@ -246,7 +250,45 @@ export function CotacoesTab({
       ...atual,
       [itemId]: [...(atual[itemId] ?? []), data],
     }))
+    setPrecoCotacaoInput((atual) => ({ ...atual, [data.id]: data.preco.toString() }))
     setFormularios((atual) => ({ ...atual, [itemId]: formVazio() }))
+  }
+
+  // Atualiza a cotação já salva na tela (otimista) enquanto o usuário digita.
+  function atualizarCotacaoLocal(itemId: string, cotacaoId: string, patch: Partial<Cotacao>) {
+    setCotacoesPorItem((atual) => ({
+      ...atual,
+      [itemId]: (atual[itemId] ?? []).map((c) => (c.id === cotacaoId ? { ...c, ...patch } : c)),
+    }))
+  }
+
+  // Cotações continuam totalmente editáveis por compras/gestor a qualquer
+  // momento, independente do status atual do pedido (fase 22.2) — nenhuma
+  // condição de status bloqueia esta função.
+  async function salvarCotacao(itemId: string, cotacaoId: string, patch: Partial<Cotacao>) {
+    setErro(null)
+    const { error } = await supabase.from('cotacoes').update(patch).eq('id', cotacaoId)
+    if (error) {
+      setErro('Não foi possível salvar a alteração da cotação.')
+      return
+    }
+
+    // Se o preço editado é o da cotação vencedora, mantém o custo final do
+    // item sincronizado com o novo valor.
+    if (patch.preco !== undefined) {
+      const cotacaoAtual = (cotacoesPorItem[itemId] ?? []).find((c) => c.id === cotacaoId)
+      if (cotacaoAtual?.vencedora) {
+        const { error: erroCusto } = await supabase
+          .from('pedido_itens')
+          .update({ custo_final: patch.preco })
+          .eq('id', itemId)
+        if (erroCusto) {
+          setErro('Preço da cotação salvo, mas houve erro ao atualizar o custo final.')
+          return
+        }
+        setCustoFinalPorItem((atual) => ({ ...atual, [itemId]: String(patch.preco) }))
+      }
+    }
   }
 
   async function marcarVencedora(itemId: string, cotacaoId: string, preco: number) {
@@ -357,28 +399,12 @@ export function CotacoesTab({
 
             <div className="mt-3 flex items-center gap-2">
               <label className="text-sm text-muted">Custo final:</label>
-              <input
-                type={editandoCustoFinal[item.id] ? 'number' : 'text'}
-                step="any"
-                min="0"
-                value={
-                  editandoCustoFinal[item.id]
-                    ? (custoFinalPorItem[item.id] ?? '')
-                    : custoFinalPorItem[item.id]
-                      ? formatarMoeda(Number(custoFinalPorItem[item.id]))
-                      : ''
+              <MoedaInput
+                value={custoFinalPorItem[item.id] ?? ''}
+                onChange={(valor) =>
+                  setCustoFinalPorItem((atual) => ({ ...atual, [item.id]: valor }))
                 }
-                onFocus={() =>
-                  setEditandoCustoFinal((atual) => ({ ...atual, [item.id]: true }))
-                }
-                onChange={(e) =>
-                  setCustoFinalPorItem((atual) => ({ ...atual, [item.id]: e.target.value }))
-                }
-                onBlur={(e) => {
-                  salvarCustoFinal(item.id, e.target.value)
-                  setEditandoCustoFinal((atual) => ({ ...atual, [item.id]: false }))
-                }}
-                placeholder="R$ —"
+                onBlurSalvar={(valor) => salvarCustoFinal(item.id, valor)}
                 className="input-field w-32 rounded-md px-2 py-1 font-mono text-sm"
               />
             </div>
@@ -407,35 +433,118 @@ export function CotacoesTab({
                       }`}
                     >
                       <td
-                        className={`py-1.5 pr-2 text-primary ${
+                        className={`py-1.5 pr-2 ${
                           cotacao.vencedora
-                            ? 'border-l-4 border-accent-success pl-2 font-semibold'
+                            ? 'border-l-4 border-accent-success pl-2'
                             : 'pl-3'
                         }`}
                       >
-                        {cotacao.fornecedor}
-                      </td>
-                      <td className="py-1.5 pr-2 font-mono text-primary">
-                        {formatarMoeda(cotacao.preco)}
-                      </td>
-                      <td className="py-1.5 pr-2 text-primary">
-                        {formatarDataSomente(cotacao.data_cotacao)}
+                        <input
+                          type="text"
+                          value={cotacao.fornecedor}
+                          onChange={(e) =>
+                            atualizarCotacaoLocal(item.id, cotacao.id, {
+                              fornecedor: e.target.value,
+                            })
+                          }
+                          onBlur={(e) =>
+                            salvarCotacao(item.id, cotacao.id, {
+                              fornecedor: e.target.value.trim(),
+                            })
+                          }
+                          className={`input-field w-full rounded-md px-1.5 py-1 text-sm ${
+                            cotacao.vencedora ? 'font-semibold' : ''
+                          }`}
+                        />
                       </td>
                       <td className="py-1.5 pr-2">
-                        <span className={vencida ? 'text-accent-danger' : 'text-primary'}>
-                          {formatarDataSomente(cotacao.validade_cotacao)}
-                        </span>
+                        <MoedaInput
+                          value={precoCotacaoInput[cotacao.id] ?? cotacao.preco.toString()}
+                          onChange={(valor) =>
+                            setPrecoCotacaoInput((atual) => ({ ...atual, [cotacao.id]: valor }))
+                          }
+                          onBlurSalvar={(valor) => {
+                            const numero = Number(valor)
+                            if (!Number.isFinite(numero) || numero <= 0) return
+                            atualizarCotacaoLocal(item.id, cotacao.id, { preco: numero })
+                            salvarCotacao(item.id, cotacao.id, { preco: numero })
+                          }}
+                          className="input-field w-24 rounded-md px-1.5 py-1 font-mono text-sm"
+                        />
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        <input
+                          type="date"
+                          value={cotacao.data_cotacao}
+                          onChange={(e) =>
+                            atualizarCotacaoLocal(item.id, cotacao.id, {
+                              data_cotacao: e.target.value,
+                            })
+                          }
+                          onBlur={(e) =>
+                            salvarCotacao(item.id, cotacao.id, { data_cotacao: e.target.value })
+                          }
+                          className="input-field w-full min-w-[130px] rounded-md px-1.5 py-1 text-sm"
+                        />
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        <input
+                          type="date"
+                          value={cotacao.validade_cotacao}
+                          onChange={(e) =>
+                            atualizarCotacaoLocal(item.id, cotacao.id, {
+                              validade_cotacao: e.target.value,
+                            })
+                          }
+                          onBlur={(e) =>
+                            salvarCotacao(item.id, cotacao.id, {
+                              validade_cotacao: e.target.value,
+                            })
+                          }
+                          className={`input-field w-full min-w-[130px] rounded-md px-1.5 py-1 text-sm ${
+                            vencida ? 'border-accent-danger/50 text-accent-danger' : ''
+                          }`}
+                        />
                         {vencida && (
                           <span className="ml-1.5 inline-flex items-center rounded-full border border-accent-danger/40 bg-accent-danger/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-danger">
                             Vencida
                           </span>
                         )}
                       </td>
-                      <td className="py-1.5 pr-2 text-primary">
-                        {cotacao.empresa_faturou ?? '—'}
+                      <td className="py-1.5 pr-2">
+                        <input
+                          type="text"
+                          value={cotacao.empresa_faturou ?? ''}
+                          onChange={(e) =>
+                            atualizarCotacaoLocal(item.id, cotacao.id, {
+                              empresa_faturou: e.target.value,
+                            })
+                          }
+                          onBlur={(e) =>
+                            salvarCotacao(item.id, cotacao.id, {
+                              empresa_faturou: e.target.value.trim() || null,
+                            })
+                          }
+                          placeholder="—"
+                          className="input-field w-full rounded-md px-1.5 py-1 text-sm"
+                        />
                       </td>
-                      <td className="py-1.5 pr-2 text-primary">
-                        {formatarDataSomente(cotacao.previsao_chegada)}
+                      <td className="py-1.5 pr-2">
+                        <input
+                          type="date"
+                          value={cotacao.previsao_chegada ?? ''}
+                          onChange={(e) =>
+                            atualizarCotacaoLocal(item.id, cotacao.id, {
+                              previsao_chegada: e.target.value || null,
+                            })
+                          }
+                          onBlur={(e) =>
+                            salvarCotacao(item.id, cotacao.id, {
+                              previsao_chegada: e.target.value || null,
+                            })
+                          }
+                          className="input-field w-full min-w-[130px] rounded-md px-1.5 py-1 text-sm"
+                        />
                       </td>
                       <td className="py-1.5">
                         {cotacao.vencedora ? (

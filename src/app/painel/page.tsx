@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { createClient } from '@/lib/supabase/client'
 import { AppHeader } from '@/components/layout/AppHeader'
+import { ErrosRecentesSection } from '@/components/painel/ErrosRecentesSection'
 import { FiltroPeriodo } from '@/components/painel/FiltroPeriodo'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
 import { KANBAN_COLUMNS, STATUS_LABELS, STATUS_STRIPE_VAR } from '@/lib/kanban/status'
@@ -362,6 +363,8 @@ export default function PainelPage() {
         </div>
 
         {carregando && <p className="mt-4 text-sm text-muted">Atualizando dados…</p>}
+
+        <ErrosRecentesSection />
       </main>
     </div>
   )

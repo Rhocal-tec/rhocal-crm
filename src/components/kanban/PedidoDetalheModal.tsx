@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { Modal } from '@/components/ui/Modal'
+import { MoedaInput } from '@/components/ui/MoedaInput'
 import { MODO_FATURAMENTO_OPCOES, STATUS_LABELS } from '@/lib/kanban/status'
 import { formatarDataSomente, formatarMoeda, formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { cotacaoVencida } from '@/lib/kanban/cotacao-vencida'
@@ -467,13 +468,10 @@ export function PedidoDetalheModal({
                 <dt className="text-muted">Frete</dt>
                 <dd className="font-medium text-primary">
                   {podeEditarDadosCliente ? (
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
+                    <MoedaInput
                       value={freteInput}
-                      onChange={(e) => setFreteInput(e.target.value)}
-                      onBlur={() => salvarFrete(freteInput)}
+                      onChange={setFreteInput}
+                      onBlurSalvar={salvarFrete}
                       className="input-field mt-0.5 w-full rounded-md px-2 py-1 font-mono text-sm"
                     />
                   ) : (

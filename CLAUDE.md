@@ -526,3 +526,75 @@ Telefone: (11) 4161-6675
 - Rodapé/assinatura: nome do vendedor (comercial que criou o pedido, criado_por via join com profiles), data e hora de emissão do documento, e o texto de validade ("Orçamento válido por 7 dias a partir da data de emissão")
 
 **Geração:** botão "Baixar PDF do Orçamento" no modal do pedido (aba Dados), disponível para comercial e gestor, habilitado quando todos os itens tiverem preco_venda preenchido — independente do pedido já ter ou não omie_orcamento_id. Gerar client-side (@react-pdf/renderer ou jsPDF), sem depender de serviço externo.
+
+## Fase 22 — Ajustes de precificação e edição pós-cotação
+
+**22.1 — Frete em formato de moeda brasileira**
+O campo "Frete" (aba Dados, pedidos.valor_frete) deve usar máscara/formatação de moeda brasileira (R$ 0.000,00) tanto na digitação quanto na exibição — mesmo padrão já usado em custo final e preço de venda.
+
+**22.2 — Cotação continua editável após concluída**
+Os campos de cotação (fornecedor, preço, data, validade, previsão de chegada, custo final) na aba Cotações continuam totalmente editáveis por compras/gestor independente do status atual do pedido — mesmo depois que o pedido já saiu de EM_COTACAO e avançou para PEDIDO_COTADO, APROVADO_CLIENTE ou além. Nunca bloquear edição por causa do status do pedido ter avançado. Alterações continuam sendo auditadas normalmente pelos triggers já existentes.
+
+**22.3 — Margem substituída por preço de venda direto**
+Remover o campo de margem percentual (margem_pct) da interface do comercial/gestor. Em seu lugar, um campo "Preço de venda" por item, onde o comercial digita diretamente o valor final em reais (sem cálculo automático de margem sobre o custo). A coluna margem_pct permanece no schema (nunca deletar coluna), apenas sem uso ativo na UI a partir de agora. O total do pedido continua sendo a soma dos preco_venda de todos os itens + frete (fase 21).
+
+**22.4 — Observação, tamanho, número e cor no PDF do orçamento**
+Confirmar/garantir que o PDF gerado (fase 21) exibe, por item: o conteúdo do campo observacao (quando preenchido) e os campos tamanho, numero e cor (quando preenchidos, combinados de forma legível) — junto com descrição, CA, quantidade e valores já especificados.
+
+## Fase 23 — Busca de CNPJ na Receita Federal (fallback quando não está no Omie)
+
+Quando o comercial digita um CNPJ na criação do pedido e ele NÃO é encontrado no Omie (fase 18.2/CNPJ), buscar automaticamente na Receita Federal via API pública BrasilAPI (https://brasilapi.com.br/api/cnpj/v1/{cnpj}, gratuita, sem necessidade de chave) como fallback:
+
+1. Se a busca no Omie falhar (cliente não encontrado), chamar a rota server-side (nova: POST /api/cnpj/consultar, que por sua vez chama a BrasilAPI) com o CNPJ digitado
+2. Se a BrasilAPI encontrar o CNPJ, preencher automaticamente: nome (razão social ou nome fantasia, o que estiver disponível), telefone (se disponível no retorno) — o cliente_omie_id permanece vazio, já que esse cliente não está cadastrado no Omie ainda
+3. Exibir um aviso discreto: "Cliente encontrado na Receita Federal, mas ainda não está cadastrado no Omie. Ele poderá ser cadastrado lá antes de gerar o orçamento." — não bloqueia a criação do pedido
+4. Se nem a BrasilAPI encontrar o CNPJ (CNPJ inválido ou inexistente), mostrar mensagem clara e deixar o preenchimento manual, sem bloquear
+5. A busca por nome parcial (fase 18.2) continua funcionando normalmente só contra o Omie — a Receita Federal só entra como fallback quando um CNPJ completo é digitado e não bate com nada no Omie
+
+## Fase 24 — Cadastrar cliente no Omie direto do CRM
+
+Quando um cliente não é encontrado no Omie (fase 23), oferecer a opção de cadastrá-lo sem sair do CRM, usando o método IncluirCliente da API do Omie.
+
+Captura de dados (ao consultar a Receita Federal, fase 23): além de nome e telefone (já usados para preencher o formulário do pedido), capturar e manter em estado temporário do formulário os demais campos retornados pela BrasilAPI necessários para o cadastro: razão social, nome fantasia, DDD e telefone separados, logradouro, número, bairro, município, UF e CEP.
+
+Fluxo:
+1. Quando o cliente não tem cliente_omie_id (não encontrado no Omie), exibir um botão "Cadastrar no Omie" próximo ao campo de cliente no formulário
+2. Ao clicar, abrir um formulário curto e pré-preenchido (com os dados da Receita Federal, quando disponíveis) para revisão/complemento: razão social, nome fantasia, CNPJ, telefone (DDD + número), endereço completo (logradouro, número, bairro, cidade, estado, CEP), e e-mail (opcional). Todos os campos editáveis antes de confirmar
+3. Ao confirmar, chamar uma rota server-side (POST /api/omie/cadastrar-cliente) que monta o payload no formato exigido pelo Omie:
+{
+  "codigo_cliente_integracao": "RHOCAL-CRM-CLI-{timestamp ou CNPJ}",
+  "razao_social": "...",
+  "nome_fantasia": "...",
+  "cnpj_cpf": "...",
+  "telefone1_ddd": "...",
+  "telefone1_numero": "...",
+  "endereco": "...",
+  "endereco_numero": "...",
+  "bairro": "...",
+  "cidade": "...",
+  "estado": "...",
+  "email": "..."
+}
+4. Se o cadastro for bem-sucedido, o Omie retorna o codigo_cliente_omie — salvar esse valor imediatamente em cliente_omie_id do pedido (ou manter em estado, se o pedido ainda não foi criado) e mostrar confirmação visual ("Cliente cadastrado no Omie com sucesso")
+5. Tratar erros da API (ex: CNPJ já cadastrado, campo obrigatório faltando) de forma amigável, seguindo o mesmo padrão já usado nos outros erros do Omie
+
+## Fase 25 — Log de erros próprio (sem depender de serviço externo)
+
+Em vez de um serviço de monitoramento terceirizado (ex: Sentry), registrar erros de rotas sensíveis direto no Supabase — mesmo padrão já usado em audit_log, sem custo e sem dependência externa.
+
+Schema:
+create table error_log (
+  id bigserial primary key,
+  rota text not null,
+  mensagem text not null,
+  pedido_id uuid references pedidos(id),
+  colaborador uuid references profiles(id),
+  data_hora timestamptz not null default now()
+);
+alter table error_log enable row level security;
+create policy "error_log leitura gestor" on error_log for select to authenticated
+  using (meu_setor() = 'gestor');
+
+Instrumentação: todas as rotas server-side sensíveis (/api/omie/*, /api/cnpj/*) devem capturar exceções em try/catch e, além de retornar a mensagem amigável já existente ao usuário, inserir um registro em error_log com a rota, a mensagem de erro (nunca incluir chaves de API ou dados sensíveis na mensagem salva), o pedido relacionado (se houver) e o colaborador logado no momento.
+
+Visualização: nova aba/seção "Erros recentes" dentro do Painel executivo (/painel, fase 14), visível somente ao gestor — lista os últimos erros registrados (rota, mensagem, data/hora, colaborador), permitindo identificar problemas sem precisar de ferramenta externa.

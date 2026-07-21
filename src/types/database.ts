@@ -235,6 +235,26 @@ export interface Database {
         Update: never
         Relationships: []
       }
+      error_log: {
+        Row: {
+          id: number
+          rota: string
+          mensagem: string
+          pedido_id: string | null
+          colaborador: string | null
+          data_hora: string
+        }
+        Insert: {
+          id?: number
+          rota: string
+          mensagem: string
+          pedido_id?: string | null
+          colaborador?: string | null
+          data_hora?: string
+        }
+        Update: never
+        Relationships: []
+      }
     }
     Views: {
       vw_historico_ca: {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { Modal } from '@/components/ui/Modal'
@@ -18,6 +18,54 @@ interface ClienteOmieSugestao {
   razaoSocial: string
   nomeFantasia: string | null
   cnpjCpf: string | null
+}
+
+// Dados capturados da Receita Federal (fase 23) que não são usados para
+// preencher o pedido diretamente, mas servem de base para pré-preencher o
+// formulário de cadastro do cliente no Omie (fase 24).
+interface DadosReceitaCadastro {
+  razaoSocial: string
+  nomeFantasia: string
+  telefoneDdd: string
+  telefoneNumero: string
+  logradouro: string
+  numero: string
+  bairro: string
+  municipio: string
+  uf: string
+  cep: string
+}
+
+interface CadastroOmieForm {
+  razaoSocial: string
+  nomeFantasia: string
+  cnpj: string
+  telefoneDdd: string
+  telefoneNumero: string
+  logradouro: string
+  enderecoNumero: string
+  bairro: string
+  cidade: string
+  estado: string
+  cep: string
+  email: string
+}
+
+function cadastroFormVazio(): CadastroOmieForm {
+  return {
+    razaoSocial: '',
+    nomeFantasia: '',
+    cnpj: '',
+    telefoneDdd: '',
+    telefoneNumero: '',
+    logradouro: '',
+    enderecoNumero: '',
+    bairro: '',
+    cidade: '',
+    estado: '',
+    cep: '',
+    email: '',
+  }
 }
 
 interface ItemForm {
@@ -71,10 +119,23 @@ export function NovoOrcamentoModal({
   const debounceClienteRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [clienteTelefone, setClienteTelefone] = useState('')
   const [clienteContato, setClienteContato] = useState('')
+  const [dadosReceita, setDadosReceita] = useState<DadosReceitaCadastro | null>(null)
+  const [cadastroOmieAberto, setCadastroOmieAberto] = useState(false)
+  const [cadastroForm, setCadastroForm] = useState<CadastroOmieForm>(cadastroFormVazio())
+  const [cadastrandoOmie, setCadastrandoOmie] = useState(false)
+  const [erroCadastroOmie, setErroCadastroOmie] = useState<string | null>(null)
+  const [sucessoCadastroOmie, setSucessoCadastroOmie] = useState<string | null>(null)
   const [orcamentoDireto, setOrcamentoDireto] = useState(false)
   const [itens, setItens] = useState<ItemForm[]>([itemVazio()])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+
+  // Some a confirmação de cadastro no Omie automaticamente após alguns segundos.
+  useEffect(() => {
+    if (!sucessoCadastroOmie) return
+    const timeout = setTimeout(() => setSucessoCadastroOmie(null), 6000)
+    return () => clearTimeout(timeout)
+  }, [sucessoCadastroOmie])
 
   function resetar() {
     setCnpj('')
@@ -88,6 +149,12 @@ export function NovoOrcamentoModal({
     if (debounceClienteRef.current) clearTimeout(debounceClienteRef.current)
     setClienteTelefone('')
     setClienteContato('')
+    setDadosReceita(null)
+    setCadastroOmieAberto(false)
+    setCadastroForm(cadastroFormVazio())
+    setCadastrandoOmie(false)
+    setErroCadastroOmie(null)
+    setSucessoCadastroOmie(null)
     setOrcamentoDireto(false)
     setItens([itemVazio()])
     setErro(null)
@@ -167,12 +234,150 @@ export function NovoOrcamentoModal({
         setClienteOmieId(dados.cliente.codigoClienteOmie)
         if (dados.cliente.cnpjCpf) setCnpj(dados.cliente.cnpjCpf)
         setAvisoCnpj(null)
-      } else {
-        setClienteOmieId(null)
-        setAvisoCnpj('CNPJ não encontrado no Omie — preencha o nome manualmente.')
+        return
       }
+
+      // Não encontrado no Omie — cai para o fallback da Receita Federal
+      // (fase 23), que só preenche nome/telefone (o cliente ainda não tem
+      // codigo_cliente_omie, então clienteOmieId continua vazio).
+      setClienteOmieId(null)
+      await buscarCnpjReceita(digitos)
+    } catch {
+      // Falha inesperada na chamada ao Omie (ex: rede) — sem este catch, a
+      // exceção vazava como unhandled rejection e o fallback da Receita nunca
+      // era chamado, sem nenhum aviso aparecer na tela.
+      setClienteOmieId(null)
+      setAvisoCnpj('Não foi possível consultar o Omie agora. Preencha o nome manualmente.')
     } finally {
       setBuscandoCnpj(false)
+    }
+  }
+
+  async function buscarCnpjReceita(digitos: string) {
+    // Falha de rede/timeout da BrasilAPI é tratada de forma silenciosa: cai
+    // direto para a mensagem padrão de "não encontrado, preencha manualmente"
+    // sem expor o motivo técnico nem travar a tela — o usuário só precisa
+    // saber que precisa preencher o nome na mão.
+    try {
+      const resposta = await fetch('/api/cnpj/consultar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cnpj: digitos }),
+      })
+      const dados = await resposta.json().catch(() => null)
+
+      if (resposta.ok && dados && !dados.erro && dados.encontrado && dados.cliente) {
+        const nome = dados.cliente.razaoSocial || dados.cliente.nomeFantasia
+        if (nome) setClienteNome(nome)
+        if (dados.cliente.telefone && !clienteTelefone.trim()) {
+          setClienteTelefone(formatarTelefoneInput(dados.cliente.telefone))
+        }
+        // Campos extras (fase 24) não preenchem nada no pedido diretamente —
+        // ficam guardados só para pré-preencher o formulário de cadastro no
+        // Omie, caso o comercial decida cadastrar esse cliente por lá.
+        setDadosReceita({
+          razaoSocial: dados.cliente.razaoSocial ?? '',
+          nomeFantasia: dados.cliente.nomeFantasia ?? '',
+          telefoneDdd: dados.cliente.telefoneDdd ?? '',
+          telefoneNumero: dados.cliente.telefoneNumero ?? '',
+          logradouro: dados.cliente.logradouro ?? '',
+          numero: dados.cliente.numero ?? '',
+          bairro: dados.cliente.bairro ?? '',
+          municipio: dados.cliente.municipio ?? '',
+          uf: dados.cliente.uf ?? '',
+          cep: dados.cliente.cep ?? '',
+        })
+        setAvisoCnpj('Cliente encontrado na Receita Federal, mas ainda não está cadastrado no Omie.')
+        return
+      }
+    } catch {
+      // Rede/timeout: segue para o fallback abaixo sem mostrar erro técnico.
+    }
+
+    setAvisoCnpj('CNPJ não encontrado no Omie — preencha o nome manualmente.')
+  }
+
+  // Abre o formulário de cadastro (fase 24) já pré-preenchido com o que a
+  // Receita Federal devolveu (quando disponível) ou com o que já foi digitado
+  // no formulário do pedido — tudo permanece editável antes de confirmar.
+  function abrirCadastroOmie() {
+    setErroCadastroOmie(null)
+    setSucessoCadastroOmie(null)
+    const digitosTelefone = clienteTelefone.replace(/\D/g, '')
+    const dddDigitado = digitosTelefone.length >= 10 ? digitosTelefone.slice(0, 2) : ''
+    const numeroDigitado = digitosTelefone.length >= 10 ? digitosTelefone.slice(2) : ''
+
+    setCadastroForm({
+      razaoSocial: dadosReceita?.razaoSocial || clienteNome,
+      nomeFantasia: dadosReceita?.nomeFantasia || '',
+      cnpj: cnpj.replace(/\D/g, ''),
+      telefoneDdd: dadosReceita?.telefoneDdd || dddDigitado,
+      telefoneNumero: dadosReceita?.telefoneNumero || numeroDigitado,
+      logradouro: dadosReceita?.logradouro || '',
+      enderecoNumero: dadosReceita?.numero || '',
+      bairro: dadosReceita?.bairro || '',
+      cidade: dadosReceita?.municipio || '',
+      estado: dadosReceita?.uf || '',
+      cep: dadosReceita?.cep || '',
+      email: '',
+    })
+    setCadastroOmieAberto(true)
+  }
+
+  function atualizarCadastroForm(campo: keyof CadastroOmieForm, valor: string) {
+    setCadastroForm((atual) => ({ ...atual, [campo]: valor }))
+  }
+
+  async function confirmarCadastroOmie() {
+    setErroCadastroOmie(null)
+
+    const cnpjDigitos = cadastroForm.cnpj.replace(/\D/g, '')
+    if (!cadastroForm.razaoSocial.trim()) {
+      setErroCadastroOmie('Informe a razão social.')
+      return
+    }
+    if (cnpjDigitos.length !== 14) {
+      setErroCadastroOmie('Informe um CNPJ válido (14 dígitos).')
+      return
+    }
+
+    setCadastrandoOmie(true)
+    try {
+      const resposta = await fetch('/api/omie/cadastrar-cliente', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          razaoSocial: cadastroForm.razaoSocial.trim(),
+          nomeFantasia: cadastroForm.nomeFantasia.trim(),
+          cnpj: cnpjDigitos,
+          telefoneDdd: cadastroForm.telefoneDdd.trim(),
+          telefoneNumero: cadastroForm.telefoneNumero.trim(),
+          endereco: cadastroForm.logradouro.trim(),
+          enderecoNumero: cadastroForm.enderecoNumero.trim(),
+          bairro: cadastroForm.bairro.trim(),
+          cidade: cadastroForm.cidade.trim(),
+          estado: cadastroForm.estado.trim(),
+          email: cadastroForm.email.trim(),
+        }),
+      })
+      const dados = await resposta.json().catch(() => null)
+
+      if (!resposta.ok || !dados || dados.erro || typeof dados.codigoClienteOmie !== 'number') {
+        setErroCadastroOmie(
+          dados?.erro ?? 'Não foi possível cadastrar o cliente no Omie agora. Tente novamente.',
+        )
+        return
+      }
+
+      setClienteOmieId(dados.codigoClienteOmie)
+      setClienteNome(cadastroForm.razaoSocial.trim())
+      setCnpj(cnpjDigitos)
+      setCadastroOmieAberto(false)
+      setSucessoCadastroOmie('Cliente cadastrado no Omie com sucesso.')
+    } catch {
+      setErroCadastroOmie('Não foi possível cadastrar o cliente no Omie agora. Tente novamente.')
+    } finally {
+      setCadastrandoOmie(false)
     }
   }
 
@@ -450,6 +655,191 @@ export function NovoOrcamentoModal({
             </ul>
           )}
         </div>
+
+        {sucessoCadastroOmie && (
+          <div className="rounded-md border border-accent-success/30 bg-accent-success/10 px-3 py-2 text-sm text-accent-success">
+            ✓ {sucessoCadastroOmie}
+          </div>
+        )}
+
+        {clienteOmieId === null &&
+          (!cadastroOmieAberto ? (
+            <button
+              type="button"
+              onClick={abrirCadastroOmie}
+              disabled={salvando}
+              className="self-start rounded-md border border-accent-primary/40 bg-accent-primary/10 px-3 py-1.5 text-xs font-semibold text-accent-primary transition-colors hover:bg-accent-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Cadastrar no Omie
+            </button>
+          ) : (
+            <div className="rounded-md border border-accent-primary/30 bg-accent-primary/10 p-3">
+              <p className="text-sm font-medium text-primary">Cadastrar cliente no Omie</p>
+              <p className="mt-0.5 text-xs text-muted">
+                Revise os dados (pré-preenchidos com o que a Receita Federal retornou, quando
+                disponível) antes de confirmar.
+              </p>
+
+              {erroCadastroOmie && (
+                <div className="mt-2 rounded-md border border-accent-danger/30 bg-accent-danger/10 px-3 py-2 text-sm text-accent-danger">
+                  {erroCadastroOmie}
+                </div>
+              )}
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-muted">Razão social *</label>
+                  <input
+                    type="text"
+                    value={cadastroForm.razaoSocial}
+                    onChange={(e) => atualizarCadastroForm('razaoSocial', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">Nome fantasia</label>
+                  <input
+                    type="text"
+                    value={cadastroForm.nomeFantasia}
+                    onChange={(e) => atualizarCadastroForm('nomeFantasia', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">CNPJ *</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={cadastroForm.cnpj}
+                    onChange={(e) => atualizarCadastroForm('cnpj', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 font-mono text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">E-mail (opcional)</label>
+                  <input
+                    type="email"
+                    value={cadastroForm.email}
+                    onChange={(e) => atualizarCadastroForm('email', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">DDD</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={cadastroForm.telefoneDdd}
+                    onChange={(e) => atualizarCadastroForm('telefoneDdd', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 font-mono text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">Telefone</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={cadastroForm.telefoneNumero}
+                    onChange={(e) => atualizarCadastroForm('telefoneNumero', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 font-mono text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className="block text-xs text-muted">Logradouro</label>
+                  <input
+                    type="text"
+                    value={cadastroForm.logradouro}
+                    onChange={(e) => atualizarCadastroForm('logradouro', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">Número</label>
+                  <input
+                    type="text"
+                    value={cadastroForm.enderecoNumero}
+                    onChange={(e) => atualizarCadastroForm('enderecoNumero', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-2 grid grid-cols-4 gap-2">
+                <div className="col-span-2">
+                  <label className="block text-xs text-muted">Bairro</label>
+                  <input
+                    type="text"
+                    value={cadastroForm.bairro}
+                    onChange={(e) => atualizarCadastroForm('bairro', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">Cidade</label>
+                  <input
+                    type="text"
+                    value={cadastroForm.cidade}
+                    onChange={(e) => atualizarCadastroForm('cidade', e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">UF</label>
+                  <input
+                    type="text"
+                    maxLength={2}
+                    value={cadastroForm.estado}
+                    onChange={(e) => atualizarCadastroForm('estado', e.target.value.toUpperCase())}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm uppercase"
+                    disabled={cadastrandoOmie}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-2 w-1/4 min-w-[110px]">
+                <label className="block text-xs text-muted">CEP</label>
+                <input
+                  type="text"
+                  value={cadastroForm.cep}
+                  onChange={(e) => atualizarCadastroForm('cep', e.target.value)}
+                  className="input-field mt-1 w-full rounded-md px-2 py-1.5 font-mono text-sm"
+                  disabled={cadastrandoOmie}
+                />
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={confirmarCadastroOmie}
+                  disabled={cadastrandoOmie}
+                  className="rounded-md bg-accent-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {cadastrandoOmie ? 'Cadastrando…' : 'Confirmar cadastro'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCadastroOmieAberto(false)}
+                  disabled={cadastrandoOmie}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium text-muted hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ))}
 
         <div className="grid grid-cols-2 gap-3">
           <div>

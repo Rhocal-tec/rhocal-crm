@@ -5,13 +5,6 @@ import { registrarErro } from '@/lib/omie/registrar-erro'
 // Nunca expor OMIE_APP_KEY/OMIE_APP_SECRET no client — só lidas aqui, server-side.
 const OMIE_CLIENTES_URL = 'https://app.omie.com.br/api/v1/geral/clientes/'
 
-interface ClienteOmie {
-  codigoClienteOmie: number
-  razaoSocial: string
-  nomeFantasia: string | null
-  cnpjCpf: string | null
-}
-
 // Chama a API do Omie e normaliza os dois jeitos que ela sinaliza erro:
 // HTTP não-2xx, ou HTTP 200 com um corpo { faultstring, faultcode }.
 async function chamarOmie(url: string, call: string, param: Record<string, unknown>) {
@@ -47,6 +40,10 @@ async function chamarOmie(url: string, call: string, param: Record<string, unkno
   return dados as Record<string, unknown>
 }
 
+function campoTexto(valor: unknown): string {
+  return typeof valor === 'string' ? valor.trim() : ''
+}
+
 export async function POST(request: Request) {
   const supabase = createClient()
 
@@ -65,56 +62,65 @@ export async function POST(request: Request) {
 
   if (!profile || (profile.setor !== 'comercial' && profile.setor !== 'gestor')) {
     return NextResponse.json(
-      { erro: 'Seu perfil não pode buscar clientes no Omie.' },
+      { erro: 'Seu perfil não pode cadastrar clientes no Omie.' },
       { status: 403 },
     )
   }
 
   const body = await request.json().catch(() => null)
-  const cnpj = typeof body?.cnpj === 'string' ? body.cnpj.replace(/\D/g, '') : ''
+
+  const razaoSocial = campoTexto(body?.razaoSocial)
+  const cnpj = campoTexto(body?.cnpj).replace(/\D/g, '')
+
+  if (!razaoSocial) {
+    return NextResponse.json({ erro: 'Informe a razão social.' }, { status: 400 })
+  }
   if (cnpj.length !== 14) {
     return NextResponse.json({ erro: 'CNPJ inválido.' }, { status: 400 })
   }
 
+  const nomeFantasia = campoTexto(body?.nomeFantasia) || razaoSocial
+  const telefoneDdd = campoTexto(body?.telefoneDdd)
+  const telefoneNumero = campoTexto(body?.telefoneNumero)
+  const endereco = campoTexto(body?.endereco)
+  const enderecoNumero = campoTexto(body?.enderecoNumero)
+  const bairro = campoTexto(body?.bairro)
+  const cidade = campoTexto(body?.cidade)
+  const estado = campoTexto(body?.estado)
+  const email = campoTexto(body?.email)
+
+  // codigo_cliente_integracao com base no CNPJ (em vez de timestamp): torna a
+  // chamada idempotente — se o comercial tentar cadastrar de novo o mesmo
+  // CNPJ (ex: depois de uma falha de rede), o Omie atualiza o mesmo registro
+  // em vez de arriscar duplicar o cadastro.
+  const payload = {
+    codigo_cliente_integracao: `RHOCAL-CRM-CLI-${cnpj}`,
+    razao_social: razaoSocial,
+    nome_fantasia: nomeFantasia,
+    cnpj_cpf: cnpj,
+    telefone1_ddd: telefoneDdd,
+    telefone1_numero: telefoneNumero,
+    endereco,
+    endereco_numero: enderecoNumero,
+    bairro,
+    cidade,
+    estado,
+    email,
+  }
+
   try {
-    let resultado: Record<string, unknown>
-    try {
-      resultado = await chamarOmie(OMIE_CLIENTES_URL, 'ListarClientes', {
-        pagina: 1,
-        registros_por_pagina: 1,
-        apenas_importado_api: 'N',
-        clientesFiltro: { cnpj_cpf: cnpj },
-      })
-    } catch (err) {
-      // O Omie sinaliza "nenhum cliente bate com o filtro" como uma falha
-      // (faultstring "Não existem registros para a página...") em vez de uma
-      // lista vazia. Trata como "não encontrado" — outros erros (credenciais,
-      // rede, etc.) continuam propagando normalmente.
-      const mensagem = err instanceof Error ? err.message : ''
-      if (mensagem.toLowerCase().includes('não existem registros')) {
-        return NextResponse.json({ encontrado: false })
-      }
-      throw err
+    const resultado = await chamarOmie(OMIE_CLIENTES_URL, 'IncluirCliente', payload)
+
+    const codigoClienteOmie = resultado.codigo_cliente_omie as number | undefined
+    if (typeof codigoClienteOmie !== 'number') {
+      throw new Error('O Omie não retornou o código do cliente cadastrado.')
     }
 
-    const bruto = Array.isArray(resultado.clientes_cadastro) ? resultado.clientes_cadastro : []
-    if (bruto.length === 0) {
-      return NextResponse.json({ encontrado: false })
-    }
-
-    const c = bruto[0] as Record<string, unknown>
-    const cliente: ClienteOmie = {
-      codigoClienteOmie: c.codigo_cliente_omie as number,
-      razaoSocial: c.razao_social as string,
-      nomeFantasia: (c.nome_fantasia as string) ?? null,
-      cnpjCpf: (c.cnpj_cpf as string) ?? null,
-    }
-
-    return NextResponse.json({ encontrado: true, cliente })
+    return NextResponse.json({ codigoClienteOmie })
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : 'Erro desconhecido ao falar com o Omie.'
     await registrarErro(supabase, {
-      rota: '/api/omie/buscar-cliente-cnpj',
+      rota: '/api/omie/cadastrar-cliente',
       mensagem,
       colaboradorId: user.id,
     })

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { MoedaInput } from '@/components/ui/MoedaInput'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
 import type { Database, SetorTipo } from '@/types/database'
 
@@ -16,10 +17,6 @@ interface SpecForm {
   numero: string
   cor: string
   observacao: string
-}
-
-function calcularPrecoVenda(custoFinal: number, margemPct: number): number {
-  return custoFinal * (1 + margemPct / 100)
 }
 
 function specVazio(item: PedidoItem): SpecForm {
@@ -42,12 +39,12 @@ export function ItensTab({
   onItemAtualizado: (item: PedidoItem) => void
 }) {
   const [supabase] = useState(() => createClient())
-  // Estado local dos inputs de margem, das especificações (descrição/tamanho/
-  // número/cor/observação) e do campo de busca de código Omie por item —
-  // inicializado a partir do valor já salvo, mas segue solto enquanto o
-  // usuário digita (só persiste no blur).
-  const [margemPorItem, setMargemPorItem] = useState<Record<string, string>>(() =>
-    Object.fromEntries(itens.map((item) => [item.id, item.margem_pct?.toString() ?? ''])),
+  // Estado local dos inputs de preço de venda, das especificações (descrição/
+  // tamanho/número/cor/observação) e do campo de busca de código Omie por
+  // item — inicializado a partir do valor já salvo, mas segue solto enquanto
+  // o usuário digita (só persiste no blur).
+  const [precoVendaPorItem, setPrecoVendaPorItem] = useState<Record<string, string>>(() =>
+    Object.fromEntries(itens.map((item) => [item.id, item.preco_venda?.toString() ?? ''])),
   )
   const [specPorItem, setSpecPorItem] = useState<Record<string, SpecForm>>(() =>
     Object.fromEntries(itens.map((item) => [item.id, specVazio(item)])),
@@ -63,12 +60,12 @@ export function ItensTab({
       ),
   )
 
-  // Comercial e gestor veem custo/margem/preço de venda; compras não (já vê o
-  // custo real, sem margem comercial, na aba Cotações).
+  // Comercial e gestor veem custo final e editam o preço de venda; compras
+  // não (já vê o custo real na aba Cotações).
   const veMargem = setor !== 'compras'
 
-  function margemAtual(itemId: string): string {
-    return margemPorItem[itemId] ?? ''
+  function precoVendaAtual(itemId: string): string {
+    return precoVendaPorItem[itemId] ?? ''
   }
 
   function spec(itemId: string): SpecForm {
@@ -84,20 +81,17 @@ export function ItensTab({
     }))
   }
 
-  async function salvarMargem(item: PedidoItem, valorStr: string) {
-    if (item.custo_final === null) return
-    const margem = valorStr.trim() === '' ? null : Number(valorStr)
-    if (margem !== null && !Number.isFinite(margem)) return
-
-    const precoVenda = margem === null ? null : calcularPrecoVenda(item.custo_final, margem)
+  async function salvarPrecoVenda(item: PedidoItem, valorStr: string) {
+    const precoVenda = valorStr.trim() === '' ? null : Number(valorStr)
+    if (precoVenda !== null && !Number.isFinite(precoVenda)) return
 
     const { error } = await supabase
       .from('pedido_itens')
-      .update({ margem_pct: margem, preco_venda: precoVenda })
+      .update({ preco_venda: precoVenda })
       .eq('id', item.id)
 
     if (!error) {
-      onItemAtualizado({ ...item, margem_pct: margem, preco_venda: precoVenda })
+      onItemAtualizado({ ...item, preco_venda: precoVenda })
     }
   }
 
@@ -198,13 +192,6 @@ export function ItensTab({
   return (
     <div className="mt-4 flex flex-col gap-3">
       {itens.map((item) => {
-        const custoPreenchido = item.custo_final !== null
-        const margemValor = margemAtual(item.id)
-        const margemNumero = Number(margemValor)
-        const precoVendaCalculado =
-          custoPreenchido && margemValor.trim() !== '' && Number.isFinite(margemNumero)
-            ? calcularPrecoVenda(item.custo_final as number, margemNumero)
-            : null
         const itemSpec = spec(item.id)
         const statusCodigo = statusCodigoPorItem[item.id] ?? 'idle'
 
@@ -342,44 +329,17 @@ export function ItensTab({
                     {formatarMoeda(item.custo_final)}
                   </span>
                 </div>
-                {custoPreenchido ? (
-                  <>
-                    <label className="flex items-center gap-2">
-                      <span className="text-xs text-muted">Margem (%):</span>
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={margemValor}
-                        onChange={(e) =>
-                          setMargemPorItem((atual) => ({
-                            ...atual,
-                            [item.id]: e.target.value,
-                          }))
-                        }
-                        onBlur={(e) => salvarMargem(item, e.target.value)}
-                        placeholder="0"
-                        className="input-field w-20 rounded-md px-2 py-1 font-mono text-sm"
-                      />
-                    </label>
-                    <div>
-                      <span className="text-xs text-muted">Preço de venda: </span>
-                      <span className="font-mono font-medium text-primary">
-                        {precoVendaCalculado !== null ? formatarMoeda(precoVendaCalculado) : '—'}
-                      </span>
-                    </div>
-                  </>
-                ) : item.preco_venda !== null ? (
-                  <div>
-                    <span className="text-xs text-muted">Preço de venda: </span>
-                    <span className="font-mono font-medium text-primary">
-                      {formatarMoeda(item.preco_venda)}
-                    </span>
-                    <span className="ml-1.5 text-xs text-accent-compras">(orçamento direto)</span>
-                  </div>
-                ) : (
-                  <span className="text-xs text-muted">Aguardando cotação</span>
-                )}
+                <label className="flex items-center gap-2">
+                  <span className="text-xs text-muted">Preço de venda:</span>
+                  <MoedaInput
+                    value={precoVendaAtual(item.id)}
+                    onChange={(valor) =>
+                      setPrecoVendaPorItem((atual) => ({ ...atual, [item.id]: valor }))
+                    }
+                    onBlurSalvar={(valor) => salvarPrecoVenda(item, valor)}
+                    className="input-field w-28 rounded-md px-2 py-1 font-mono text-sm font-medium"
+                  />
+                </label>
               </div>
             )}
           </div>

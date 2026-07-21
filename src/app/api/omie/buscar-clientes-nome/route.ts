@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { registrarErro } from '@/lib/omie/registrar-erro'
 
 // Nunca expor OMIE_APP_KEY/OMIE_APP_SECRET no client — só lidas aqui, server-side.
 const OMIE_CLIENTES_URL = 'https://app.omie.com.br/api/v1/geral/clientes/'
@@ -123,6 +124,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ clientes })
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : 'Erro desconhecido ao falar com o Omie.'
+    await registrarErro(supabase, {
+      rota: '/api/omie/buscar-clientes-nome',
+      mensagem,
+      colaboradorId: user.id,
+    })
     return NextResponse.json({ erro: mensagem }, { status: 502 })
   }
 }

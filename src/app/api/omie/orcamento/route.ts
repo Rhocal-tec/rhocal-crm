@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { registrarErro } from '@/lib/omie/registrar-erro'
 
 // Nunca expor OMIE_APP_KEY/OMIE_APP_SECRET no client — só lidas aqui, server-side.
 const OMIE_CLIENTES_URL = 'https://app.omie.com.br/api/v1/geral/clientes/'
@@ -204,6 +205,11 @@ export async function POST(request: Request) {
   if (!body || typeof body.acao !== 'string') {
     return NextResponse.json({ erro: 'Requisição inválida.' }, { status: 400 })
   }
+
+  // Usado só para o log de erros (fase 25): todas as ações que operam sobre
+  // um pedido já existente (criar_orcamento, converter_pedido_venda) mandam
+  // pedidoId no corpo — buscar_cliente não tem pedido associado, e fica null.
+  const pedidoIdParaLog = typeof body.pedidoId === 'string' ? body.pedidoId : null
 
   try {
     if (body.acao === 'buscar_cliente') {
@@ -581,6 +587,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ erro: 'Ação inválida.' }, { status: 400 })
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : 'Erro desconhecido ao falar com o Omie.'
+    await registrarErro(supabase, {
+      rota: '/api/omie/orcamento',
+      mensagem,
+      pedidoId: pedidoIdParaLog,
+      colaboradorId: user.id,
+    })
     return NextResponse.json({ erro: mensagem }, { status: 502 })
   }
 }
