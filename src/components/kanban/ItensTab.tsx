@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { MoedaInput } from '@/components/ui/MoedaInput'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
+import { corMargemPrecoVenda, estiloCorMargem } from '@/lib/kanban/margem-cor'
 import type { Database, SetorTipo } from '@/types/database'
 
 type PedidoItem = Database['public']['Tables']['pedido_itens']['Row']
@@ -107,6 +108,15 @@ export function ItensTab({
     if (!error) onItemAtualizado({ ...item, descricao: valor })
   }
 
+  async function alternarEmEstoque(item: PedidoItem, valor: boolean) {
+    const { error } = await supabase
+      .from('pedido_itens')
+      .update({ em_estoque: valor })
+      .eq('id', item.id)
+
+    if (!error) onItemAtualizado({ ...item, em_estoque: valor })
+  }
+
   async function salvarSpecCampo(item: PedidoItem, campo: CampoTexto, valorStr: string) {
     const valor = valorStr.trim() === '' ? null : valorStr.trim()
     if (valor === (item[campo] ?? null)) return
@@ -194,6 +204,7 @@ export function ItensTab({
       {itens.map((item) => {
         const itemSpec = spec(item.id)
         const statusCodigo = statusCodigoPorItem[item.id] ?? 'idle'
+        const corMargem = corMargemPrecoVenda(item.custo_final, Number(precoVendaAtual(item.id)))
 
         const detalhes = [
           item.tamanho?.trim() ? `Tam. ${item.tamanho.trim()}` : null,
@@ -260,6 +271,11 @@ export function ItensTab({
               <div className="flex shrink-0 items-center gap-3 pt-5 font-mono text-xs text-muted">
                 <span>Qtd. {item.quantidade}</span>
                 {item.ca && <span>CA {item.ca}</span>}
+                {item.em_estoque && (
+                  <span className="inline-flex items-center rounded-full border border-accent-compras/40 bg-accent-compras/15 px-2 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wide text-accent-compras">
+                    Em estoque
+                  </span>
+                )}
               </div>
             </div>
 
@@ -321,6 +337,16 @@ export function ItensTab({
               />
             </div>
 
+            <label className="mt-3 flex w-fit cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={item.em_estoque}
+                onChange={(e) => alternarEmEstoque(item, e.target.checked)}
+                className="h-4 w-4 accent-accent-compras"
+              />
+              <span className="text-xs text-muted">Já em estoque (não precisa cotar)</span>
+            </label>
+
             {veMargem && (
               <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-white/5 pt-3 text-sm">
                 <div>
@@ -338,7 +364,16 @@ export function ItensTab({
                     }
                     onBlurSalvar={(valor) => salvarPrecoVenda(item, valor)}
                     className="input-field w-28 rounded-md px-2 py-1 font-mono text-sm font-medium"
+                    style={estiloCorMargem(corMargem)}
                   />
+                  {corMargem && (
+                    <span
+                      aria-hidden="true"
+                      title="Indicador de margem"
+                      className="h-3.5 w-3.5 shrink-0 rounded-full border border-white/40"
+                      style={{ backgroundColor: corMargem }}
+                    />
+                  )}
                 </label>
               </div>
             )}

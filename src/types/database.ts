@@ -133,6 +133,7 @@ export interface Database {
           margem_pct: number | null
           preco_venda: number | null
           codigo_produto_omie: number | null
+          em_estoque: boolean
           criado_em: string
         }
         Insert: {
@@ -149,6 +150,7 @@ export interface Database {
           margem_pct?: number | null
           preco_venda?: number | null
           codigo_produto_omie?: number | null
+          em_estoque?: boolean
           criado_em?: string
         }
         Update: {
@@ -165,6 +167,7 @@ export interface Database {
           margem_pct?: number | null
           preco_venda?: number | null
           codigo_produto_omie?: number | null
+          em_estoque?: boolean
           criado_em?: string
         }
         Relationships: []

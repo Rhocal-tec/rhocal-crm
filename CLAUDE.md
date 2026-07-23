@@ -598,3 +598,39 @@ create policy "error_log leitura gestor" on error_log for select to authenticate
 Instrumentação: todas as rotas server-side sensíveis (/api/omie/*, /api/cnpj/*) devem capturar exceções em try/catch e, além de retornar a mensagem amigável já existente ao usuário, inserir um registro em error_log com a rota, a mensagem de erro (nunca incluir chaves de API ou dados sensíveis na mensagem salva), o pedido relacionado (se houver) e o colaborador logado no momento.
 
 Visualização: nova aba/seção "Erros recentes" dentro do Painel executivo (/painel, fase 14), visível somente ao gestor — lista os últimos erros registrados (rota, mensagem, data/hora, colaborador), permitindo identificar problemas sem precisar de ferramenta externa.
+
+## Fase 26 — Item "Já em estoque" (fora do fluxo de cotação)
+
+Nem todo item precisa de cotação — alguns já estão em estoque na RHOCAL. Uma marcação por item resolve isso, mantendo comercial e compras com visões diferentes do mesmo pedido.
+
+Novo campo: pedido_itens.em_estoque (boolean, default false)
+
+Comportamento:
+- Checkbox "Já em estoque (não precisa cotar)" por item, editável por comercial, compras e gestor, disponível na criação e edição do item
+- Comercial e gestor: sempre veem TODOS os itens do pedido, com ou sem a marcação, normalmente na aba Itens
+- Compras: na aba Cotações, itens marcados como em_estoque = true NÃO aparecem na lista de itens a cotar — ficam 100% fora dessa aba, sem nenhuma exceção ou campo simplificado de custo
+- Validação ao mover para ORÇAMENTO COTADO: a checagem de "itens sem cotação vencedora" (aviso não bloqueante, fase existente) deve ignorar itens em_estoque = true — eles não contam como pendência de cotação
+- Itens em estoque continuam aparecendo normalmente no PDF do orçamento (fase 21) e em qualquer outro lugar que liste itens do pedido — a marcação afeta apenas a aba Cotações
+
+## Fase 27 — Indicador visual de margem no preço de venda (por cor, sem expor percentual)
+
+Quando o comercial (ou gestor) digita o preço de venda de um item (fase 22.3), o campo deve mudar de cor automaticamente conforme a margem implícita naquele preço — sem NUNCA exibir o percentual numérico ao comercial. O cálculo e as faixas são internos ao sistema.
+
+Cálculo (por item, recalculado a cada alteração do preço de venda):
+percentual = (custo_final / preco_venda) * 100
+
+Esse percentual representa "quanto do preço final é custo" — quanto MENOR, melhor a margem; quanto MAIOR, mais apertada.
+
+Faixas de cor (ajustadas para contraste — evitar tons próximos do laranja da marca `--accent-primary` #F1592A ou do azul de compras `--accent-compras` #3B7DD8 já usados no resto da interface):
+- Percentual menor que 60%: Azul vívido (#2563EB) — Margem ótima, acima do ideal
+- Percentual de 60% a 65%: Verde (#16A34A) — Margem boa
+- Percentual de 66% a 70%: Amarelo puro (#EAB308) — Margem apertando
+- Percentual de 71% a 75%: Vermelho (#DC2626) — Margem crítica
+- Percentual maior que 75%: Vermelho bem escuro (#7F1D1D) — Perigo real, preço muito próximo ou abaixo do custo
+
+Implementação:
+- O campo "Preço de venda" (input) tem fundo preenchido com a cor correspondente em opacidade alta (~50%, não um tingimento sutil) e borda de 2px na cor cheia, atualizando em tempo real enquanto o comercial digita
+- Reforço redundante: um selo/círculo sólido preenchido com a cor exata aparece ao lado do campo (fora do input), para o indicador não depender só do preenchimento de fundo
+- Se custo_final ainda não estiver preenchido (item aguardando cotação), não aplicar nenhuma cor nem selo — mostrar o campo no estado neutro padrão
+- O percentual calculado NUNCA aparece em nenhum lugar da interface do comercial — nem como texto, nem como tooltip, nem no PDF. É puramente uma cor
+- Para compras e gestor, essa mesma lógica de cor pode ser exibida opcionalmente já que eles têm acesso a ambos os números de qualquer forma — não é obrigatório

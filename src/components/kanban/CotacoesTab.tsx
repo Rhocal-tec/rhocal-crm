@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
@@ -48,7 +48,7 @@ function formVazio(): NovaCotacaoForm {
 }
 
 export function CotacoesTab({
-  itens,
+  itens: todosItens,
   pedidoNumero,
 }: {
   itens: PedidoItem[]
@@ -56,6 +56,13 @@ export function CotacoesTab({
 }) {
   const { user } = useAuth()
   const [supabase] = useState(() => createClient())
+  // Itens já em estoque (fase 26) não precisam de cotação — ficam 100% fora
+  // desta aba, sem exceção. Memoizado para não recriar a referência do array
+  // (e disparar o efeito de carregamento abaixo) a cada re-render local.
+  const itens = useMemo(
+    () => todosItens.filter((item) => !item.em_estoque),
+    [todosItens],
+  )
   const [cotacoesPorItem, setCotacoesPorItem] = useState<Record<string, Cotacao[]>>({})
   const [historicoPorCa, setHistoricoPorCa] = useState<Record<string, HistoricoCA[]>>({})
   const [custoFinalPorItem, setCustoFinalPorItem] = useState<Record<string, string>>({})

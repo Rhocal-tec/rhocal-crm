@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
 
 // Input de valor monetário: enquanto focado mostra o número puro e editável;
@@ -14,6 +14,7 @@ export function MoedaInput({
   placeholder = 'R$ —',
   className = 'input-field w-32 rounded-md px-2 py-1 font-mono text-sm',
   disabled,
+  style,
 }: {
   value: string
   onChange: (valor: string) => void
@@ -21,6 +22,10 @@ export function MoedaInput({
   placeholder?: string
   className?: string
   disabled?: boolean
+  // Estilo inline opcional — usado para tingir a borda/fundo do campo
+  // dinamicamente (ex: indicador de margem, fase 27), sem depender de classes
+  // Tailwind fixas.
+  style?: CSSProperties
 }) {
   const [editando, setEditando] = useState(false)
 
@@ -39,6 +44,7 @@ export function MoedaInput({
       placeholder={placeholder}
       className={className}
       disabled={disabled}
+      style={style}
     />
   )
 }

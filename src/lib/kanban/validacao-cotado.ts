@@ -11,17 +11,25 @@ export async function validarPedidoParaCotado(
   supabase: SupabaseBrowserClient,
   pedidoId: string,
 ): Promise<ResultadoValidacao> {
-  const { data: itens, error: erroItens } = await supabase
+  const { data: todosItens, error: erroItens } = await supabase
     .from('pedido_itens')
-    .select('id, descricao, custo_final')
+    .select('id, descricao, custo_final, em_estoque')
     .eq('pedido_id', pedidoId)
 
-  if (erroItens || !itens) {
+  if (erroItens || !todosItens) {
     return { ok: false, mensagem: 'Não foi possível validar as cotações do pedido.' }
   }
 
-  if (itens.length === 0) {
+  if (todosItens.length === 0) {
     return { ok: false, mensagem: 'O pedido não tem itens cadastrados.' }
+  }
+
+  // Itens já em estoque (fase 26) não passam pela cotação — não contam como
+  // pendência aqui.
+  const itens = todosItens.filter((item) => !item.em_estoque)
+
+  if (itens.length === 0) {
+    return { ok: true }
   }
 
   const itemIds = itens.map((item) => item.id)

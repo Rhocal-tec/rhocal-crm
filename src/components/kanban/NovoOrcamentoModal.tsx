@@ -80,6 +80,7 @@ interface ItemForm {
   cor: string
   observacao: string
   precoVenda: string
+  emEstoque: boolean
 }
 
 function itemVazio(): ItemForm {
@@ -95,6 +96,7 @@ function itemVazio(): ItemForm {
     cor: '',
     observacao: '',
     precoVenda: '',
+    emEstoque: false,
   }
 }
 
@@ -393,6 +395,12 @@ export function NovoOrcamentoModal({
     )
   }
 
+  function alternarEmEstoque(index: number, valor: boolean) {
+    setItens((atual) =>
+      atual.map((item, i) => (i === index ? { ...item, emEstoque: valor } : item)),
+    )
+  }
+
   // Digitar de novo o código invalida o vínculo anterior — só é revalidado
   // quando o campo perde o foco de novo.
   function atualizarCodigo(index: number, valor: string) {
@@ -494,6 +502,7 @@ export function NovoOrcamentoModal({
       observacao: item.observacao.trim() || null,
       codigo_produto_omie: item.codigoProdutoOmie,
       preco_venda: orcamentoDireto ? Number(item.precoVenda) : null,
+      em_estoque: item.emEstoque,
     }))
 
     if (itensValidos.length === 0) {
@@ -554,6 +563,7 @@ export function NovoOrcamentoModal({
         observacao: item.observacao,
         codigo_produto_omie: item.codigo_produto_omie,
         preco_venda: item.preco_venda,
+        em_estoque: item.em_estoque,
       })),
     )
 
@@ -1026,6 +1036,19 @@ export function NovoOrcamentoModal({
                       disabled={salvando}
                     />
                   </div>
+
+                  <label className="flex w-fit cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={item.emEstoque}
+                      onChange={(e) => alternarEmEstoque(index, e.target.checked)}
+                      disabled={salvando}
+                      className="h-4 w-4 accent-accent-compras"
+                    />
+                    <span className="text-xs text-muted">
+                      Já em estoque (não precisa cotar)
+                    </span>
+                  </label>
                 </div>
                 <button
                   type="button"
