@@ -51,9 +51,14 @@ export function PedidoDetalheModal({
   const [nomeUltimaMovimentacao, setNomeUltimaMovimentacao] = useState<string | null>(null)
 
   const vePainelCompras = setor === 'compras' || setor === 'gestor'
-  const veMargem = setor !== 'compras'
-  const podeEditarDadosCliente = setor === 'comercial' || setor === 'gestor'
-  const podeDuplicar = setor === 'comercial' || setor === 'gestor'
+  // Fase 29: enquanto o pedido está em EM_COTACAO, o comercial (nunca o
+  // gestor) fica em modo estritamente somente-leitura, com um subconjunto
+  // mínimo de informação — sem frete, modo de faturamento, preço de venda
+  // nem botões de ação. Some assim que compras move para PEDIDO_COTADO.
+  const somenteLeituraComercial = setor === 'comercial' && pedido?.status === 'EM_COTACAO'
+  const veMargem = setor !== 'compras' && !somenteLeituraComercial
+  const podeEditarDadosCliente = (setor === 'comercial' || setor === 'gestor') && !somenteLeituraComercial
+  const podeDuplicar = (setor === 'comercial' || setor === 'gestor') && !somenteLeituraComercial
   // Number(...) é obrigatório aqui: o Postgres devolve `preco_venda` (numeric)
   // como string (ex: "150.00"), e `soma + item.preco_venda` faria concatenação
   // de string em vez de soma quando o valor chega assim.
@@ -460,81 +465,95 @@ export function PedidoDetalheModal({
                   )}
                 </dd>
               </div>
-              <div>
-                <dt className="text-muted">Status</dt>
-                <dd className="font-medium text-primary">{STATUS_LABELS[pedido.status]}</dd>
-              </div>
-              <div>
-                <dt className="text-muted">Frete</dt>
-                <dd className="font-medium text-primary">
-                  {podeEditarDadosCliente ? (
-                    <MoedaInput
-                      value={freteInput}
-                      onChange={setFreteInput}
-                      onBlurSalvar={salvarFrete}
-                      className="input-field mt-0.5 w-full rounded-md px-2 py-1 font-mono text-sm"
-                    />
-                  ) : (
-                    formatarMoeda(pedido.valor_frete)
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted">Modo de faturamento</dt>
-                <dd className="font-medium text-primary">
-                  {podeEditarDadosCliente ? (
-                    <select
-                      value={pedido.modo_faturamento ?? ''}
-                      onChange={(e) => salvarModoFaturamento(e.target.value)}
-                      className="input-field mt-0.5 w-full rounded-md px-2 py-1 text-sm"
-                    >
-                      <option value="">—</option>
-                      {MODO_FATURAMENTO_OPCOES.map((opcao) => (
-                        <option key={opcao} value={opcao}>
-                          {opcao}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    (pedido.modo_faturamento ?? '—')
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted">Última movimentação</dt>
-                <dd className="font-medium text-primary">
-                  {new Date(pedido.ultima_movimentacao).toLocaleDateString('pt-BR')}
-                  {nomeUltimaMovimentacao && ` por ${nomeUltimaMovimentacao}`}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted">Previsão de chegada</dt>
-                <dd className="font-medium text-primary">
-                  {formatarDataSomente(pedido.previsao_chegada)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted">Data real de entrega</dt>
-                <dd className="font-medium text-primary">
-                  {vePainelCompras ? (
-                    <input
-                      type="date"
-                      value={pedido.data_entrega_real ?? ''}
-                      onChange={(e) => salvarDataEntregaReal(e.target.value)}
-                      className="input-field mt-0.5 rounded-md px-2 py-1 text-sm"
-                    />
-                  ) : (
-                    formatarDataSomente(pedido.data_entrega_real)
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted">Entrega ao cliente (prometida)</dt>
-                <dd className="font-medium text-primary">
-                  {formatarDataSomente(pedido.data_entrega_cliente)}
-                </dd>
-              </div>
-              {pedido.status === 'PERDIDO' && (
+              {!somenteLeituraComercial && (
+                <div>
+                  <dt className="text-muted">Status</dt>
+                  <dd className="font-medium text-primary">{STATUS_LABELS[pedido.status]}</dd>
+                </div>
+              )}
+              {setor !== 'compras' && !somenteLeituraComercial && (
+                <div>
+                  <dt className="text-muted">Frete</dt>
+                  <dd className="font-medium text-primary">
+                    {podeEditarDadosCliente ? (
+                      <MoedaInput
+                        value={freteInput}
+                        onChange={setFreteInput}
+                        onBlurSalvar={salvarFrete}
+                        className="input-field mt-0.5 w-full rounded-md px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      formatarMoeda(pedido.valor_frete)
+                    )}
+                  </dd>
+                </div>
+              )}
+              {setor !== 'compras' && !somenteLeituraComercial && (
+                <div>
+                  <dt className="text-muted">Modo de faturamento</dt>
+                  <dd className="font-medium text-primary">
+                    {podeEditarDadosCliente ? (
+                      <select
+                        value={pedido.modo_faturamento ?? ''}
+                        onChange={(e) => salvarModoFaturamento(e.target.value)}
+                        className="input-field mt-0.5 w-full rounded-md px-2 py-1 text-sm"
+                      >
+                        <option value="">—</option>
+                        {MODO_FATURAMENTO_OPCOES.map((opcao) => (
+                          <option key={opcao} value={opcao}>
+                            {opcao}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      (pedido.modo_faturamento ?? '—')
+                    )}
+                  </dd>
+                </div>
+              )}
+              {!somenteLeituraComercial && (
+                <div>
+                  <dt className="text-muted">Última movimentação</dt>
+                  <dd className="font-medium text-primary">
+                    {new Date(pedido.ultima_movimentacao).toLocaleDateString('pt-BR')}
+                    {nomeUltimaMovimentacao && ` por ${nomeUltimaMovimentacao}`}
+                  </dd>
+                </div>
+              )}
+              {!somenteLeituraComercial && (
+                <div>
+                  <dt className="text-muted">Previsão de chegada</dt>
+                  <dd className="font-medium text-primary">
+                    {formatarDataSomente(pedido.previsao_chegada)}
+                  </dd>
+                </div>
+              )}
+              {!somenteLeituraComercial && (
+                <div>
+                  <dt className="text-muted">Data real de entrega</dt>
+                  <dd className="font-medium text-primary">
+                    {vePainelCompras ? (
+                      <input
+                        type="date"
+                        value={pedido.data_entrega_real ?? ''}
+                        onChange={(e) => salvarDataEntregaReal(e.target.value)}
+                        className="input-field mt-0.5 rounded-md px-2 py-1 text-sm"
+                      />
+                    ) : (
+                      formatarDataSomente(pedido.data_entrega_real)
+                    )}
+                  </dd>
+                </div>
+              )}
+              {!somenteLeituraComercial && (
+                <div>
+                  <dt className="text-muted">Entrega ao cliente (prometida)</dt>
+                  <dd className="font-medium text-primary">
+                    {formatarDataSomente(pedido.data_entrega_cliente)}
+                  </dd>
+                </div>
+              )}
+              {pedido.status === 'PERDIDO' && !somenteLeituraComercial && (
                 <div className="col-span-2">
                   <dt className="text-muted">Motivo da perda</dt>
                   <dd className="font-medium text-accent-danger">
@@ -545,9 +564,11 @@ export function PedidoDetalheModal({
             </dl>
           )}
 
-          {aba === 'dados' && <OrcamentoPdfButton pedido={pedido} itens={itens} setor={setor} />}
+          {aba === 'dados' && !somenteLeituraComercial && (
+            <OrcamentoPdfButton pedido={pedido} itens={itens} setor={setor} />
+          )}
 
-          {aba === 'dados' && (
+          {aba === 'dados' && !somenteLeituraComercial && (
             <OmieOrcamentoSection
               pedido={pedido}
               itens={itens}
@@ -557,7 +578,7 @@ export function PedidoDetalheModal({
             />
           )}
 
-          {aba === 'dados' && (
+          {aba === 'dados' && !somenteLeituraComercial && (
             <ConverterPedidoVendaSection
               pedido={pedido}
               setor={setor}
@@ -565,12 +586,18 @@ export function PedidoDetalheModal({
             />
           )}
 
-          {aba === 'dados' && (
+          {aba === 'dados' && !somenteLeituraComercial && (
             <MarcarPerdidoSection pedido={pedido} setor={setor} onPedidoAtualizado={setPedido} />
           )}
 
           {aba === 'itens' && (
-            <ItensTab itens={itens} setor={setor} onItemAtualizado={handleItemAtualizado} />
+            <ItensTab
+              itens={itens}
+              setor={setor}
+              orcamentoDireto={pedido.orcamento_direto}
+              somenteLeitura={somenteLeituraComercial}
+              onItemAtualizado={handleItemAtualizado}
+            />
           )}
 
           {aba === 'cotacoes' && vePainelCompras && (

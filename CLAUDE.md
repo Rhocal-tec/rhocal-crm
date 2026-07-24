@@ -611,6 +611,7 @@ Comportamento:
 - Compras: na aba Cotações, itens marcados como em_estoque = true NÃO aparecem na lista de itens a cotar — ficam 100% fora dessa aba, sem nenhuma exceção ou campo simplificado de custo
 - Validação ao mover para ORÇAMENTO COTADO: a checagem de "itens sem cotação vencedora" (aviso não bloqueante, fase existente) deve ignorar itens em_estoque = true — eles não contam como pendência de cotação
 - Itens em estoque continuam aparecendo normalmente no PDF do orçamento (fase 21) e em qualquer outro lugar que liste itens do pedido — a marcação afeta apenas a aba Cotações
+- Preço de venda imediato: assim que um item é marcado como em_estoque = true, o campo "Preço de venda" (fase 22.3) fica disponível para o comercial preencher imediatamente naquele item — mesmo comportamento já usado no "Orçamento direto" (fase 19), já que um item em estoque não depende de custo vindo de cotação. Isso vale item a item: num mesmo pedido, itens em estoque já podem ter preço de venda definido, enquanto outros itens (que ainda vão para cotação) esperam o custo do Compras normalmente.
 
 ## Fase 27 — Indicador visual de margem no preço de venda (por cor, sem expor percentual)
 
@@ -634,3 +635,35 @@ Implementação:
 - Se custo_final ainda não estiver preenchido (item aguardando cotação), não aplicar nenhuma cor nem selo — mostrar o campo no estado neutro padrão
 - O percentual calculado NUNCA aparece em nenhum lugar da interface do comercial — nem como texto, nem como tooltip, nem no PDF. É puramente uma cor
 - Para compras e gestor, essa mesma lógica de cor pode ser exibida opcionalmente já que eles têm acesso a ambos os números de qualquer forma — não é obrigatório
+
+## Fase 28 — Frete, modo de faturamento e item "em estoque" exclusivos do Comercial
+
+Restringe a visibilidade de três elementos que hoje eram visíveis também para Compras, tornando-os exclusivos do Comercial (o Gestor continua vendo/editando tudo, por ser regra permanente do sistema — nunca há campo escondido do Gestor).
+
+28.1 — Frete e Modo de faturamento invisíveis para Compras
+Os campos valor_frete e modo_faturamento (aba Dados) deixam de aparecer inteiramente na tela de Compras — nem como leitura, nem como edição. Continuam visíveis e editáveis normalmente para Comercial e Gestor. Esses campos só fazem sentido preencher a partir do momento em que o pedido está em PEDIDO_COTADO (Orçamento Cotado) ou além, já que dependem do custo já estar definido — mas a restrição de visibilidade é por PERFIL (nunca aparecem pra Compras), não por status.
+
+28.2 — Papel de Compras no Orçamento Cotado é só mover o card
+Reforça que, na etapa ORÇAMENTO COTADO, a única ação de Compras é arrastar o card para lá (a partir de EM_COTACAO). Nenhum campo de frete, modo de faturamento ou preço de venda é visível ou editável por Compras nessa etapa — esses são preenchidos pelo Comercial. Não altera a Fase 22.2: os campos de cotação (fornecedor, preço, custo final) continuam editáveis por Compras/Gestor a qualquer momento, normalmente.
+
+28.3 — Item "Já em estoque" exclusivo do Comercial
+A marcação/checkbox em_estoque (fase 26) deixa de ser editável por Compras — só Comercial (e Gestor) podem marcar ou desmarcar. Além disso, itens marcados como em_estoque = true ficam completamente invisíveis para Compras em qualquer lugar do sistema (não só na aba Cotações) — Compras enxerga exclusivamente os itens que ainda precisam ser cotados.
+
+## Fase 29 — Comercial em modo somente-leitura durante "Orçamento em Cotação"
+
+Enquanto o pedido está com status EM_COTACAO (Orçamento em Cotação), o Comercial (não o Gestor) fica em modo estritamente somente-leitura: nenhuma edição é permitida, e apenas um subconjunto mínimo de informação é exibido.
+
+O que o Comercial vê nesse status (somente leitura, sem nenhum controle editável):
+- Número do pedido
+- Dados do cliente (nome, CNPJ, telefone, contato) — exibidos, não editáveis
+- Lista de itens sendo cotados: descrição, quantidade, CA, tamanho/número/cor, observação — exibidos, não editáveis
+
+O que o Comercial NÃO vê nesse status:
+- Nenhum campo de Frete ou Modo de faturamento (mesmo sendo campos dele em outras etapas — fase 28)
+- Nenhum campo de Preço de venda (mesmo em itens marcados como "em estoque" — fase 26)
+- Nenhum botão de ação (arquivar, marcar como perdido, duplicar, gerar orçamento no Omie, etc.) — todos ficam ocultos ou desabilitados nesse status especificamente para o Comercial
+- A aba Cotações continua nunca visível para o Comercial (regra já existente, não muda)
+
+Quando o status muda: assim que o Compras move o pedido para PEDIDO_COTADO (Orçamento Cotado), todas as permissões normais do Comercial voltam a valer (frete, modo de faturamento, preço de venda, ações do pedido) — a restrição desta fase vale exclusivamente enquanto o status for EM_COTACAO.
+
+Gestor não é afetado: o Gestor continua com acesso total e irrestrito em qualquer status, incluindo EM_COTACAO — essa fase restringe apenas o perfil Comercial.

@@ -492,18 +492,31 @@ export function NovoOrcamentoModal({
       return
     }
 
-    const itensValidos = itens.map((item) => ({
-      descricao: item.descricao.trim(),
-      quantidade: Number(item.quantidade),
-      ca: item.ca.trim() || null,
-      tamanho: item.tamanho.trim() || null,
-      numero: item.numero.trim() || null,
-      cor: item.cor.trim() || null,
-      observacao: item.observacao.trim() || null,
-      codigo_produto_omie: item.codigoProdutoOmie,
-      preco_venda: orcamentoDireto ? Number(item.precoVenda) : null,
-      em_estoque: item.emEstoque,
-    }))
+    // Preço de venda é preenchível na criação tanto no orçamento direto
+    // (todos os itens, obrigatório) quanto por item marcado como em estoque
+    // (opcional — o item não depende de custo vindo de cotação, ver fase 26).
+    const itensValidos = itens.map((item) => {
+      const precoVendaDigitado = item.precoVenda.trim() === '' ? null : Number(item.precoVenda)
+      const precoVenda =
+        (orcamentoDireto || item.emEstoque) &&
+        precoVendaDigitado !== null &&
+        Number.isFinite(precoVendaDigitado)
+          ? precoVendaDigitado
+          : null
+
+      return {
+        descricao: item.descricao.trim(),
+        quantidade: Number(item.quantidade),
+        ca: item.ca.trim() || null,
+        tamanho: item.tamanho.trim() || null,
+        numero: item.numero.trim() || null,
+        cor: item.cor.trim() || null,
+        observacao: item.observacao.trim() || null,
+        codigo_produto_omie: item.codigoProdutoOmie,
+        preco_venda: precoVenda,
+        em_estoque: item.emEstoque,
+      }
+    })
 
     if (itensValidos.length === 0) {
       setErro('Adicione ao menos um item.')
@@ -975,10 +988,10 @@ export function NovoOrcamentoModal({
                         disabled={salvando}
                       />
                     </div>
-                    {orcamentoDireto && (
+                    {(orcamentoDireto || item.emEstoque) && (
                       <div className="min-w-[120px] flex-1">
                         <label className="block text-xs text-accent-compras">
-                          Preço de venda *
+                          Preço de venda{orcamentoDireto ? ' *' : ''}
                         </label>
                         <input
                           type="number"

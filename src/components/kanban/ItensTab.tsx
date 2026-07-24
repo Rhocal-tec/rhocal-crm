@@ -33,10 +33,14 @@ function specVazio(item: PedidoItem): SpecForm {
 export function ItensTab({
   itens,
   setor,
+  orcamentoDireto,
+  somenteLeitura = false,
   onItemAtualizado,
 }: {
   itens: PedidoItem[]
   setor: SetorTipo
+  orcamentoDireto: boolean
+  somenteLeitura?: boolean
   onItemAtualizado: (item: PedidoItem) => void
 }) {
   const [supabase] = useState(() => createClient())
@@ -62,8 +66,20 @@ export function ItensTab({
   )
 
   // Comercial e gestor veem custo final e editam o preço de venda; compras
-  // não (já vê o custo real na aba Cotações).
-  const veMargem = setor !== 'compras'
+  // não (já vê o custo real na aba Cotações). Fase 29: durante EM_COTACAO o
+  // comercial fica sem acesso a nada disso também (somenteLeitura).
+  const veMargem = setor !== 'compras' && !somenteLeitura
+  // Fase 28.3: itens em estoque são um assunto exclusivo do comercial — compras
+  // não os enxerga em lugar nenhum do sistema, nem edita a marcação.
+  const podeMarcarEmEstoque = setor !== 'compras' && !somenteLeitura
+  const itensVisiveis = setor === 'compras' ? itens.filter((item) => !item.em_estoque) : itens
+
+  // Preço de venda só é preenchível sem custo_final quando o item está em
+  // estoque (não passa por cotação) ou o pedido inteiro é orçamento direto
+  // (fase 19). Fora isso, o item ainda depende do custo liberado por Compras.
+  function podeEditarPrecoVenda(item: PedidoItem): boolean {
+    return orcamentoDireto || item.em_estoque || item.custo_final !== null
+  }
 
   function precoVendaAtual(itemId: string): string {
     return precoVendaPorItem[itemId] ?? ''
@@ -201,7 +217,7 @@ export function ItensTab({
 
   return (
     <div className="mt-4 flex flex-col gap-3">
-      {itens.map((item) => {
+      {itensVisiveis.map((item) => {
         const itemSpec = spec(item.id)
         const statusCodigo = statusCodigoPorItem[item.id] ?? 'idle'
         const corMargem = corMargemPrecoVenda(item.custo_final, Number(precoVendaAtual(item.id)))
@@ -216,56 +232,62 @@ export function ItensTab({
           <div key={item.id} className="rounded-lg border border-white/10 bg-surface p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="flex flex-1 flex-wrap gap-2">
-                <div className="min-w-[130px] flex-1">
-                  <label className="block text-xs text-muted">Código Omie</label>
-                  <div className="relative mt-1">
-                    <input
-                      type="text"
-                      value={codigoPorItem[item.id] ?? ''}
-                      onChange={(e) => atualizarCodigoInput(item.id, e.target.value)}
-                      onBlur={() => handleBlurCodigo(item)}
-                      placeholder={
-                        item.codigo_produto_omie !== null ? `#${item.codigo_produto_omie}` : '—'
-                      }
-                      className="input-field w-full rounded-md px-2 py-1.5 pr-7 font-mono text-sm"
-                    />
-                    {statusCodigo === 'buscando' && (
-                      <span
-                        aria-hidden="true"
-                        className="absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin rounded-full border-2 border-white/20 border-t-accent-primary"
+                {!somenteLeitura && (
+                  <div className="min-w-[130px] flex-1">
+                    <label className="block text-xs text-muted">Código Omie</label>
+                    <div className="relative mt-1">
+                      <input
+                        type="text"
+                        value={codigoPorItem[item.id] ?? ''}
+                        onChange={(e) => atualizarCodigoInput(item.id, e.target.value)}
+                        onBlur={() => handleBlurCodigo(item)}
+                        placeholder={
+                          item.codigo_produto_omie !== null ? `#${item.codigo_produto_omie}` : '—'
+                        }
+                        className="input-field w-full rounded-md px-2 py-1.5 pr-7 font-mono text-sm"
                       />
-                    )}
+                      {statusCodigo === 'buscando' && (
+                        <span
+                          aria-hidden="true"
+                          className="absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin rounded-full border-2 border-white/20 border-t-accent-primary"
+                        />
+                      )}
+                      {statusCodigo === 'encontrado' && (
+                        <span
+                          aria-hidden="true"
+                          title="Produto vinculado ao Omie"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-sm font-bold text-accent-success"
+                        >
+                          ✓
+                        </span>
+                      )}
+                    </div>
                     {statusCodigo === 'encontrado' && (
-                      <span
-                        aria-hidden="true"
-                        title="Produto vinculado ao Omie"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-sm font-bold text-accent-success"
-                      >
-                        ✓
-                      </span>
+                      <p className="mt-1 text-[11px] text-accent-success">Vinculado ao Omie</p>
+                    )}
+                    {statusCodigo === 'nao_encontrado' && (
+                      <p className="mt-1 text-[11px] text-muted">Código não encontrado no Omie.</p>
+                    )}
+                    {statusCodigo === 'erro' && (
+                      <p className="mt-1 text-[11px] text-accent-danger">
+                        Não foi possível consultar o Omie agora.
+                      </p>
                     )}
                   </div>
-                  {statusCodigo === 'encontrado' && (
-                    <p className="mt-1 text-[11px] text-accent-success">Vinculado ao Omie</p>
-                  )}
-                  {statusCodigo === 'nao_encontrado' && (
-                    <p className="mt-1 text-[11px] text-muted">Código não encontrado no Omie.</p>
-                  )}
-                  {statusCodigo === 'erro' && (
-                    <p className="mt-1 text-[11px] text-accent-danger">
-                      Não foi possível consultar o Omie agora.
-                    </p>
-                  )}
-                </div>
+                )}
                 <div className="min-w-[220px] flex-[2]">
                   <label className="block text-xs text-muted">Descrição</label>
-                  <input
-                    type="text"
-                    value={itemSpec.descricao}
-                    onChange={(e) => atualizarSpecCampo(item.id, 'descricao', e.target.value)}
-                    onBlur={(e) => salvarDescricao(item, e.target.value)}
-                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-                  />
+                  {somenteLeitura ? (
+                    <p className="mt-1 text-sm text-primary">{itemSpec.descricao}</p>
+                  ) : (
+                    <input
+                      type="text"
+                      value={itemSpec.descricao}
+                      onChange={(e) => atualizarSpecCampo(item.id, 'descricao', e.target.value)}
+                      onBlur={(e) => salvarDescricao(item, e.target.value)}
+                      className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                    />
+                  )}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-3 pt-5 font-mono text-xs text-muted">
@@ -289,63 +311,69 @@ export function ItensTab({
               </p>
             )}
 
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <div>
-                <label className="block text-xs text-muted">Tamanho</label>
-                <input
-                  type="text"
-                  value={itemSpec.tamanho}
-                  onChange={(e) => atualizarSpecCampo(item.id, 'tamanho', e.target.value)}
-                  onBlur={(e) => salvarSpecCampo(item, 'tamanho', e.target.value)}
-                  placeholder="—"
-                  className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-                />
+            {!somenteLeitura && (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-xs text-muted">Tamanho</label>
+                  <input
+                    type="text"
+                    value={itemSpec.tamanho}
+                    onChange={(e) => atualizarSpecCampo(item.id, 'tamanho', e.target.value)}
+                    onBlur={(e) => salvarSpecCampo(item, 'tamanho', e.target.value)}
+                    placeholder="—"
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">Número</label>
+                  <input
+                    type="text"
+                    value={itemSpec.numero}
+                    onChange={(e) => atualizarSpecCampo(item.id, 'numero', e.target.value)}
+                    onBlur={(e) => salvarSpecCampo(item, 'numero', e.target.value)}
+                    placeholder="—"
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted">Cor</label>
+                  <input
+                    type="text"
+                    value={itemSpec.cor}
+                    onChange={(e) => atualizarSpecCampo(item.id, 'cor', e.target.value)}
+                    onBlur={(e) => salvarSpecCampo(item, 'cor', e.target.value)}
+                    placeholder="—"
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-muted">Número</label>
-                <input
-                  type="text"
-                  value={itemSpec.numero}
-                  onChange={(e) => atualizarSpecCampo(item.id, 'numero', e.target.value)}
-                  onBlur={(e) => salvarSpecCampo(item, 'numero', e.target.value)}
-                  placeholder="—"
-                  className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-muted">Cor</label>
-                <input
-                  type="text"
-                  value={itemSpec.cor}
-                  onChange={(e) => atualizarSpecCampo(item.id, 'cor', e.target.value)}
-                  onBlur={(e) => salvarSpecCampo(item, 'cor', e.target.value)}
-                  placeholder="—"
-                  className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-                />
-              </div>
-            </div>
+            )}
 
-            <div className="mt-2">
-              <label className="block text-xs text-muted">Observação</label>
-              <textarea
-                value={itemSpec.observacao}
-                onChange={(e) => atualizarSpecCampo(item.id, 'observacao', e.target.value)}
-                onBlur={(e) => salvarSpecCampo(item, 'observacao', e.target.value)}
-                rows={2}
-                placeholder="—"
-                className="input-field mt-1 w-full resize-none rounded-md px-2 py-1.5 text-sm"
-              />
-            </div>
+            {!somenteLeitura && (
+              <div className="mt-2">
+                <label className="block text-xs text-muted">Observação</label>
+                <textarea
+                  value={itemSpec.observacao}
+                  onChange={(e) => atualizarSpecCampo(item.id, 'observacao', e.target.value)}
+                  onBlur={(e) => salvarSpecCampo(item, 'observacao', e.target.value)}
+                  rows={2}
+                  placeholder="—"
+                  className="input-field mt-1 w-full resize-none rounded-md px-2 py-1.5 text-sm"
+                />
+              </div>
+            )}
 
-            <label className="mt-3 flex w-fit cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={item.em_estoque}
-                onChange={(e) => alternarEmEstoque(item, e.target.checked)}
-                className="h-4 w-4 accent-accent-compras"
-              />
-              <span className="text-xs text-muted">Já em estoque (não precisa cotar)</span>
-            </label>
+            {podeMarcarEmEstoque && (
+              <label className="mt-3 flex w-fit cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={item.em_estoque}
+                  onChange={(e) => alternarEmEstoque(item, e.target.checked)}
+                  className="h-4 w-4 accent-accent-compras"
+                />
+                <span className="text-xs text-muted">Já em estoque (não precisa cotar)</span>
+              </label>
+            )}
 
             {veMargem && (
               <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-white/5 pt-3 text-sm">
@@ -355,32 +383,36 @@ export function ItensTab({
                     {formatarMoeda(item.custo_final)}
                   </span>
                 </div>
-                <label className="flex items-center gap-2">
-                  <span className="text-xs text-muted">Preço de venda:</span>
-                  <MoedaInput
-                    value={precoVendaAtual(item.id)}
-                    onChange={(valor) =>
-                      setPrecoVendaPorItem((atual) => ({ ...atual, [item.id]: valor }))
-                    }
-                    onBlurSalvar={(valor) => salvarPrecoVenda(item, valor)}
-                    className="input-field w-28 rounded-md px-2 py-1 font-mono text-sm font-medium"
-                    style={estiloCorMargem(corMargem)}
-                  />
-                  {corMargem && (
-                    <span
-                      aria-hidden="true"
-                      title="Indicador de margem"
-                      className="h-3.5 w-3.5 shrink-0 rounded-full border border-white/40"
-                      style={{ backgroundColor: corMargem }}
+                {podeEditarPrecoVenda(item) ? (
+                  <label className="flex items-center gap-2">
+                    <span className="text-xs text-muted">Preço de venda:</span>
+                    <MoedaInput
+                      value={precoVendaAtual(item.id)}
+                      onChange={(valor) =>
+                        setPrecoVendaPorItem((atual) => ({ ...atual, [item.id]: valor }))
+                      }
+                      onBlurSalvar={(valor) => salvarPrecoVenda(item, valor)}
+                      className="input-field w-28 rounded-md px-2 py-1 font-mono text-sm font-medium"
+                      style={estiloCorMargem(corMargem)}
                     />
-                  )}
-                </label>
+                    {corMargem && (
+                      <span
+                        aria-hidden="true"
+                        title="Indicador de margem"
+                        className="h-3.5 w-3.5 shrink-0 rounded-full border border-white/40"
+                        style={{ backgroundColor: corMargem }}
+                      />
+                    )}
+                  </label>
+                ) : (
+                  <span className="text-xs text-muted">Aguardando cotação</span>
+                )}
               </div>
             )}
           </div>
         )
       })}
-      {itens.length === 0 && (
+      {itensVisiveis.length === 0 && (
         <p className="py-4 text-center text-sm text-muted">Nenhum item cadastrado.</p>
       )}
     </div>
