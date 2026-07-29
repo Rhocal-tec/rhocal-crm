@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { useEmpresa } from '@/contexts/EmpresaContext'
 import { Modal } from '@/components/ui/Modal'
 import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
 
@@ -108,6 +109,7 @@ export function NovoOrcamentoModal({
   onClose: () => void
 }) {
   const { user } = useAuth()
+  const { empresaAtiva } = useEmpresa()
   const [supabase] = useState(() => createClient())
   const [cnpj, setCnpj] = useState('')
   const [buscandoCnpj, setBuscandoCnpj] = useState(false)
@@ -168,7 +170,7 @@ export function NovoOrcamentoModal({
       const resposta = await fetch('/api/omie/buscar-clientes-nome', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome: termo }),
+        body: JSON.stringify({ nome: termo, empresaSlug: empresaAtiva?.slug }),
       })
       const dados = await resposta.json().catch(() => null)
       if (resposta.ok && dados && Array.isArray(dados.clientes)) {
@@ -221,7 +223,7 @@ export function NovoOrcamentoModal({
       const resposta = await fetch('/api/omie/buscar-cliente-cnpj', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cnpj: digitos }),
+        body: JSON.stringify({ cnpj: digitos, empresaSlug: empresaAtiva?.slug }),
       })
       const dados = await resposta.json().catch(() => null)
 
@@ -360,6 +362,7 @@ export function NovoOrcamentoModal({
           cidade: cadastroForm.cidade.trim(),
           estado: cadastroForm.estado.trim(),
           email: cadastroForm.email.trim(),
+          empresaSlug: empresaAtiva?.slug,
         }),
       })
       const dados = await resposta.json().catch(() => null)
@@ -432,7 +435,7 @@ export function NovoOrcamentoModal({
       const resposta = await fetch('/api/omie/buscar-produto-codigo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigo }),
+        body: JSON.stringify({ codigo, empresaSlug: empresaAtiva?.slug }),
       })
       const dados = await resposta.json().catch(() => null)
 
@@ -485,6 +488,11 @@ export function NovoOrcamentoModal({
     setErro(null)
 
     if (!user) return
+
+    if (!empresaAtiva) {
+      setErro('Não foi possível identificar a empresa ativa. Recarregue a página.')
+      return
+    }
 
     const clienteValido = clienteNome.trim()
     if (!clienteValido) {
@@ -554,6 +562,7 @@ export function NovoOrcamentoModal({
         status: orcamentoDireto ? 'APROVADO_CLIENTE' : undefined,
         orcamento_direto: orcamentoDireto,
         criado_por: user.id,
+        empresa_id: empresaAtiva.id,
       })
       .select()
       .single()
@@ -1098,7 +1107,7 @@ export function NovoOrcamentoModal({
           </button>
           <button
             type="submit"
-            disabled={salvando}
+            disabled={salvando || !empresaAtiva}
             className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-dark disabled:opacity-50"
           >
             {salvando ? 'Criando…' : 'Criar Orçamento'}

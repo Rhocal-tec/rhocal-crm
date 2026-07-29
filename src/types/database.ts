@@ -16,9 +16,56 @@ export type ArquivoMotivo = 'manual' | 'inatividade'
 
 export type AuditAcao = 'criou' | 'alterou' | 'moveu' | 'arquivou_auto' | string
 
+export type EmpresaSlug = 'rhocal' | 'matseg'
+
 export interface Database {
   public: {
     Tables: {
+      empresas: {
+        Row: {
+          id: string
+          slug: string
+          nome_fantasia: string
+          razao_social: string
+          cnpj: string
+          ie: string | null
+          endereco: string
+          telefone: string
+          logo_path: string
+          cor_primaria: string
+          cor_secundaria: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          slug: string
+          nome_fantasia: string
+          razao_social: string
+          cnpj: string
+          ie?: string | null
+          endereco: string
+          telefone: string
+          logo_path: string
+          cor_primaria: string
+          cor_secundaria?: string | null
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          slug?: string
+          nome_fantasia?: string
+          razao_social?: string
+          cnpj?: string
+          ie?: string | null
+          endereco?: string
+          telefone?: string
+          logo_path?: string
+          cor_primaria?: string
+          cor_secundaria?: string | null
+          criado_em?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           id: string
@@ -65,6 +112,7 @@ export interface Database {
           criado_em: string
           ultima_movimentacao: string
           movido_por: string | null
+          empresa_id: string | null
         }
         Insert: {
           id?: string
@@ -90,6 +138,7 @@ export interface Database {
           criado_em?: string
           ultima_movimentacao?: string
           movido_por?: string | null
+          empresa_id?: string | null
         }
         Update: {
           id?: string
@@ -115,6 +164,7 @@ export interface Database {
           criado_em?: string
           ultima_movimentacao?: string
           movido_por?: string | null
+          empresa_id?: string | null
         }
         Relationships: []
       }

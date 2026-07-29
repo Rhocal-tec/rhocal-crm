@@ -174,7 +174,7 @@ export function ItensTab({
       const resposta = await fetch('/api/omie/buscar-produto-codigo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigo }),
+        body: JSON.stringify({ codigo, pedidoId: item.pedido_id }),
       })
       const dados = await resposta.json().catch(() => null)
 

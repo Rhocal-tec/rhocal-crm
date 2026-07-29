@@ -3,11 +3,12 @@
 import { useEffect, useState } from 'react'
 import { pdf } from '@react-pdf/renderer'
 import { createClient } from '@/lib/supabase/client'
-import { OrcamentoPdfDocument } from './OrcamentoPdfDocument'
+import { OrcamentoPdfDocument, EMPRESA_PDF_PADRAO } from './OrcamentoPdfDocument'
 import type { Database, SetorTipo } from '@/types/database'
 
 type Pedido = Database['public']['Tables']['pedidos']['Row']
 type PedidoItem = Database['public']['Tables']['pedido_itens']['Row']
+type Empresa = Database['public']['Tables']['empresas']['Row']
 
 export function OrcamentoPdfButton({
   pedido,
@@ -20,6 +21,7 @@ export function OrcamentoPdfButton({
 }) {
   const [supabase] = useState(() => createClient())
   const [nomeVendedor, setNomeVendedor] = useState<string | null>(null)
+  const [empresaPedido, setEmpresaPedido] = useState<Empresa | null>(null)
   const [gerando, setGerando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -46,6 +48,28 @@ export function OrcamentoPdfButton({
     }
   }, [pedido.criado_por, podeBaixar, supabase])
 
+  // O PDF reflete a empresa DONA do pedido (a que criou), não a empresa
+  // ativa no seletor do header no momento de gerar o documento.
+  useEffect(() => {
+    if (!podeBaixar || !pedido.empresa_id) return
+    let ativo = true
+
+    async function carregar() {
+      const { data } = await supabase
+        .from('empresas')
+        .select('*')
+        .eq('id', pedido.empresa_id as string)
+        .maybeSingle()
+      if (ativo) setEmpresaPedido(data ?? null)
+    }
+
+    carregar()
+
+    return () => {
+      ativo = false
+    }
+  }, [pedido.empresa_id, podeBaixar, supabase])
+
   if (!podeBaixar) return null
 
   async function baixarPdf() {
@@ -58,6 +82,7 @@ export function OrcamentoPdfButton({
           itens={itens}
           nomeVendedor={nomeVendedor}
           dataEmissao={new Date()}
+          empresa={empresaPedido ?? EMPRESA_PDF_PADRAO}
         />,
       ).toBlob()
 

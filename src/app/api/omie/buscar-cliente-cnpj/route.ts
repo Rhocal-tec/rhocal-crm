@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { registrarErro } from '@/lib/omie/registrar-erro'
+import { chamarOmie, resolverCredenciaisOmie } from '@/lib/omie/chamar-omie'
 
-// Nunca expor OMIE_APP_KEY/OMIE_APP_SECRET no client — só lidas aqui, server-side.
+// Nunca expor OMIE_APP_KEY_*/OMIE_APP_SECRET_* no client — só lidas aqui, server-side.
 const OMIE_CLIENTES_URL = 'https://app.omie.com.br/api/v1/geral/clientes/'
 
 interface ClienteOmie {
@@ -10,41 +11,6 @@ interface ClienteOmie {
   razaoSocial: string
   nomeFantasia: string | null
   cnpjCpf: string | null
-}
-
-// Chama a API do Omie e normaliza os dois jeitos que ela sinaliza erro:
-// HTTP não-2xx, ou HTTP 200 com um corpo { faultstring, faultcode }.
-async function chamarOmie(url: string, call: string, param: Record<string, unknown>) {
-  const appKey = process.env.OMIE_APP_KEY
-  const appSecret = process.env.OMIE_APP_SECRET
-  if (!appKey || !appSecret) {
-    throw new Error('Credenciais do Omie não configuradas no servidor.')
-  }
-
-  let resposta: Response
-  try {
-    resposta = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ call, app_key: appKey, app_secret: appSecret, param: [param] }),
-    })
-  } catch {
-    throw new Error('Não foi possível conectar à API do Omie. Verifique sua conexão e tente novamente.')
-  }
-
-  const dados = await resposta.json().catch(() => null)
-
-  if (!dados) {
-    throw new Error('A API do Omie retornou uma resposta inválida.')
-  }
-  if (typeof dados.faultstring === 'string') {
-    throw new Error(dados.faultstring)
-  }
-  if (!resposta.ok) {
-    throw new Error(`A API do Omie retornou um erro inesperado (HTTP ${resposta.status}).`)
-  }
-
-  return dados as Record<string, unknown>
 }
 
 export async function POST(request: Request) {
@@ -77,14 +43,24 @@ export async function POST(request: Request) {
   }
 
   try {
+    // Pedido já existente (busca feita de dentro do pedido) usa a empresa
+    // dona dele; sem pedidoId (criação de um orçamento novo) usa a empresa
+    // ativa no seletor, enviada pelo client como empresaSlug.
+    const credenciais = await resolverCredenciaisOmie(supabase, body)
+
     let resultado: Record<string, unknown>
     try {
-      resultado = await chamarOmie(OMIE_CLIENTES_URL, 'ListarClientes', {
-        pagina: 1,
-        registros_por_pagina: 1,
-        apenas_importado_api: 'N',
-        clientesFiltro: { cnpj_cpf: cnpj },
-      })
+      resultado = await chamarOmie(
+        OMIE_CLIENTES_URL,
+        'ListarClientes',
+        {
+          pagina: 1,
+          registros_por_pagina: 1,
+          apenas_importado_api: 'N',
+          clientesFiltro: { cnpj_cpf: cnpj },
+        },
+        credenciais,
+      )
     } catch (err) {
       // O Omie sinaliza "nenhum cliente bate com o filtro" como uma falha
       // (faultstring "Não existem registros para a página...") em vez de uma

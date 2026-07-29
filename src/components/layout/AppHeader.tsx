@@ -4,6 +4,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useEmpresa } from '@/contexts/EmpresaContext'
 import type { SetorTipo } from '@/types/database'
 
 const SETOR_LABEL: Record<SetorTipo, string> = {
@@ -32,6 +33,7 @@ export function AppHeader() {
   const pathname = usePathname()
   const router = useRouter()
   const { user, profile, signOut } = useAuth()
+  const { empresaAtiva } = useEmpresa()
 
   async function handleLogout() {
     await signOut()
@@ -44,14 +46,14 @@ export function AppHeader() {
       <div className="flex flex-wrap items-center gap-6">
         <div className="flex items-center gap-2.5">
           <Image
-            src="/rhocal-logo.png"
-            alt="RHOCAL"
+            src={empresaAtiva?.logo_path ?? '/rhocal-logo.png'}
+            alt={empresaAtiva?.nome_fantasia ?? 'RHOCAL'}
             width={28}
             height={28}
             className="rounded-md"
           />
           <span className="font-heading text-lg font-semibold tracking-wide text-primary">
-            RHOCAL CRM
+            {empresaAtiva?.nome_fantasia ?? 'RHOCAL'} CRM
           </span>
           {profile && (
             <span
@@ -86,6 +88,7 @@ export function AppHeader() {
         </nav>
       </div>
       <div className="flex items-center gap-3">
+        <EmpresaSwitcher />
         <span className="text-sm text-primary/70">
           {profile?.nome ?? user?.email}{' '}
           <span className="text-muted">({profile ? SETOR_LABEL[profile.setor] : '—'})</span>
@@ -108,5 +111,48 @@ export function AppHeader() {
         </button>
       </div>
     </header>
+  )
+}
+
+// Seletor de empresa ativa (RHOCAL/MATSEG) — troca o workspace inteiro
+// (visual + escopo de dados), disponível para qualquer perfil.
+function EmpresaSwitcher() {
+  const { empresas, empresaAtiva, loading, trocarEmpresa } = useEmpresa()
+
+  if (loading || empresas.length < 2) return null
+
+  return (
+    <div
+      role="group"
+      aria-label="Empresa ativa"
+      className="flex items-center gap-1 rounded-full border border-white/10 bg-surface-alt p-1"
+    >
+      {empresas.map((empresa) => {
+        const ativa = empresa.slug === empresaAtiva?.slug
+        return (
+          <button
+            key={empresa.slug}
+            type="button"
+            onClick={() => trocarEmpresa(empresa.slug)}
+            aria-pressed={ativa}
+            title={empresa.nome_fantasia}
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+              ativa
+                ? 'bg-accent-primary text-white'
+                : 'text-muted hover:text-primary/80'
+            }`}
+          >
+            <Image
+              src={empresa.logo_path}
+              alt=""
+              width={16}
+              height={16}
+              className="rounded-sm"
+            />
+            {empresa.nome_fantasia}
+          </button>
+        )
+      })}
+    </div>
   )
 }

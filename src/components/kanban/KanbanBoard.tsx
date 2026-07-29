@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/core'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { useEmpresa } from '@/contexts/EmpresaContext'
 import { KANBAN_COLUMNS, STATUS_LABELS } from '@/lib/kanban/status'
 import { podeMoverPara } from '@/lib/kanban/permissions'
 import { validarPedidoParaCotado } from '@/lib/kanban/validacao-cotado'
@@ -22,6 +23,7 @@ type Pedido = Database['public']['Tables']['pedidos']['Row']
 
 export function KanbanBoard({ setor }: { setor: SetorTipo }) {
   const { user } = useAuth()
+  const { empresaAtiva } = useEmpresa()
   const [supabase] = useState(() => createClient())
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [loading, setLoading] = useState(true)
@@ -41,14 +43,19 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   )
 
-  // Carrega os pedidos visíveis no kanban (tudo exceto ARQUIVADO e PERDIDO).
+  // Carrega os pedidos visíveis no kanban (tudo exceto ARQUIVADO e PERDIDO),
+  // escopados pela empresa ativa. Refaz a busca sempre que a empresa ativa
+  // muda (troca no seletor do header).
   useEffect(() => {
+    if (!empresaAtiva) return
     let ativo = true
+    setLoading(true)
 
     async function carregar() {
       const { data, error } = await supabase
         .from('pedidos')
         .select('*')
+        .eq('empresa_id', empresaAtiva!.id)
         .not('status', 'in', '(ARQUIVADO,PERDIDO)')
         .order('criado_em', { ascending: true })
 
@@ -66,7 +73,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
     return () => {
       ativo = false
     }
-  }, [supabase])
+  }, [supabase, empresaAtiva])
 
   // Nomes de todos os colaboradores, para resolver "Movido por X" nos cards.
   useEffect(() => {
@@ -91,13 +98,17 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
   // wildcard que, combinado com a configuração de replicação do projeto,
   // pode não entregar todos os tipos de evento de forma confiável.
   useEffect(() => {
+    if (!empresaAtiva) return
+    const empresaId = empresaAtiva.id
+
     const channel = supabase
-      .channel('pedidos-kanban')
+      .channel(`pedidos-kanban-${empresaId}`)
       .on<Pedido>(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'pedidos' },
         (payload) => {
           const novo = payload.new
+          if (novo.empresa_id !== empresaId) return
           if (novo.status === 'ARQUIVADO' || novo.status === 'PERDIDO') return
           setPedidos((atual) => {
             if (atual.some((p) => p.id === novo.id)) return atual
@@ -110,6 +121,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
         { event: 'UPDATE', schema: 'public', table: 'pedidos' },
         (payload) => {
           const atualizado = payload.new
+          if (atualizado.empresa_id !== empresaId) return
           setPedidos((atual) => {
             if (atualizado.status === 'ARQUIVADO' || atualizado.status === 'PERDIDO') {
               return atual.filter((p) => p.id !== atualizado.id)
@@ -137,7 +149,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase])
+  }, [supabase, empresaAtiva])
 
   // Some avisos de bloqueio automaticamente após alguns segundos.
   useEffect(() => {

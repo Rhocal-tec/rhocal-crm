@@ -248,6 +248,7 @@ export function PedidoDetalheModal({
         cliente_telefone: pedido.cliente_telefone,
         cliente_contato: pedido.cliente_contato,
         criado_por: user.id,
+        empresa_id: pedido.empresa_id,
       })
       .select()
       .single()

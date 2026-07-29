@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useEmpresa } from '@/contexts/EmpresaContext'
 import { createClient } from '@/lib/supabase/client'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { ErrosRecentesSection } from '@/components/painel/ErrosRecentesSection'
@@ -23,6 +24,7 @@ interface EventoAudit {
 
 export default function PainelPage() {
   const { profile, loading: authLoading } = useAuth()
+  const { empresaAtiva } = useEmpresa()
   const router = useRouter()
   const [supabase] = useState(() => createClient())
 
@@ -66,7 +68,7 @@ export default function PainelPage() {
   }
 
   useEffect(() => {
-    if (!ehGestor) return
+    if (!ehGestor || !empresaAtiva) return
     let ativo = true
 
     async function carregar() {
@@ -78,6 +80,7 @@ export default function PainelPage() {
         let queryPedidos = supabase
           .from('pedidos')
           .select('id, status, ultima_movimentacao, criado_em, motivo_perda')
+          .eq('empresa_id', empresaAtiva!.id)
 
         if (inicio) queryPedidos = queryPedidos.gte('criado_em', `${inicio}T00:00:00`)
         if (fim) queryPedidos = queryPedidos.lt('criado_em', `${proximoDia(fim)}T00:00:00`)
@@ -232,7 +235,7 @@ export default function PainelPage() {
     return () => {
       ativo = false
     }
-  }, [ehGestor, range, supabase])
+  }, [ehGestor, range, supabase, empresaAtiva])
 
   if (authLoading || !profile || !ehGestor) {
     return (

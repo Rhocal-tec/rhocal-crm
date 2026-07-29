@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { registrarErro } from '@/lib/omie/registrar-erro'
+import {
+  chamarOmie,
+  resolverCredenciaisOmie,
+  obterCredenciaisOmiePorEmpresaId,
+  type CredenciaisOmie,
+} from '@/lib/omie/chamar-omie'
 
-// Nunca expor OMIE_APP_KEY/OMIE_APP_SECRET no client — só lidas aqui, server-side.
+// Nunca expor OMIE_APP_KEY_*/OMIE_APP_SECRET_* no client — só lidas aqui, server-side.
 const OMIE_CLIENTES_URL = 'https://app.omie.com.br/api/v1/geral/clientes/'
 const OMIE_PEDIDO_URL = 'https://app.omie.com.br/api/v1/produtos/pedido/'
 const OMIE_CATEGORIAS_URL = 'https://app.omie.com.br/api/v1/geral/categorias/'
@@ -13,41 +19,6 @@ interface ClienteOmie {
   razaoSocial: string
   nomeFantasia: string | null
   cnpjCpf: string | null
-}
-
-// Chama a API do Omie e normaliza os dois jeitos que ela sinaliza erro:
-// HTTP não-2xx, ou HTTP 200 com um corpo { faultstring, faultcode }.
-async function chamarOmie(url: string, call: string, param: Record<string, unknown>) {
-  const appKey = process.env.OMIE_APP_KEY
-  const appSecret = process.env.OMIE_APP_SECRET
-  if (!appKey || !appSecret) {
-    throw new Error('Credenciais do Omie não configuradas no servidor.')
-  }
-
-  let resposta: Response
-  try {
-    resposta = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ call, app_key: appKey, app_secret: appSecret, param: [param] }),
-    })
-  } catch {
-    throw new Error('Não foi possível conectar à API do Omie. Verifique sua conexão e tente novamente.')
-  }
-
-  const dados = await resposta.json().catch(() => null)
-
-  if (!dados) {
-    throw new Error('A API do Omie retornou uma resposta inválida.')
-  }
-  if (typeof dados.faultstring === 'string') {
-    throw new Error(dados.faultstring)
-  }
-  if (!resposta.ok) {
-    throw new Error(`A API do Omie retornou um erro inesperado (HTTP ${resposta.status}).`)
-  }
-
-  return dados as Record<string, unknown>
 }
 
 function formatarDataOmie(data: Date): string {
@@ -112,21 +83,30 @@ function filtrarItemEntrada(item: Record<string, unknown>): Record<string, unkno
 }
 
 // Cache simples em memória do processo — evita chamar ListarCategorias a cada
-// orçamento gerado. Sem TTL: a categoria financeira padrão da conta Omie não
-// muda com frequência: reiniciar o servidor já é o suficiente para renovar.
-let categoriaReceitaCache: string | null = null
+// orçamento gerado. Sem TTL: a categoria financeira padrão de cada conta Omie
+// não muda com frequência: reiniciar o servidor já é o suficiente para
+// renovar. Chaveado por app_key: cada empresa é uma conta Omie separada, com
+// categorias e contas correntes próprias — um cache único misturaria a
+// categoria de uma empresa nos orçamentos da outra.
+const categoriaReceitaCachePorEmpresa = new Map<string, string>()
 
 // Busca a primeira categoria financeira do tipo RECEITA cadastrada na conta
 // Omie, para usar como codigo_categoria padrão dos orçamentos gerados pelo CRM.
-async function obterCategoriaReceitaPadrao(): Promise<string> {
-  if (categoriaReceitaCache) return categoriaReceitaCache
+async function obterCategoriaReceitaPadrao(credenciais: CredenciaisOmie): Promise<string> {
+  const cacheado = categoriaReceitaCachePorEmpresa.get(credenciais.appKey)
+  if (cacheado) return cacheado
 
-  const resultado = await chamarOmie(OMIE_CATEGORIAS_URL, 'ListarCategorias', {
-    pagina: 1,
-    registros_por_pagina: 50,
-    filtrar_apenas_ativo: 'S',
-    filtrar_por_tipo: 'R',
-  })
+  const resultado = await chamarOmie(
+    OMIE_CATEGORIAS_URL,
+    'ListarCategorias',
+    {
+      pagina: 1,
+      registros_por_pagina: 50,
+      filtrar_apenas_ativo: 'S',
+      filtrar_por_tipo: 'R',
+    },
+    credenciais,
+  )
 
   const bruto = Array.isArray(resultado.categoria_cadastro) ? resultado.categoria_cadastro : []
   const receita = bruto.find((cat: Record<string, unknown>) => {
@@ -144,23 +124,32 @@ async function obterCategoriaReceitaPadrao(): Promise<string> {
     )
   }
 
-  categoriaReceitaCache = codigo
+  categoriaReceitaCachePorEmpresa.set(credenciais.appKey, codigo)
   return codigo
 }
 
-// Mesmo cache simples em memória do processo, para a conta corrente padrão.
-let contaCorrentePadraoCache: { codigo: number; descricao: string } | null = null
+// Mesmo cache simples em memória do processo, chaveado por empresa, para a
+// conta corrente padrão.
+const contaCorrentePadraoCachePorEmpresa = new Map<string, { codigo: number; descricao: string }>()
 
 // Busca a primeira conta corrente ATIVA cadastrada na conta Omie, para usar
 // como codigo_conta_corrente padrão dos orçamentos gerados pelo CRM.
-async function obterContaCorrentePadrao(): Promise<{ codigo: number; descricao: string }> {
-  if (contaCorrentePadraoCache) return contaCorrentePadraoCache
+async function obterContaCorrentePadrao(
+  credenciais: CredenciaisOmie,
+): Promise<{ codigo: number; descricao: string }> {
+  const cacheado = contaCorrentePadraoCachePorEmpresa.get(credenciais.appKey)
+  if (cacheado) return cacheado
 
-  const resultado = await chamarOmie(OMIE_CONTA_CORRENTE_URL, 'ListarContasCorrentes', {
-    pagina: 1,
-    registros_por_pagina: 50,
-    apenas_importado_api: 'N',
-  })
+  const resultado = await chamarOmie(
+    OMIE_CONTA_CORRENTE_URL,
+    'ListarContasCorrentes',
+    {
+      pagina: 1,
+      registros_por_pagina: 50,
+      apenas_importado_api: 'N',
+    },
+    credenciais,
+  )
 
   const bruto = Array.isArray(resultado.ListarContasCorrentes)
     ? resultado.ListarContasCorrentes
@@ -174,8 +163,9 @@ async function obterContaCorrentePadrao(): Promise<{ codigo: number; descricao: 
     )
   }
 
-  contaCorrentePadraoCache = { codigo, descricao: (ativa.descricao as string) ?? '' }
-  return contaCorrentePadraoCache
+  const resolvida = { codigo, descricao: (ativa.descricao as string) ?? '' }
+  contaCorrentePadraoCachePorEmpresa.set(credenciais.appKey, resolvida)
+  return resolvida
 }
 
 export async function POST(request: Request) {
@@ -218,14 +208,21 @@ export async function POST(request: Request) {
         return NextResponse.json({ erro: 'Nome do cliente não informado.' }, { status: 400 })
       }
 
+      const credenciais = await resolverCredenciaisOmie(supabase, body)
+
       let resultado: Record<string, unknown>
       try {
-        resultado = await chamarOmie(OMIE_CLIENTES_URL, 'ListarClientes', {
-          pagina: 1,
-          registros_por_pagina: 10,
-          apenas_importado_api: 'N',
-          clientesFiltro: { razao_social: clienteNome },
-        })
+        resultado = await chamarOmie(
+          OMIE_CLIENTES_URL,
+          'ListarClientes',
+          {
+            pagina: 1,
+            registros_por_pagina: 10,
+            apenas_importado_api: 'N',
+            clientesFiltro: { razao_social: clienteNome },
+          },
+          credenciais,
+        )
       } catch (err) {
         // O Omie sinaliza "nenhum cliente bate com o filtro" como uma falha
         // (faultstring "Não existem registros para a página...") em vez de uma
@@ -315,42 +312,50 @@ export async function POST(request: Request) {
         )
       }
 
-      const codigoCategoria = await obterCategoriaReceitaPadrao()
-      const contaCorrente = await obterContaCorrentePadrao()
+      // Empresa DONA do pedido — não a empresa ativa no seletor do header no
+      // momento da chamada (fase 30 do CLAUDE.md).
+      const credenciais = await obterCredenciaisOmiePorEmpresaId(supabase, pedido.empresa_id)
+      const codigoCategoria = await obterCategoriaReceitaPadrao(credenciais)
+      const contaCorrente = await obterContaCorrentePadrao(credenciais)
 
-      const resultado = await chamarOmie(OMIE_PEDIDO_URL, 'IncluirPedido', {
-        // codigo_parcela/quantidade_parcelas não pertencem a "cabecalho" — são
-        // campos de condição de pagamento (bloco "condicao_pagamento") e não
-        // são necessários para um orçamento simples.
-        cabecalho: {
-          codigo_cliente: codigoClienteOmie ?? 0,
-          data_previsao: formatarDataOmie(new Date()),
-          // "00" = Orçamento (não Pedido de Venda completo).
-          etapa: '00',
-          origem_pedido: 'API',
-          // Identificador único nosso, exigido pelo Omie para rastrear/evitar
-          // duplicidade — não é o codigo_pedido (esse é gerado pelo Omie na resposta).
-          codigo_pedido_integracao: `RHOCAL-CRM-${pedido.numero}`,
-        },
-        det: itens.map((item, index) => ({
-          // Identificador único do item na nossa integração, exigido pelo
-          // Omie — mesmo papel do codigo_pedido_integracao, mas por item.
-          ide: {
-            codigo_item_integracao: `RHOCAL-CRM-${pedido.numero}-${index + 1}`,
+      const resultado = await chamarOmie(
+        OMIE_PEDIDO_URL,
+        'IncluirPedido',
+        {
+          // codigo_parcela/quantidade_parcelas não pertencem a "cabecalho" —
+          // são campos de condição de pagamento (bloco "condicao_pagamento")
+          // e não são necessários para um orçamento simples.
+          cabecalho: {
+            codigo_cliente: codigoClienteOmie ?? 0,
+            data_previsao: formatarDataOmie(new Date()),
+            // "00" = Orçamento (não Pedido de Venda completo).
+            etapa: '00',
+            origem_pedido: 'API',
+            // Identificador único nosso, exigido pelo Omie para rastrear/evitar
+            // duplicidade — não é o codigo_pedido (esse é gerado pelo Omie na resposta).
+            codigo_pedido_integracao: `RHOCAL-CRM-${pedido.numero}`,
           },
-          produto: {
-            codigo_produto: item.codigo_produto_omie,
-            descricao: item.descricao,
-            quantidade: Number(item.quantidade),
-            valor_unitario: Number(item.preco_venda),
+          det: itens.map((item, index) => ({
+            // Identificador único do item na nossa integração, exigido pelo
+            // Omie — mesmo papel do codigo_pedido_integracao, mas por item.
+            ide: {
+              codigo_item_integracao: `RHOCAL-CRM-${pedido.numero}-${index + 1}`,
+            },
+            produto: {
+              codigo_produto: item.codigo_produto_omie,
+              descricao: item.descricao,
+              quantidade: Number(item.quantidade),
+              valor_unitario: Number(item.preco_venda),
+            },
+          })),
+          informacoes_adicionais: {
+            consumidor_final: 'S',
+            codigo_categoria: codigoCategoria,
+            codigo_conta_corrente: contaCorrente.codigo,
           },
-        })),
-        informacoes_adicionais: {
-          consumidor_final: 'S',
-          codigo_categoria: codigoCategoria,
-          codigo_conta_corrente: contaCorrente.codigo,
         },
-      })
+        credenciais,
+      )
 
       const codigoPedido = resultado.codigo_pedido as number | undefined
       if (!codigoPedido) {
@@ -465,12 +470,21 @@ export async function POST(request: Request) {
         }))
       }
 
+      // Empresa DONA do pedido — não a empresa ativa no seletor do header no
+      // momento da chamada (fase 30 do CLAUDE.md).
+      const credenciais = await obterCredenciaisOmiePorEmpresaId(supabase, pedido.empresa_id)
+
       // Busca o pedido como está hoje no Omie — preserva qualquer edição feita
       // manualmente lá (endereço, frete, itens) em vez de reconstruir tudo do
       // zero a partir do nosso banco, que poderia estar desatualizado.
-      const atual = await chamarOmie(OMIE_PEDIDO_URL, 'ConsultarPedido', {
-        codigo_pedido: pedido.omie_orcamento_id,
-      })
+      const atual = await chamarOmie(
+        OMIE_PEDIDO_URL,
+        'ConsultarPedido',
+        {
+          codigo_pedido: pedido.omie_orcamento_id,
+        },
+        credenciais,
+      )
       const pedidoOmie = atual.pedido_venda_produto as Record<string, unknown> | undefined
       if (!pedidoOmie || !pedidoOmie.cabecalho || !pedidoOmie.det) {
         return NextResponse.json(
@@ -512,8 +526,8 @@ export async function POST(request: Request) {
         return { ...p, valor, data_vencimento: formatarDataOmie(vencimento) }
       })
 
-      const codigoCategoria = await obterCategoriaReceitaPadrao()
-      const contaCorrente = await obterContaCorrentePadrao()
+      const codigoCategoria = await obterCategoriaReceitaPadrao(credenciais)
+      const contaCorrente = await obterContaCorrentePadrao(credenciais)
 
       // Só os campos de ENTRADA aceitos por AlterarPedidoVenda — nunca reenviar
       // os blocos que o próprio Omie devolve como calculados/de auditoria na
@@ -564,7 +578,7 @@ export async function POST(request: Request) {
       }
       if (pedidoOmie.observacoes) payload.observacoes = pedidoOmie.observacoes
 
-      await chamarOmie(OMIE_PEDIDO_URL, 'AlterarPedidoVenda', payload)
+      await chamarOmie(OMIE_PEDIDO_URL, 'AlterarPedidoVenda', payload, credenciais)
 
       const { error: erroUpdate } = await supabase
         .from('pedidos')

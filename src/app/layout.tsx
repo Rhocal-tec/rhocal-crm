@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Barlow_Condensed, Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { EmpresaProvider } from "@/contexts/EmpresaContext";
 
 // Títulos e números de pedido.
 const barlowCondensed = Barlow_Condensed({
@@ -38,7 +39,9 @@ export default function RootLayout({
       <body
         className={`${barlowCondensed.variable} ${inter.variable} ${ibmPlexMono.variable} antialiased`}
       >
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <EmpresaProvider>{children}</EmpresaProvider>
+        </AuthProvider>
       </body>
     </html>
   );

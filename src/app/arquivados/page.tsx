@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useEmpresa } from '@/contexts/EmpresaContext'
 import { createClient } from '@/lib/supabase/client'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { FiltroData } from '@/components/busca/FiltroData'
@@ -30,6 +31,7 @@ const FILTRO_SITUACAO_OPCOES: { valor: FiltroSituacao; label: string }[] = [
 
 export default function ArquivadosPage() {
   const { profile, loading } = useAuth()
+  const { empresaAtiva } = useEmpresa()
   const [supabase] = useState(() => createClient())
   const [pedidoAbertoId, setPedidoAbertoId] = useState<string | null>(null)
 
@@ -45,12 +47,14 @@ export default function ArquivadosPage() {
   const [erro, setErro] = useState<string | null>(null)
 
   async function executarBusca(situacao: FiltroSituacao) {
+    if (!empresaAtiva) return
     setErro(null)
     setCarregando(true)
 
     let query = supabase
       .from('pedidos')
       .select('id, numero, cliente_nome, criado_em, status, arquivado_motivo, motivo_perda')
+      .eq('empresa_id', empresaAtiva.id)
       .order('criado_em', { ascending: false })
 
     if (situacao === 'arquivados') {
@@ -91,11 +95,15 @@ export default function ArquivadosPage() {
     setResultados(data ?? [])
   }
 
-  // Carrega tudo (arquivados + perdidos) ao entrar na página, sem filtros.
+  // Carrega tudo (arquivados + perdidos) ao entrar na página, sem filtros, e
+  // de novo sempre que a empresa ativa mudar (mantém o filtro de situação já
+  // selecionado, mas descarta o termo buscado — resultado de outra empresa
+  // não deve continuar na tela).
   useEffect(() => {
-    executarBusca('todos')
+    if (!empresaAtiva) return
+    executarBusca(filtroSituacao)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase])
+  }, [supabase, empresaAtiva?.id])
 
   function selecionarFiltroSituacao(situacao: FiltroSituacao) {
     setFiltroSituacao(situacao)

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useEmpresa } from '@/contexts/EmpresaContext'
 import { createClient } from '@/lib/supabase/client'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { FiltroData } from '@/components/busca/FiltroData'
@@ -41,6 +42,7 @@ export default function BuscaPage() {
 
 function BuscaPageConteudo() {
   const { profile, loading } = useAuth()
+  const { empresaAtiva } = useEmpresa()
   const searchParams = useSearchParams()
   const [supabase] = useState(() => createClient())
   const [aba, setAba] = useState<AbaBusca>('pedido')
@@ -83,6 +85,7 @@ function BuscaPageConteudo() {
     setErroPedido(null)
     setResultadosPedido(null)
 
+    if (!empresaAtiva) return
     if (!validarFiltroData(setErroPedido)) return
 
     const termo = numeroInput.trim()
@@ -104,6 +107,7 @@ function BuscaPageConteudo() {
     let query = supabase
       .from('pedidos')
       .select('id, numero, cliente_nome, status, criado_em')
+      .eq('empresa_id', empresaAtiva.id)
       .order('criado_em', { ascending: false })
 
     if (numero !== null) query = query.eq('numero', numero)
@@ -141,6 +145,7 @@ function BuscaPageConteudo() {
     setErroCa(null)
     setResultadosCa(null)
 
+    if (!empresaAtiva) return
     if (!validarFiltroData(setErroCa)) return
 
     if (!termo && modoData === 'nenhum') {
@@ -149,9 +154,32 @@ function BuscaPageConteudo() {
     }
 
     setBuscandoCa(true)
+
+    // vw_historico_ca não guarda empresa_id (é uma view sobre pedido_itens
+    // join pedidos) — escopamos por empresa buscando primeiro os números de
+    // pedido daquela empresa e filtrando o histórico por eles.
+    const { data: pedidosEmpresa, error: erroPedidosEmpresa } = await supabase
+      .from('pedidos')
+      .select('numero')
+      .eq('empresa_id', empresaAtiva.id)
+
+    if (erroPedidosEmpresa) {
+      setBuscandoCa(false)
+      setErroCa('Não foi possível buscar. Tente novamente.')
+      return
+    }
+
+    const numerosEmpresa = (pedidosEmpresa ?? []).map((p) => p.numero)
+    if (numerosEmpresa.length === 0) {
+      setBuscandoCa(false)
+      setErroCa('Nenhum histórico encontrado com esses critérios.')
+      return
+    }
+
     let query = supabase
       .from('vw_historico_ca')
       .select('*')
+      .in('pedido_numero', numerosEmpresa)
       .order('data_cotacao', { ascending: false })
 
     if (termo) query = query.eq('ca', termo)
@@ -183,14 +211,24 @@ function BuscaPageConteudo() {
   }
 
   async function abrirPedidoPorNumero(numero: number | null) {
-    if (numero === null) return
+    if (numero === null || !empresaAtiva) return
     const { data } = await supabase
       .from('pedidos')
       .select('id')
       .eq('numero', numero)
+      .eq('empresa_id', empresaAtiva.id)
       .maybeSingle()
     if (data) setPedidoAbertoId(data.id)
   }
+
+  // Troca de empresa no seletor do header: descarta resultados da empresa
+  // anterior em vez de deixá-los na tela indevidamente.
+  useEffect(() => {
+    setResultadosPedido(null)
+    setResultadosCa(null)
+    setErroPedido(null)
+    setErroCa(null)
+  }, [empresaAtiva?.id])
 
   // Chegando de um link "ver histórico completo" (aba Cotações do modal do
   // pedido): pré-preenche o CA, troca para a aba certa e já dispara a busca.

@@ -157,7 +157,7 @@ export function OmieOrcamentoSection({
     const resultados: Record<string, ProdutoOmie[]> = {}
     try {
       for (const item of pendentes) {
-        const dados = await chamarApiOmieProdutos({ descricao: item.descricao })
+        const dados = await chamarApiOmieProdutos({ descricao: item.descricao, pedidoId: pedido.id })
         resultados[item.id] = dados.produtos ?? []
       }
     } catch (err) {
@@ -199,7 +199,11 @@ export function OmieOrcamentoSection({
     setEtapa('buscando')
 
     try {
-      const dados = await chamarApiOmie({ acao: 'buscar_cliente', clienteNome: pedido.cliente_nome })
+      const dados = await chamarApiOmie({
+        acao: 'buscar_cliente',
+        clienteNome: pedido.cliente_nome,
+        pedidoId: pedido.id,
+      })
       const encontrados: ClienteOmie[] = dados.clientes ?? []
       setClientes(encontrados)
       setBuscaSemResultado(encontrados.length === 0)

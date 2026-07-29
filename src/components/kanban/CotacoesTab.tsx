@@ -170,10 +170,11 @@ export function CotacoesTab({
   async function buscarFornecedores(itemId: string, termo: string) {
     setBuscandoFornecedor((atual) => ({ ...atual, [itemId]: true }))
     try {
+      const pedidoId = todosItens.find((item) => item.id === itemId)?.pedido_id
       const resposta = await fetch('/api/omie/buscar-clientes-nome', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome: termo, apenasFornecedor: true }),
+        body: JSON.stringify({ nome: termo, apenasFornecedor: true, pedidoId }),
       })
       const dados = await resposta.json().catch(() => null)
       if (resposta.ok && dados && Array.isArray(dados.clientes)) {

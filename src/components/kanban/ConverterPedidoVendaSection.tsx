@@ -68,7 +68,7 @@ export function ConverterPedidoVendaSection({
       const resposta = await fetch('/api/omie/buscar-clientes-nome', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome: termo }),
+        body: JSON.stringify({ nome: termo, pedidoId: pedido.id }),
       })
       const dados = await resposta.json().catch(() => null)
       if (resposta.ok && dados && Array.isArray(dados.clientes)) {

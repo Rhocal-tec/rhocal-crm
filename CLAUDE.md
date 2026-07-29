@@ -667,3 +667,78 @@ O que o Comercial NÃO vê nesse status:
 Quando o status muda: assim que o Compras move o pedido para PEDIDO_COTADO (Orçamento Cotado), todas as permissões normais do Comercial voltam a valer (frete, modo de faturamento, preço de venda, ações do pedido) — a restrição desta fase vale exclusivamente enquanto o status for EM_COTACAO.
 
 Gestor não é afetado: o Gestor continua com acesso total e irrestrito em qualquer status, incluindo EM_COTACAO — essa fase restringe apenas o perfil Comercial.
+
+## Fase 30 — Múltiplas empresas (RHOCAL e MATSEG) — troca de "workspace" dentro do mesmo login
+
+Uma segunda empresa do mesmo nicho passa a operar no mesmo CRM, com o mesmo login de cada colaborador. Dentro do sistema, existe um seletor de empresa ativa — trocar de empresa é como trocar de workspace inteiro: logo, cores, kanban, busca, arquivados e painel executivo passam a refletir a empresa selecionada. Clientes e produtos são compartilhados entre as duas no Omie (recurso "Compartilhamento de Cadastros entre Aplicativos" do próprio Omie), mas cada empresa é um "aplicativo" Omie distinto, com App Key/App Secret próprios.
+
+Conceito central — "empresa ativa":
+- Existe um seletor visível no header (ex: dropdown ou toggle com o logo de cada empresa), disponível para todos os perfis, em qualquer tela
+- A empresa selecionada vira o contexto ativo da sessão naquele navegador (guardado em localStorage, para lembrar da última escolha daquele usuário/dispositivo)
+- Trocar a empresa ativa NÃO desloga nem troca de usuário — é só o contexto de dados e visual que muda
+
+O que muda ao trocar de empresa ativa:
+1. Identidade visual: logo no header e a cor de destaque (accent-primary) do sistema trocam para a da empresa ativa (RHOCAL: laranja #F1592A + logo RHOCAL; MATSEG: amarelo #F9C304 + logo MATSEG). As demais cores funcionais do design system (azul de compras, verde de sucesso, âmbar de alerta) permanecem as mesmas nas duas — são cores de status, não de marca
+2. Kanban: mostra somente os pedidos cuja empresa_id é a empresa ativa — RHOCAL e MATSEG NÃO aparecem misturadas no mesmo quadro
+3. Busca, Arquivados, Painel executivo: igualmente escopados pela empresa ativa — cada tela reflete só os dados daquela empresa
+4. Criação de pedido: ao criar um "Novo Orçamento", o pedido é automaticamente vinculado à empresa ativa no momento da criação (empresa_id preenchido sozinho, sem precisar de campo de seleção manual no formulário)
+5. PDF do orçamento (fase 21): usa o logo, cores, razão social, CNPJ, IE, endereço e telefone da empresa à qual aquele pedido pertence (a empresa em que ele foi criado, não necessariamente a empresa ativa no momento de gerar o PDF — o pedido "pertence" à empresa da criação, permanentemente)
+6. Chamadas ao Omie relacionadas a um pedido (buscar cliente, buscar produto, buscar fornecedor, cadastrar cliente, gerar orçamento, converter em Pedido de Venda) usam sempre o par de credenciais da empresa DONA daquele pedido (não da empresa ativa no momento, para evitar inconsistência caso o usuário troque de empresa no meio de uma operação)
+
+Dados das duas empresas:
+
+RHOCAL:
+- Razão social: RHOCAL EQUIPAMENTOS DE SEGURANÇA LTDA
+- Nome fantasia: RHOCAL
+- CNPJ: 53.263.859/0001-50
+- IE: 206.912.722.113
+- Endereço: Av. Capitão Francisco César, 842 — Vila Pindorama, Barueri-SP, CEP 06415-000
+- Telefone: (11) 4161-6675
+- Logo: /public/rhocal-logo.png
+- Cor de destaque (marca): #F1592A (laranja)
+- Cor secundária: —
+- Credenciais Omie: OMIE_APP_KEY_RHOCAL / OMIE_APP_SECRET_RHOCAL
+
+MATSEG:
+- Razão social: MATI SERG EQUIPAMENTOS DE SEGURANÇA E SERVIÇOS GERAIS LTDA
+- Nome fantasia: MATSEG
+- CNPJ: 46.540.967/0001-67
+- IE: (não informada)
+- Endereço: Rua Marechal Deodoro, 253 — Loja 02, Vila Engenho Novo, Barueri-SP, CEP 06415-130
+- Telefone: (11) 96747-1574
+- Logo: /public/matseg-logo.png
+- Cor de destaque (marca): #F9C304 (amarelo)
+- Cor secundária: #060606 (preto)
+- Credenciais Omie: OMIE_APP_KEY_MATSEG / OMIE_APP_SECRET_MATSEG
+
+Schema:
+create table empresas (
+  id uuid primary key default gen_random_uuid(),
+  slug text unique not null,
+  nome_fantasia text not null,
+  razao_social text not null,
+  cnpj text not null,
+  ie text,
+  endereco text not null,
+  telefone text not null,
+  logo_path text not null,
+  cor_primaria text not null,
+  cor_secundaria text,
+  criado_em timestamptz not null default now()
+);
+
+alter table pedidos add column empresa_id uuid references empresas(id);
+
+insert into empresas (slug, nome_fantasia, razao_social, cnpj, ie, endereco, telefone, logo_path, cor_primaria, cor_secundaria) values
+('rhocal', 'RHOCAL', 'RHOCAL EQUIPAMENTOS DE SEGURANÇA LTDA', '53.263.859/0001-50', '206.912.722.113', 'Av. Capitão Francisco César, 842 — Vila Pindorama, Barueri-SP — CEP: 06415-000', '(11) 4161-6675', '/rhocal-logo.png', '#F1592A', null),
+('matseg', 'MATSEG', 'MATI SERG EQUIPAMENTOS DE SEGURANÇA E SERVIÇOS GERAIS LTDA', '46.540.967/0001-67', null, 'Rua Marechal Deodoro, 253 — Loja 02, Vila Engenho Novo, Barueri-SP — CEP: 06415-130', '(11) 96747-1574', '/matseg-logo.png', '#F9C304', '#060606');
+
+RLS: leitura liberada para todos os perfis autenticados (é dado de configuração, não sensível).
+
+Credenciais Omie: as variáveis de ambiente OMIE_APP_KEY/OMIE_APP_SECRET existentes são renomeadas para OMIE_APP_KEY_RHOCAL/OMIE_APP_SECRET_RHOCAL (mesmos valores, só o nome muda). Novas variáveis OMIE_APP_KEY_MATSEG/OMIE_APP_SECRET_MATSEG são adicionadas com as credenciais da MATSEG. Todas as rotas server-side que chamam a API do Omie (/api/omie/*) passam a receber um parâmetro indicando qual empresa (ex: empresaSlug) usar para escolher o par de credenciais correto.
+
+Implementação técnica sugerida:
+- Um EmpresaContext (React Context) na aplicação, com o slug da empresa ativa e os dados completos dela (nome, logo, cores), carregado a partir do localStorage (default: rhocal)
+- As cores de marca (accent-primary e, se aplicável, uma cor secundária) tornam-se CSS custom properties atualizadas dinamicamente pelo EmpresaContext, em vez de fixas no Tailwind config
+- Todas as queries de listagem (kanban, busca, arquivados, painel executivo) recebem .eq('empresa_id', empresaAtivaId) como filtro
+- O seletor no header troca o valor do contexto e persiste no localStorage

@@ -4,105 +4,124 @@ import type { Database } from '@/types/database'
 
 type Pedido = Database['public']['Tables']['pedidos']['Row']
 type PedidoItem = Database['public']['Tables']['pedido_itens']['Row']
+type Empresa = Database['public']['Tables']['empresas']['Row']
 
-const LARANJA = '#F1592A'
-
-// Dados fixos da RHOCAL — CLAUDE.md, seção "Fase 21 — PDF do orçamento".
-const RHOCAL_DADOS = {
-  razaoSocial: 'RHOCAL EQUIPAMENTOS DE SEGURANÇA LTDA',
+// Fallback usado só se a empresa dona do pedido não puder ser carregada (ex:
+// pedido antigo sem empresa_id ainda migrado) — nunca deixa o PDF quebrar.
+export const EMPRESA_PDF_PADRAO: Pick<
+  Empresa,
+  'razao_social' | 'cnpj' | 'ie' | 'endereco' | 'telefone' | 'logo_path' | 'cor_primaria' | 'cor_secundaria'
+> = {
+  razao_social: 'RHOCAL EQUIPAMENTOS DE SEGURANÇA LTDA',
   cnpj: '53.263.859/0001-50',
   ie: '206.912.722.113',
-  endereco: 'Av. Capitão Francisco César, 842 — Vila Pindorama',
-  cidade: 'Barueri-SP — CEP: 06415-000',
-  telefone: 'Telefone: (11) 4161-6675',
+  endereco: 'Av. Capitão Francisco César, 842 — Vila Pindorama, Barueri-SP — CEP: 06415-000',
+  telefone: '(11) 4161-6675',
+  logo_path: '/rhocal-logo.png',
+  cor_primaria: '#F1592A',
+  cor_secundaria: null,
 }
 
-const styles = StyleSheet.create({
-  page: {
-    padding: 40,
-    fontSize: 10,
-    fontFamily: 'Helvetica',
-    color: '#1a1a1a',
-    backgroundColor: '#ffffff',
-  },
-  headerRow: { flexDirection: 'row', alignItems: 'center' },
-  logo: { width: 54, height: 54, marginRight: 12 },
-  empresaBloco: { flex: 1 },
-  empresaNome: { fontSize: 11.5, fontFamily: 'Helvetica-Bold', color: LARANJA },
-  empresaLinha: { fontSize: 8.5, color: '#444444', marginTop: 1.5 },
-  orcamentoBloco: { alignItems: 'flex-end' },
-  tituloOrcamento: { fontSize: 16, fontFamily: 'Helvetica-Bold', color: LARANJA },
-  emissao: { fontSize: 8.5, color: '#666666', marginTop: 3 },
-  divisoria: { borderBottomWidth: 1.5, borderBottomColor: LARANJA, marginTop: 14, marginBottom: 14 },
-  divisoriaFina: { borderBottomWidth: 0.75, borderBottomColor: '#e2c3b8', marginTop: 10, marginBottom: 10 },
-  secaoTitulo: {
-    fontSize: 9,
-    fontFamily: 'Helvetica-Bold',
-    color: LARANJA,
-    marginBottom: 5,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  clienteGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  clienteCampo: { width: '50%', marginBottom: 5 },
-  clienteLabel: { fontSize: 7.5, color: '#888888' },
-  clienteValor: { fontSize: 9.5, marginTop: 1 },
-  tabelaHeader: { flexDirection: 'row', backgroundColor: LARANJA, paddingVertical: 5, paddingHorizontal: 4 },
-  tabelaHeaderTexto: { color: '#ffffff', fontSize: 8, fontFamily: 'Helvetica-Bold' },
-  tabelaRow: {
-    flexDirection: 'row',
-    paddingVertical: 5,
-    paddingHorizontal: 4,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#dddddd',
-  },
-  tabelaRowAlt: { backgroundColor: '#faf5f3' },
-  celTexto: { fontSize: 8.5 },
-  colDescricao: { flex: 3 },
-  colCa: { flex: 1 },
-  colDetalhes: { flex: 1.5 },
-  colQtd: { flex: 0.7, textAlign: 'right' },
-  colUnit: { flex: 1.1, textAlign: 'right' },
-  colSubtotal: { flex: 1.1, textAlign: 'right' },
-  observacaoLinha: {
-    paddingHorizontal: 4,
-    paddingBottom: 5,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#dddddd',
-  },
-  observacaoTexto: { fontSize: 7.5, color: '#666666', fontFamily: 'Helvetica-Oblique' },
-  freteLinha: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 8,
-    paddingHorizontal: 4,
-  },
-  freteLabel: { fontSize: 9, marginRight: 10, color: '#444444' },
-  freteValor: { fontSize: 9, fontFamily: 'Helvetica-Bold' },
-  totalBloco: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'baseline',
-    marginTop: 6,
-    paddingTop: 8,
-    paddingHorizontal: 4,
-    borderTopWidth: 1.5,
-    borderTopColor: LARANJA,
-  },
-  totalLabel: { fontSize: 11, fontFamily: 'Helvetica-Bold', marginRight: 10, color: '#1a1a1a' },
-  totalValor: { fontSize: 15, fontFamily: 'Helvetica-Bold', color: LARANJA },
-  faturamentoBox: {
-    marginTop: 16,
-    padding: 9,
-    borderWidth: 1,
-    borderColor: LARANJA,
-    borderRadius: 3,
-  },
-  faturamentoTexto: { fontSize: 10, fontFamily: 'Helvetica-Bold', color: LARANJA, textAlign: 'center' },
-  rodape: { marginTop: 28, paddingTop: 10, borderTopWidth: 0.5, borderTopColor: '#cccccc' },
-  rodapeLinha: { fontSize: 8.5, color: '#555555', marginBottom: 2 },
-  rodapeValidade: { fontSize: 8.5, color: '#555555', fontFamily: 'Helvetica-Oblique', marginTop: 5 },
-})
+// corTexto: cor de textos/título/valores em destaque — precisa de bom
+// contraste sobre fundo branco, por isso usa a cor SECUNDÁRIA da empresa
+// quando existe (ex: preto da MATSEG sobre o amarelo da marca, que teria
+// contraste ruim como cor de texto) e só cai pra primária quando não há
+// secundária (caso da RHOCAL, mantendo o visual já existente sem mudança).
+// corLinha: cor decorativa de divisórias/bordas — sempre a cor primária da
+// marca, já que ali o requisito é identidade visual, não legibilidade de texto.
+function criarStyles(corTexto: string, corLinha: string) {
+  return StyleSheet.create({
+    page: {
+      padding: 40,
+      fontSize: 10,
+      fontFamily: 'Helvetica',
+      color: '#1a1a1a',
+      backgroundColor: '#ffffff',
+    },
+    headerRow: { flexDirection: 'row', alignItems: 'center' },
+    logo: { width: 54, height: 54, marginRight: 12 },
+    empresaBloco: { flex: 1 },
+    empresaNome: { fontSize: 11.5, fontFamily: 'Helvetica-Bold', color: corTexto },
+    empresaLinha: { fontSize: 8.5, color: '#444444', marginTop: 1.5 },
+    orcamentoBloco: { alignItems: 'flex-end' },
+    tituloOrcamento: { fontSize: 16, fontFamily: 'Helvetica-Bold', color: corTexto },
+    emissao: { fontSize: 8.5, color: '#666666', marginTop: 3 },
+    divisoria: { borderBottomWidth: 1.5, borderBottomColor: corLinha, marginTop: 14, marginBottom: 14 },
+    divisoriaFina: { borderBottomWidth: 0.75, borderBottomColor: '#e2c3b8', marginTop: 10, marginBottom: 10 },
+    secaoTitulo: {
+      fontSize: 9,
+      fontFamily: 'Helvetica-Bold',
+      color: corTexto,
+      marginBottom: 5,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    clienteGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+    clienteCampo: { width: '50%', marginBottom: 5 },
+    clienteLabel: { fontSize: 7.5, color: '#888888' },
+    clienteValor: { fontSize: 9.5, marginTop: 1 },
+    tabelaHeader: {
+      flexDirection: 'row',
+      backgroundColor: corTexto,
+      paddingVertical: 5,
+      paddingHorizontal: 4,
+    },
+    tabelaHeaderTexto: { color: '#ffffff', fontSize: 8, fontFamily: 'Helvetica-Bold' },
+    tabelaRow: {
+      flexDirection: 'row',
+      paddingVertical: 5,
+      paddingHorizontal: 4,
+      borderBottomWidth: 0.5,
+      borderBottomColor: '#dddddd',
+    },
+    tabelaRowAlt: { backgroundColor: '#faf5f3' },
+    celTexto: { fontSize: 8.5 },
+    colDescricao: { flex: 3 },
+    colCa: { flex: 1 },
+    colDetalhes: { flex: 1.5 },
+    colQtd: { flex: 0.7, textAlign: 'right' },
+    colUnit: { flex: 1.1, textAlign: 'right' },
+    colSubtotal: { flex: 1.1, textAlign: 'right' },
+    observacaoLinha: {
+      paddingHorizontal: 4,
+      paddingBottom: 5,
+      borderBottomWidth: 0.5,
+      borderBottomColor: '#dddddd',
+    },
+    observacaoTexto: { fontSize: 7.5, color: '#666666', fontFamily: 'Helvetica-Oblique' },
+    freteLinha: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      marginTop: 8,
+      paddingHorizontal: 4,
+    },
+    freteLabel: { fontSize: 9, marginRight: 10, color: '#444444' },
+    freteValor: { fontSize: 9, fontFamily: 'Helvetica-Bold' },
+    totalBloco: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'baseline',
+      marginTop: 6,
+      paddingTop: 8,
+      paddingHorizontal: 4,
+      borderTopWidth: 1.5,
+      borderTopColor: corLinha,
+    },
+    totalLabel: { fontSize: 11, fontFamily: 'Helvetica-Bold', marginRight: 10, color: '#1a1a1a' },
+    totalValor: { fontSize: 15, fontFamily: 'Helvetica-Bold', color: corTexto },
+    faturamentoBox: {
+      marginTop: 16,
+      padding: 9,
+      borderWidth: 1,
+      borderColor: corLinha,
+      borderRadius: 3,
+    },
+    faturamentoTexto: { fontSize: 10, fontFamily: 'Helvetica-Bold', color: corTexto, textAlign: 'center' },
+    rodape: { marginTop: 28, paddingTop: 10, borderTopWidth: 0.5, borderTopColor: '#cccccc' },
+    rodapeLinha: { fontSize: 8.5, color: '#555555', marginBottom: 2 },
+    rodapeValidade: { fontSize: 8.5, color: '#555555', fontFamily: 'Helvetica-Oblique', marginTop: 5 },
+  })
+}
 
 function combinarDetalhes(item: PedidoItem): string {
   return [
@@ -120,35 +139,43 @@ function formatarDataHora(data: Date): string {
   return `${dataStr} às ${horaStr}`
 }
 
+type EmpresaPdfDados = Pick<
+  Empresa,
+  'razao_social' | 'cnpj' | 'ie' | 'endereco' | 'telefone' | 'logo_path' | 'cor_primaria' | 'cor_secundaria'
+>
+
 export function OrcamentoPdfDocument({
   pedido,
   itens,
   nomeVendedor,
   dataEmissao,
+  empresa = EMPRESA_PDF_PADRAO,
 }: {
   pedido: Pedido
   itens: PedidoItem[]
   nomeVendedor: string | null
   dataEmissao: Date
+  empresa?: EmpresaPdfDados
 }) {
   const totalItens = itens.reduce((soma, item) => soma + Number(item.preco_venda ?? 0), 0)
   const frete = Number(pedido.valor_frete ?? 0)
   const totalGeral = totalItens + frete
+  const styles = criarStyles(empresa.cor_secundaria || empresa.cor_primaria, empresa.cor_primaria)
 
   return (
     <Document>
       <Page size="A4" style={styles.page}>
         <View style={styles.headerRow}>
           {/* eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image, não <img> do HTML */}
-          <Image style={styles.logo} src="/rhocal-logo.png" />
+          <Image style={styles.logo} src={empresa.logo_path} />
           <View style={styles.empresaBloco}>
-            <Text style={styles.empresaNome}>{RHOCAL_DADOS.razaoSocial}</Text>
+            <Text style={styles.empresaNome}>{empresa.razao_social}</Text>
             <Text style={styles.empresaLinha}>
-              CNPJ: {RHOCAL_DADOS.cnpj} · IE: {RHOCAL_DADOS.ie}
+              CNPJ: {empresa.cnpj}
+              {empresa.ie ? ` · IE: ${empresa.ie}` : ''}
             </Text>
-            <Text style={styles.empresaLinha}>{RHOCAL_DADOS.endereco}</Text>
-            <Text style={styles.empresaLinha}>{RHOCAL_DADOS.cidade}</Text>
-            <Text style={styles.empresaLinha}>{RHOCAL_DADOS.telefone}</Text>
+            <Text style={styles.empresaLinha}>{empresa.endereco}</Text>
+            <Text style={styles.empresaLinha}>Telefone: {empresa.telefone}</Text>
           </View>
           <View style={styles.orcamentoBloco}>
             <Text style={styles.tituloOrcamento}>Orçamento Nº {pedido.numero}</Text>

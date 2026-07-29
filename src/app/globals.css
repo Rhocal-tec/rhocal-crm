@@ -8,6 +8,10 @@
   --bg-surface-alt: #232c33;
   --accent-primary: #f1592a;
   --accent-primary-dark: #c94a22;
+  /* Cor secundária da empresa ativa (ex: preto da MATSEG). Sem valor padrão
+     fixo — o EmpresaContext define/remove essa propriedade dinamicamente
+     conforme a empresa selecionada; RHOCAL não tem cor secundária. */
+  --accent-secondary: transparent;
   --accent-compras: #3b7dd8;
   --accent-success: #2fae66;
   --accent-alert: #f4b400;

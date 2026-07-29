@@ -17,6 +17,7 @@ const config: Config = {
         accent: {
           primary: "var(--accent-primary)",
           "primary-dark": "var(--accent-primary-dark)",
+          secondary: "var(--accent-secondary)",
           compras: "var(--accent-compras)",
           success: "var(--accent-success)",
           alert: "var(--accent-alert)",
