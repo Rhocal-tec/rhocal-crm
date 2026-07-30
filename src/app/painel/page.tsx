@@ -137,11 +137,13 @@ export default function PainelPage() {
         if (idsAtivos.length > 0) {
           const { data: itens, error: erroItens } = await supabase
             .from('pedido_itens')
-            .select('pedido_id, preco_venda')
+            .select('pedido_id, preco_venda, quantidade')
             .in('pedido_id', idsAtivos)
           if (erroItens) throw erroItens
+          // preco_venda é o preço UNITÁRIO do item — precisa multiplicar pela
+          // quantidade para chegar no valor da linha.
           valorNegociacaoCalc = (itens ?? []).reduce(
-            (soma, item) => soma + Number(item.preco_venda ?? 0),
+            (soma, item) => soma + Number(item.preco_venda ?? 0) * Number(item.quantidade),
             0,
           )
         }

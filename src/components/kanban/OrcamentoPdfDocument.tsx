@@ -157,7 +157,12 @@ export function OrcamentoPdfDocument({
   dataEmissao: Date
   empresa?: EmpresaPdfDados
 }) {
-  const totalItens = itens.reduce((soma, item) => soma + Number(item.preco_venda ?? 0), 0)
+  // preco_venda é o preço UNITÁRIO do item — precisa multiplicar pela
+  // quantidade, igual ao Subtotal calculado por linha logo abaixo.
+  const totalItens = itens.reduce(
+    (soma, item) => soma + Number(item.preco_venda ?? 0) * Number(item.quantidade),
+    0,
+  )
   const frete = Number(pedido.valor_frete ?? 0)
   const totalGeral = totalItens + frete
   const styles = criarStyles(empresa.cor_secundaria || empresa.cor_primaria, empresa.cor_primaria)

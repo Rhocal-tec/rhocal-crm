@@ -59,10 +59,15 @@ export function PedidoDetalheModal({
   const veMargem = setor !== 'compras' && !somenteLeituraComercial
   const podeEditarDadosCliente = (setor === 'comercial' || setor === 'gestor') && !somenteLeituraComercial
   const podeDuplicar = (setor === 'comercial' || setor === 'gestor') && !somenteLeituraComercial
-  // Number(...) é obrigatório aqui: o Postgres devolve `preco_venda` (numeric)
-  // como string (ex: "150.00"), e `soma + item.preco_venda` faria concatenação
-  // de string em vez de soma quando o valor chega assim.
-  const totalPedido = itens.reduce((soma, item) => soma + Number(item.preco_venda ?? 0), 0)
+  // Number(...) é obrigatório aqui: o Postgres devolve `preco_venda`/`quantidade`
+  // (numeric) como string (ex: "150.00"), e `soma + item.preco_venda` faria
+  // concatenação de string em vez de soma quando o valor chega assim.
+  // preco_venda é o preço UNITÁRIO do item — precisa multiplicar pela
+  // quantidade para chegar no valor da linha, igual ao Subtotal do PDF.
+  const totalPedido = itens.reduce(
+    (soma, item) => soma + Number(item.preco_venda ?? 0) * Number(item.quantidade),
+    0,
+  )
 
   function handleItemAtualizado(itemAtualizado: PedidoItem) {
     setItens((atual) =>
