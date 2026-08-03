@@ -6,13 +6,14 @@ import { Modal } from '@/components/ui/Modal'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { TarefasTab } from '@/components/tarefas/TarefasTab'
+import { HistoricoContatoTab } from '@/components/interacoes/HistoricoContatoTab'
 import { ConverterEmOrcamentoSection } from './ConverterEmOrcamentoSection'
 import { MarcarOportunidadePerdidaSection } from './MarcarOportunidadePerdidaSection'
 import type { Database, SetorTipo } from '@/types/database'
 
 type Oportunidade = Database['public']['Tables']['oportunidades']['Row']
 
-type Aba = 'dados' | 'tarefas'
+type Aba = 'dados' | 'tarefas' | 'historico'
 
 export function OportunidadeDetalheModal({
   oportunidadeId,
@@ -86,6 +87,16 @@ export function OportunidadeDetalheModal({
             >
               Tarefas
             </button>
+            <button
+              onClick={() => setAba('historico')}
+              className={`border-b-2 px-1 pb-2 text-sm font-medium transition-colors ${
+                aba === 'historico'
+                  ? 'border-accent-primary text-primary'
+                  : 'border-transparent text-muted hover:text-primary/80'
+              }`}
+            >
+              Histórico de contato
+            </button>
           </div>
 
           {aba === 'dados' && (
@@ -154,6 +165,8 @@ export function OportunidadeDetalheModal({
           )}
 
           {aba === 'tarefas' && <TarefasTab oportunidadeId={oportunidade.id} />}
+
+          {aba === 'historico' && <HistoricoContatoTab oportunidadeId={oportunidade.id} />}
         </div>
       )}
     </Modal>

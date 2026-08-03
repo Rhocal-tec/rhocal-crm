@@ -334,6 +334,7 @@ export interface Database {
           status: OportunidadeStatus
           motivo_perda: string | null
           omie_oportunidade_id: number | null
+          omie_fase_bruta: string | null
           pedido_id: string | null
           criado_por: string
           criado_em: string
@@ -354,6 +355,7 @@ export interface Database {
           status?: OportunidadeStatus
           motivo_perda?: string | null
           omie_oportunidade_id?: number | null
+          omie_fase_bruta?: string | null
           pedido_id?: string | null
           criado_por: string
           criado_em?: string
@@ -374,6 +376,7 @@ export interface Database {
           status?: OportunidadeStatus
           motivo_perda?: string | null
           omie_oportunidade_id?: number | null
+          omie_fase_bruta?: string | null
           pedido_id?: string | null
           criado_por?: string
           criado_em?: string
@@ -414,6 +417,39 @@ export interface Database {
           data_prevista?: string | null
           concluida?: boolean
           criado_por?: string
+          criado_em?: string
+        }
+        Relationships: []
+      }
+      interacoes: {
+        Row: {
+          id: string
+          oportunidade_id: string | null
+          pedido_id: string | null
+          tipo: string
+          resultado: string
+          observacao: string | null
+          registrado_por: string
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          oportunidade_id?: string | null
+          pedido_id?: string | null
+          tipo: string
+          resultado: string
+          observacao?: string | null
+          registrado_por: string
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          oportunidade_id?: string | null
+          pedido_id?: string | null
+          tipo?: string
+          resultado?: string
+          observacao?: string | null
+          registrado_por?: string
           criado_em?: string
         }
         Relationships: []

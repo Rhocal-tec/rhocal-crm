@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { Modal } from '@/components/ui/Modal'
 import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
+import { ORIGEM_OPCOES } from '@/lib/oportunidades/status'
 
 export function NovaOportunidadeModal({
   open,
@@ -151,14 +152,19 @@ export function NovaOportunidadeModal({
             <label className="block text-sm font-medium text-primary/80">
               Origem (opcional)
             </label>
-            <input
-              type="text"
+            <select
               value={origem}
               onChange={(e) => setOrigem(e.target.value)}
               className="input-field mt-1 w-full rounded-md px-3 py-2 text-sm"
-              placeholder="Ex: Indicação, site, telefone…"
               disabled={salvando}
-            />
+            >
+              <option value="">—</option>
+              {ORIGEM_OPCOES.map((opcao) => (
+                <option key={opcao} value={opcao}>
+                  {opcao}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-primary/80">

@@ -794,7 +794,27 @@ Auditoria: reaproveitar os mesmos triggers/padrão de audit_log já existente (a
 
 Alertas de tempo parado: mesmo padrão do kanban de pedidos (3 dias = âmbar, 7 dias = arquivamento — ou nesse caso, mover automaticamente para uma situação "esfriada"/inativa a definir).
 
-⚠️ Investigação obrigatória antes de sincronizar com o Omie: as "Fases do Processo", "Origens de Oportunidade" e "Motivos de Conclusão" são configuráveis por conta Omie — e como RHOCAL e MATSEG são aplicativos separados (fase 30), cada uma pode ter configurações diferentes. Antes de mapear nosso funil para as etapas do Omie, é necessário consultar (via API ou verificação manual em Configurações do CRM no Omie) os valores exatos configurados em CADA uma das duas contas. Não assumir nomes/códigos fixos. As etapas provisórias listadas acima podem precisar ser renomeadas/ajustadas para bater com o que o Omie usa, viabilizando o mapeamento 1:1 na sincronização.
+✅ Investigação concluída — mapeamento confirmado (RHOCAL e MATSEG usam a mesma configuração padrão do Omie, sem personalização):
+
+Fases do Processo do Omie (fixas em 6, mesmas nas duas empresas):
+1. 01 Prospect
+2. 02 Qualificação
+3. 03 Apresentação
+4. 04 Proposta
+5. 05 Negociação
+6. 06 Conclusão (registra ganho ou perda, com status e motivo separados)
+
+Mapeamento nosso status ↔ Fase do Omie:
+- NOVO_LEAD → 01 Prospect
+- EM_CONTATO → 01 Prospect
+- QUALIFICADO → 02 Qualificação
+- PROPOSTA → 04 Proposta
+- GANHO → 06 Conclusão (status "Ganho")
+- PERDIDO → 06 Conclusão (status "Perdido", com motivo)
+
+Origens de Oportunidade configuradas no Omie (usar exatamente estes valores no campo origem): Ativo, Ativo Telemarketing, Email MKT, Indicação Cliente, Bing, Telemarketing, Google, Anúncio. Adicionar também "Lead Frio / Reativação" (valor próprio do nosso sistema, não existe no Omie — ao sincronizar, mapear para "Ativo" como fallback, já que é prospecção ativa).
+
+Motivos de Conclusão configurados no Omie (usar ao marcar como perdida, mapeando com os motivos já usados no nosso sistema para os mais próximos): Preço, Tecnologia, Marca, Referências, Orçamento, Oportunidade nunca existiu, Ordem da Matriz, Projeto cancelado internamente, Projeto Futuro.
 
 Sincronização com o CRM do Omie (após a investigação):
 1. Ao criar uma oportunidade, criar automaticamente uma Oportunidade correspondente no Omie (IncluirOportunidade, usando as credenciais da empresa — fase 30), salvando o omie_oportunidade_id retornado
@@ -822,3 +842,52 @@ create policy "tarefas escrita" on tarefas for all to authenticated using (true)
 ```
 
 Interface: aba "Tarefas" tanto no modal de oportunidade quanto no modal de pedido, para comercial e gestor, com responsável, data prevista e status de conclusão.
+
+Botão "Importar do Omie": exclusivo do gestor, disponível na tela de Oportunidades. Ao clicar, chama `ListarOportunidades` da API do Omie usando a credencial da empresa ativa (fase 30 — cada empresa é um app Omie separado) e cria, no nosso banco, uma oportunidade nova para cada registro do Omie ainda não importado — status inicial sempre `NOVO_LEAD` por padrão, independente da etapa em que a oportunidade esteja no Omie (o mapeamento fino de etapas continua pendente da investigação já registrada acima). Evita duplicar comparando com `omie_oportunidade_id` já gravado: só insere as que ainda não têm esse vínculo no nosso banco.
+
+**Formato real confirmado ao vivo** (nada disso é documentado explicitamente no portal do desenvolvedor Omie — só foi possível confirmar chamando a API de verdade, mesmo padrão de cautela já usado nas fases 18.5/20):
+- `ListarOportunidades` no endpoint `https://app.omie.com.br/api/v1/crm/oportunidades/` devolve o array em `cadastros` (não `oportunidades_cadastro`, que seria o padrão do resto da integração Omie deste projeto). Cada item vem com os dados agrupados em sub-objetos: `identificacao.nCodOp` (id da oportunidade), `identificacao.nCodConta` (código da "Conta" — cliente, ver abaixo), `ticket.nTicket` (valor estimado — confirmado comparando vários registros reais, inclusive um com valor zerado de verdade), `fasesStatus.{nCodFase,nCodStatus,nCodMotivo}` (códigos numéricos opacos, gravados brutos em `oportunidades.omie_fase_bruta` sem tradução). A API limitou a 100 registros por página mesmo pedindo `registros_por_pagina: 200` — paginação completa ainda não implementada, o botão importa só a primeira página por clique
+- O nome do cliente **não** vem em `identificacao.cDesOp` (é uma descrição da oportunidade, tipo "CLIENTE LTDA - Solução 01 (1)", não o nome limpo) nem existe um campo de nome solto no item. É preciso resolver `identificacao.nCodConta` numa chamada separada
+- **`nCodConta` é uma "Conta" do módulo CRM, uma entidade própria — não é o mesmo espaço de código do cadastro geral de Clientes** (`geral/clientes/`). `ConsultarCliente`/`codigo_cliente_omie` com esse código retorna erro ("Cliente não cadastrado para o Código [...]"). A resolução correta é `ConsultarConta` no endpoint `https://app.omie.com.br/api/v1/crm/contas/`, com o parâmetro **`{ nCod: <código> }`** — camelCase, diferente do padrão snake_case (`codigo_produto`, `codigo_cliente_omie`) usado no resto da integração Omie deste projeto. A resposta traz nome em `identificacao.cNome`, CNPJ em `identificacao.cDoc` e telefone em `telefone_email.cNumTel` — os três são salvos em `cliente_nome`/`cliente_cnpj`/`cliente_telefone` da oportunidade importada, numa única chamada por conta (deduplicada: uma só por conta, mesmo que várias oportunidades novas pertençam à mesma)
+- **`ConsultarCliente` tem um rate limit próprio da Omie** ("API bloqueada por consumo indevido", ~25 min de espera) que foi disparado durante os testes deste botão — motivo a mais para nunca usar esse endpoint pra resolver `nCodConta`, além de estar simplesmente errado
+
+Perfil comercial usado pelo SDR (pré-vendas): o mesmo login/perfil `comercial` cobre tanto o vendedor de orçamento quanto o SDR de prospecção — sem perfil dedicado. Reflexo disso no campo `origem` da oportunidade: a lista de opções ganha "Lead Frio / Reativação" como valor comum de uso do SDR, ao lado das demais origens já digitáveis livremente nesse campo.
+
+## Fase 32 — Ferramentas de trabalho para o SDR + inteligência de funil
+
+Três melhorias priorizadas para o SDR trabalhar mais rápido e gerar dado confiável para análise posterior.
+
+### 32.1 — Log de tentativas de contato
+
+Registro do que já foi FEITO (diferente de tarefas, que registra o que ainda vai ser feito).
+
+```sql
+create table interacoes (
+  id uuid primary key default gen_random_uuid(),
+  oportunidade_id uuid references oportunidades(id),
+  pedido_id uuid references pedidos(id),
+  tipo text not null,
+  resultado text not null,
+  observacao text,
+  registrado_por uuid not null references profiles(id),
+  criado_em timestamptz not null default now()
+);
+alter table interacoes enable row level security;
+create policy "interacoes leitura" on interacoes for select to authenticated using (true);
+create policy "interacoes escrita" on interacoes for all to authenticated using (true) with check (true);
+```
+
+Interface: nova sub-seção "Histórico de contato" no modal de oportunidade, com formulário rápido (tipo: Ligação/WhatsApp/E-mail/Reunião + resultado: Atendeu/Não atendeu/Agendou retorno/Recusou/Outro + observação opcional) e lista cronológica dos registros já feitos. Visível para comercial e gestor.
+
+### 32.2 — Funil com conversão por etapa no Painel executivo
+
+Estender o Painel executivo (fase 14), com uma seção dedicada a Oportunidades (só gestor):
+- Contagem de oportunidades por etapa
+- Taxa de conversão entre etapas consecutivas
+- Tempo médio até o primeiro contato (diferença entre criado_em e a primeira linha em interacoes daquela oportunidade)
+- Conversão por origem (taxa de GANHO por valor de origem, incluindo "Lead Frio / Reativação")
+- Filtro de período, reaproveitando o mesmo padrão de filtro já usado no painel de pedidos
+
+### 32.3 — Cadastro relâmpago de lead
+
+Um formulário compacto e rápido para o SDR cadastrar um lead em segundos: nome do cliente + telefone + origem. Botão "Cadastro rápido" separado do "Novo Lead" completo, abrindo um modal pequeno. Ao salvar, cria a oportunidade normalmente (status NOVO_LEAD), completando os demais dados depois, a qualquer momento.
