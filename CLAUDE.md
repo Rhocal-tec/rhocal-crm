@@ -742,3 +742,83 @@ Implementação técnica sugerida:
 - As cores de marca (accent-primary e, se aplicável, uma cor secundária) tornam-se CSS custom properties atualizadas dinamicamente pelo EmpresaContext, em vez de fixas no Tailwind config
 - Todas as queries de listagem (kanban, busca, arquivados, painel executivo) recebem .eq('empresa_id', empresaAtivaId) como filtro
 - O seletor no header troca o valor do contexto e persiste no localStorage
+
+## Fase 31 — Módulo de Oportunidades/Prospecção (novo funil, anterior ao pedido) + sincronização com o CRM do Omie
+
+Novo processo dentro do próprio RHOCAL CRM: um funil de Oportunidades/Prospecção, separado do kanban de pedidos já existente, para acompanhar negócios ainda em fase de contato/qualificação — antes de virarem um orçamento de verdade. Inspirado no módulo de CRM do Omie ("Oportunidades"), mas como uma aba própria do nosso sistema, com sincronização opcional para o Omie.
+
+Conceito: Oportunidade → (evolui) → vira um Pedido (Novo Orçamento, fluxo já existente) quando o negócio amadurece. Uma oportunidade pode também ser perdida antes de virar pedido.
+
+Nova aba de navegação: "Oportunidades", no header, ao lado de Kanban/Busca/Arquivados/Painel — visível para comercial e gestor (compras não participa dessa etapa pré-venda). Escopada pela empresa ativa (fase 30), como tudo mais no sistema.
+
+Nova tabela oportunidades:
+```sql
+create table oportunidades (
+  id uuid primary key default gen_random_uuid(),
+  numero serial unique,
+  empresa_id uuid not null references empresas(id),
+  cliente_nome text not null,
+  cliente_cnpj text,
+  cliente_telefone text,
+  cliente_contato text,
+  origem text,
+  temperatura text,
+  valor_estimado numeric,
+  status text not null default 'NOVO_LEAD',
+  motivo_perda text,
+  omie_oportunidade_id bigint,
+  pedido_id uuid references pedidos(id),
+  criado_por uuid not null references profiles(id),
+  criado_em timestamptz not null default now(),
+  ultima_movimentacao timestamptz not null default now(),
+  movido_por uuid references profiles(id)
+);
+alter table oportunidades enable row level security;
+create policy "oportunidades leitura" on oportunidades for select to authenticated using (true);
+create policy "oportunidades escrita" on oportunidades for all to authenticated using (true) with check (true);
+```
+
+Etapas do funil (kanban de Oportunidades) — provisórias, a confirmar/ajustar após a investigação das Fases do Processo configuradas no Omie:
+1. NOVO_LEAD — "Novo Lead"
+2. EM_CONTATO — "Em Contato"
+3. QUALIFICADO — "Qualificado"
+4. PROPOSTA — "Proposta Enviada"
+5. GANHO — "Convertida em Orçamento" (terminal, positivo)
+6. PERDIDO — "Perdida" (terminal, negativo, com motivo obrigatório — mesmo padrão do Fase 13 de pedidos)
+
+Conversão em pedido: botão "Converter em Orçamento" disponível em qualquer etapa não-terminal da oportunidade. Ao clicar, cria um novo pedido (fluxo já existente, status inicial PEDIDO) pré-preenchido com os dados do cliente da oportunidade (nome, CNPJ, telefone, contato), vinculado via oportunidades.pedido_id, e move a oportunidade automaticamente para GANHO.
+
+Marcar como perdida: mesmo padrão do Fase 13 — motivo obrigatório (select com opções + detalhe opcional).
+
+Auditoria: reaproveitar os mesmos triggers/padrão de audit_log já existente (a tabela já é genérica por tabela/registro_id), aplicando também às tabelas oportunidades.
+
+Alertas de tempo parado: mesmo padrão do kanban de pedidos (3 dias = âmbar, 7 dias = arquivamento — ou nesse caso, mover automaticamente para uma situação "esfriada"/inativa a definir).
+
+⚠️ Investigação obrigatória antes de sincronizar com o Omie: as "Fases do Processo", "Origens de Oportunidade" e "Motivos de Conclusão" são configuráveis por conta Omie — e como RHOCAL e MATSEG são aplicativos separados (fase 30), cada uma pode ter configurações diferentes. Antes de mapear nosso funil para as etapas do Omie, é necessário consultar (via API ou verificação manual em Configurações do CRM no Omie) os valores exatos configurados em CADA uma das duas contas. Não assumir nomes/códigos fixos. As etapas provisórias listadas acima podem precisar ser renomeadas/ajustadas para bater com o que o Omie usa, viabilizando o mapeamento 1:1 na sincronização.
+
+Sincronização com o CRM do Omie (após a investigação):
+1. Ao criar uma oportunidade, criar automaticamente uma Oportunidade correspondente no Omie (IncluirOportunidade, usando as credenciais da empresa — fase 30), salvando o omie_oportunidade_id retornado
+2. A cada movimentação de etapa no nosso funil, atualizar a etapa da Oportunidade no Omie via AlterarOportunidade
+3. Ao marcar como perdida, refletir no Omie com o motivo de conclusão correspondente
+4. Ao converter em pedido (GANHO), refletir no Omie como oportunidade ganha
+5. Tratar falhas de sincronização sem bloquear o uso do CRM — se a chamada ao Omie falhar, registrar em error_log (fase 25) e seguir normalmente
+
+Nova tabela tarefas (acompanhamento — vale tanto para oportunidades quanto para pedidos):
+```sql
+create table tarefas (
+  id uuid primary key default gen_random_uuid(),
+  oportunidade_id uuid references oportunidades(id),
+  pedido_id uuid references pedidos(id),
+  descricao text not null,
+  responsavel uuid references profiles(id),
+  data_prevista date,
+  concluida boolean not null default false,
+  criado_por uuid not null references profiles(id),
+  criado_em timestamptz not null default now()
+);
+alter table tarefas enable row level security;
+create policy "tarefas leitura" on tarefas for select to authenticated using (true);
+create policy "tarefas escrita" on tarefas for all to authenticated using (true) with check (true);
+```
+
+Interface: aba "Tarefas" tanto no modal de oportunidade quanto no modal de pedido, para comercial e gestor, com responsável, data prevista e status de conclusão.
