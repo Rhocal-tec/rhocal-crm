@@ -14,12 +14,13 @@ import { ItensTab } from './ItensTab'
 import { MarcarPerdidoSection } from './MarcarPerdidoSection'
 import { OmieOrcamentoSection } from './OmieOrcamentoSection'
 import { OrcamentoPdfButton } from './OrcamentoPdfButton'
+import { TarefasTab } from '@/components/tarefas/TarefasTab'
 import type { Database, SetorTipo } from '@/types/database'
 
 type Pedido = Database['public']['Tables']['pedidos']['Row']
 type PedidoItem = Database['public']['Tables']['pedido_itens']['Row']
 
-type Aba = 'dados' | 'itens' | 'cotacoes'
+type Aba = 'dados' | 'itens' | 'cotacoes' | 'tarefas'
 
 export function PedidoDetalheModal({
   pedidoId,
@@ -408,6 +409,18 @@ export function PedidoDetalheModal({
                 Cotações
               </button>
             )}
+            {(setor === 'comercial' || setor === 'gestor') && !somenteLeituraComercial && (
+              <button
+                onClick={() => setAba('tarefas')}
+                className={`border-b-2 px-1 pb-2 text-sm font-medium transition-colors ${
+                  aba === 'tarefas'
+                    ? 'border-accent-primary text-primary'
+                    : 'border-transparent text-muted hover:text-primary/80'
+                }`}
+              >
+                Tarefas
+              </button>
+            )}
           </div>
 
           {aba === 'dados' && (
@@ -608,6 +621,10 @@ export function PedidoDetalheModal({
 
           {aba === 'cotacoes' && vePainelCompras && (
             <CotacoesTab itens={itens} pedidoNumero={pedido.numero} />
+          )}
+
+          {aba === 'tarefas' && (setor === 'comercial' || setor === 'gestor') && (
+            <TarefasTab pedidoId={pedido.id} />
           )}
         </div>
       )}

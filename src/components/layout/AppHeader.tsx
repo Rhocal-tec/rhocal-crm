@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
+import { podeAcessarOportunidades } from '@/lib/oportunidades/permissions'
 import type { SetorTipo } from '@/types/database'
 
 const SETOR_LABEL: Record<SetorTipo, string> = {
@@ -28,6 +29,8 @@ const LINKS = [
 ]
 
 const LINK_GESTOR = { href: '/painel', label: 'Painel' }
+
+const LINK_OPORTUNIDADES = { href: '/oportunidades', label: 'Oportunidades' }
 
 export function AppHeader() {
   const pathname = usePathname()
@@ -75,6 +78,16 @@ export function AppHeader() {
               {link.label}
             </Link>
           ))}
+          {profile && podeAcessarOportunidades(profile.setor) && (
+            <Link
+              href={LINK_OPORTUNIDADES.href}
+              className={`text-sm font-medium ${
+                pathname === LINK_OPORTUNIDADES.href ? 'text-primary' : 'text-muted hover:text-primary/80'
+              }`}
+            >
+              {LINK_OPORTUNIDADES.label}
+            </Link>
+          )}
           {profile?.setor === 'gestor' && (
             <Link
               href={LINK_GESTOR.href}

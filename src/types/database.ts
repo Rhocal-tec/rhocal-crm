@@ -18,6 +18,17 @@ export type AuditAcao = 'criou' | 'alterou' | 'moveu' | 'arquivou_auto' | string
 
 export type EmpresaSlug = 'rhocal' | 'matseg'
 
+// Etapas do funil de Oportunidades/Prospecção (fase 31). Coluna `status` é
+// `text` no banco (não enum), pois o mapeamento para as Fases do Processo do
+// Omie ainda depende de investigação por conta — ver CLAUDE.md fase 31.
+export type OportunidadeStatus =
+  | 'NOVO_LEAD'
+  | 'EM_CONTATO'
+  | 'QUALIFICADO'
+  | 'PROPOSTA'
+  | 'GANHO'
+  | 'PERDIDO'
+
 export interface Database {
   public: {
     Tables: {
@@ -306,6 +317,105 @@ export interface Database {
           data_hora?: string
         }
         Update: never
+        Relationships: []
+      }
+      oportunidades: {
+        Row: {
+          id: string
+          numero: number
+          empresa_id: string
+          cliente_nome: string
+          cliente_cnpj: string | null
+          cliente_telefone: string | null
+          cliente_contato: string | null
+          origem: string | null
+          temperatura: string | null
+          valor_estimado: number | null
+          status: OportunidadeStatus
+          motivo_perda: string | null
+          omie_oportunidade_id: number | null
+          pedido_id: string | null
+          criado_por: string
+          criado_em: string
+          ultima_movimentacao: string
+          movido_por: string | null
+        }
+        Insert: {
+          id?: string
+          numero?: number
+          empresa_id: string
+          cliente_nome: string
+          cliente_cnpj?: string | null
+          cliente_telefone?: string | null
+          cliente_contato?: string | null
+          origem?: string | null
+          temperatura?: string | null
+          valor_estimado?: number | null
+          status?: OportunidadeStatus
+          motivo_perda?: string | null
+          omie_oportunidade_id?: number | null
+          pedido_id?: string | null
+          criado_por: string
+          criado_em?: string
+          ultima_movimentacao?: string
+          movido_por?: string | null
+        }
+        Update: {
+          id?: string
+          numero?: number
+          empresa_id?: string
+          cliente_nome?: string
+          cliente_cnpj?: string | null
+          cliente_telefone?: string | null
+          cliente_contato?: string | null
+          origem?: string | null
+          temperatura?: string | null
+          valor_estimado?: number | null
+          status?: OportunidadeStatus
+          motivo_perda?: string | null
+          omie_oportunidade_id?: number | null
+          pedido_id?: string | null
+          criado_por?: string
+          criado_em?: string
+          ultima_movimentacao?: string
+          movido_por?: string | null
+        }
+        Relationships: []
+      }
+      tarefas: {
+        Row: {
+          id: string
+          oportunidade_id: string | null
+          pedido_id: string | null
+          descricao: string
+          responsavel: string | null
+          data_prevista: string | null
+          concluida: boolean
+          criado_por: string
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          oportunidade_id?: string | null
+          pedido_id?: string | null
+          descricao: string
+          responsavel?: string | null
+          data_prevista?: string | null
+          concluida?: boolean
+          criado_por: string
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          oportunidade_id?: string | null
+          pedido_id?: string | null
+          descricao?: string
+          responsavel?: string | null
+          data_prevista?: string | null
+          concluida?: boolean
+          criado_por?: string
+          criado_em?: string
+        }
         Relationships: []
       }
     }
