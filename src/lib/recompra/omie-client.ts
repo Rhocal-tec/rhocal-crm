@@ -48,6 +48,13 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Timeout de rede por chamada — sem isso, uma conexão que trava (DNS, TLS,
+// TCP connect) fica pendurada até o maxDuration inteiro da função estourar,
+// e o erro que sobra pro catch da rota é genérico demais pra diagnosticar.
+// Com o AbortSignal, a falha vem rápida e com um nome de erro específico
+// (ex: TimeoutError) em vez de silenciosa.
+const TIMEOUT_REQUISICAO_MS = 20_000;
+
 async function chamarOmie<T>(
   endpoint: string,
   call: string,
@@ -55,16 +62,42 @@ async function chamarOmie<T>(
 ): Promise<T> {
   await sleep(DELAY_ENTRE_REQUISICOES_MS);
 
-  const resp = await fetch(`${OMIE_BASE_URL}/${endpoint}/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      call,
-      app_key: OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET,
-      param: [param],
-    }),
-  });
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    throw new Error(
+      `[omie-client] OMIE_APP_KEY_RHOCAL/OMIE_APP_SECRET_RHOCAL não configuradas neste ambiente — abortando antes de chamar ${endpoint}/${call}.`
+    );
+  }
+
+  let resp: Response;
+  try {
+    resp = await fetch(`${OMIE_BASE_URL}/${endpoint}/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // POST pra uma API externa nunca deve passar pelo Data Cache do
+      // Next.js — evita o comportamento observado em dev ("Failed to set
+      // fetch cache ... items over 2MB can not be cached") e qualquer
+      // interferência equivalente em produção.
+      cache: "no-store",
+      signal: AbortSignal.timeout(TIMEOUT_REQUISICAO_MS),
+      body: JSON.stringify({
+        call,
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [param],
+      }),
+    });
+  } catch (err) {
+    // Erro de rede (DNS, TLS, TCP connect, timeout do AbortSignal acima) —
+    // nunca chega a sair uma requisição "de verdade" nesses casos, por isso
+    // não aparece em "External APIs" nos logs da Vercel. Sem este catch, o
+    // erro original (nome/causa) se perde e só sobra um "fetch failed"
+    // genérico lá na rota.
+    const causa =
+      err instanceof Error
+        ? `${err.name}: ${err.message}${err.cause ? ` (cause: ${String(err.cause)})` : ""}`
+        : String(err);
+    throw new Error(`[omie-client] falha de rede ao chamar ${endpoint}/${call}: ${causa}`);
+  }
 
   const json = await resp.json();
 
@@ -118,6 +151,7 @@ export async function listarCodigosDePedidos(): Promise<number[]> {
   const codigos: number[] = [];
   let pagina = 1;
   let totalPaginas = 1;
+  const inicio = Date.now();
 
   do {
     const resposta = await chamarOmie<ListarPedidosResponse>(
@@ -131,6 +165,12 @@ export async function listarCodigosDePedidos(): Promise<number[]> {
     );
 
     totalPaginas = resposta.total_de_paginas;
+    // Log por página — se a listagem inteira estourar o tempo de novo, essa
+    // linha (a última impressa antes do corte) mostra exatamente em qual
+    // página parou e quanto tempo cada uma está levando.
+    console.log(
+      `[omie] página ${pagina}/${totalPaginas} da listagem de pedidos (${Date.now() - inicio}ms acumulados)`
+    );
 
     for (const p of resposta.pedido_venda_produto ?? []) {
       codigos.push(p.cabecalho.codigo_pedido);

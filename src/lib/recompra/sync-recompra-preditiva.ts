@@ -26,13 +26,63 @@ import { calcularRecorrencia, Pedido } from "@/lib/recompra/calculo-recorrencia"
 import { calcularCoOcorrencia, ItemPedido } from "@/lib/recompra/calculo-cross-sell";
 import { cotacaoVencida } from "@/lib/kanban/cotacao-vencida";
 
+// Teto de pedidos NOVOS (ConsultarPedido, 1 chamada Omie cada + resolverCliente/
+// resolverVendedor) processados POR EXECUÇÃO. Confirmado ao vivo
+// (FUNCTION_INVOCATION_TIMEOUT nos logs da Vercel) que o plano atual dá só
+// ~10s por invocação — sem isso, uma única chamada teria que dar conta do
+// histórico inteiro de uma vez, o que não cabe nesse orçamento.
+const LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO = 15;
+
+const CHAVE_CURSOR_SYNC = "recompra_ultimo_codigo_processado";
+
+// Cursor persistido em sync_estado — é o que faz a próxima execução (cron
+// diário) continuar de onde esta parou, mesmo que o pedido não tenha virado
+// linha em pedidos_itens_historico (ex: pedido cancelado, pulado de
+// propósito). Sem o cursor, um pedido cancelado apareceria pra sempre como
+// "novo" (nunca entra no histórico) e a cada execução a função perderia
+// tempo reconsultando o mesmo código.
+async function lerCursorSync(): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("sync_estado")
+    .select("valor")
+    .eq("chave", CHAVE_CURSOR_SYNC)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`[sync] erro ao ler cursor: ${error.message}`);
+    return null;
+  }
+  if (!data?.valor) return null;
+
+  const numero = Number(data.valor);
+  return Number.isFinite(numero) ? numero : null;
+}
+
+async function salvarCursorSync(codigo: number): Promise<void> {
+  const { error } = await supabase
+    .from("sync_estado")
+    .upsert(
+      { chave: CHAVE_CURSOR_SYNC, valor: String(codigo), atualizado_em: new Date().toISOString() },
+      { onConflict: "chave" }
+    );
+
+  if (error) console.error(`[sync] erro ao salvar cursor: ${error.message}`);
+}
+
 // -----------------------------------------------------------
-// 1) Sincronização incremental: só busca detalhe de pedidos novos
+// 1) Sincronização em lotes: só busca detalhe de até
+// LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO pedidos novos por execução, a partir do
+// cursor salvo em sync_estado. O backfill completo acontece ao longo de
+// várias execuções (cron diário) — nenhuma lógica especial de "continuar"
+// além de reler o cursor a cada chamada.
 // -----------------------------------------------------------
-async function sincronizarHistorico(): Promise<void> {
+async function sincronizarHistorico(): Promise<{ processados: number; restantes: number }> {
+  const inicioListagem = Date.now();
   console.log("[sync] listando códigos de pedido no Omie...");
   const codigosNoOmie = await listarCodigosDePedidos();
-  console.log(`[sync] ${codigosNoOmie.length} pedidos encontrados no Omie`);
+  console.log(
+    `[sync] ${codigosNoOmie.length} pedidos encontrados no Omie (listagem levou ${Date.now() - inicioListagem}ms)`
+  );
 
   const { data: existentes, error } = await supabase
     .from("pedidos_itens_historico")
@@ -41,51 +91,69 @@ async function sincronizarHistorico(): Promise<void> {
   if (error) throw new Error(`[sync] erro ao ler histórico existente: ${error.message}`);
 
   const codigosJaSincronizados = new Set((existentes ?? []).map((l) => l.pedido_omie_id));
-  const codigosNovos = codigosNoOmie.filter(
-    (c) => !codigosJaSincronizados.has(String(c))
+  const codigosNovosOrdenados = codigosNoOmie
+    .filter((c) => !codigosJaSincronizados.has(String(c)))
+    .sort((a, b) => a - b);
+
+  const cursor = await lerCursorSync();
+  const candidatos = cursor === null ? codigosNovosOrdenados : codigosNovosOrdenados.filter((c) => c > cursor);
+
+  const lote = candidatos.slice(0, LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO);
+  const restantes = candidatos.length - lote.length;
+
+  console.log(
+    `[sync] cursor atual: ${cursor ?? "(nenhum, primeira execução)"} — ${candidatos.length} pedidos novos a partir dele, processando ${lote.length} nesta execução (${restantes} restantes)`
   );
 
-  console.log(`[sync] ${codigosNovos.length} pedidos novos pra buscar o detalhe`);
+  const inicioDetalhe = Date.now();
 
-  for (const codigo of codigosNovos) {
+  for (const codigo of lote) {
     const pedido = await consultarPedido(codigo);
-    if (!pedido) continue; // pedido cancelado, pula
+    if (pedido) {
+      const { nome: clienteNome, cnpj: clienteCnpj } = await resolverCliente(
+        pedido.codigo_cliente_omie
+      );
+      const vendedorNome = await resolverVendedor(pedido.codigo_vendedor_omie);
 
-    const { nome: clienteNome, cnpj: clienteCnpj } = await resolverCliente(
-      pedido.codigo_cliente_omie
-    );
-    const vendedorNome = await resolverVendedor(pedido.codigo_vendedor_omie);
+      const [dia, mes, ano] = pedido.data_pedido.split("/");
+      const dataPedidoISO = `${ano}-${mes}-${dia}`;
 
-    const [dia, mes, ano] = pedido.data_pedido.split("/");
-    const dataPedidoISO = `${ano}-${mes}-${dia}`;
+      const linhas = pedido.itens.map((item) => ({
+        cliente_omie_codigo: pedido.codigo_cliente_omie,
+        cliente_nome: clienteNome,
+        cliente_cnpj: clienteCnpj,
+        pedido_omie_id: pedido.codigo_pedido_omie,
+        pedido_numero: pedido.numero_pedido,
+        data_pedido: dataPedidoISO,
+        item_codigo: item.codigo_produto,
+        item_nome: item.descricao,
+        categoria: item.categoria,
+        quantidade: item.quantidade,
+        valor_unitario: item.valor_unitario,
+        valor_total: item.valor_total,
+        vendedor_omie_id: pedido.codigo_vendedor_omie,
+        vendedor_nome: vendedorNome,
+      }));
 
-    const linhas = pedido.itens.map((item) => ({
-      cliente_omie_codigo: pedido.codigo_cliente_omie,
-      cliente_nome: clienteNome,
-      cliente_cnpj: clienteCnpj,
-      pedido_omie_id: pedido.codigo_pedido_omie,
-      pedido_numero: pedido.numero_pedido,
-      data_pedido: dataPedidoISO,
-      item_codigo: item.codigo_produto,
-      item_nome: item.descricao,
-      categoria: item.categoria,
-      quantidade: item.quantidade,
-      valor_unitario: item.valor_unitario,
-      valor_total: item.valor_total,
-      vendedor_omie_id: pedido.codigo_vendedor_omie,
-      vendedor_nome: vendedorNome,
-    }));
+      const { error: upsertError } = await supabase
+        .from("pedidos_itens_historico")
+        .upsert(linhas, { onConflict: "pedido_omie_id,item_codigo" });
 
-    const { error: upsertError } = await supabase
-      .from("pedidos_itens_historico")
-      .upsert(linhas, { onConflict: "pedido_omie_id,item_codigo" });
-
-    if (upsertError) {
-      console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
-    }
+      if (upsertError) {
+        console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
+      }
+    } // pedido === null: cancelado, pula (mas o cursor ainda avança por ele)
   }
 
-  console.log(`[sync] sincronização concluída`);
+  if (lote.length > 0) {
+    await salvarCursorSync(lote[lote.length - 1]);
+  }
+
+  console.log(
+    `[sync] lote concluído em ${Date.now() - inicioDetalhe}ms — ${lote.length} processados, ${restantes} restantes`
+  );
+
+  return { processados: lote.length, restantes };
 }
 
 // -----------------------------------------------------------
@@ -372,18 +440,22 @@ async function cruzarComVencimentoCA(): Promise<void> {
 // -----------------------------------------------------------
 // ORQUESTRAÇÃO
 // -----------------------------------------------------------
-export async function rodarSincronizacaoDiaria(): Promise<void> {
+export async function rodarSincronizacaoDiaria(): Promise<{ processados: number; restantes: number }> {
   console.log("=== iniciando job de recompra preditiva ===");
-  await sincronizarHistorico();
+  const resultadoSync = await sincronizarHistorico();
   await recalcularRecorrencias();
   await recalcularCrossSell();
   await cruzarComVencimentoCA();
   console.log("=== job concluído ===");
+  return resultadoSync;
 }
 
 if (require.main === module) {
   rodarSincronizacaoDiaria()
-    .then(() => process.exit(0))
+    .then((resultado) => {
+      console.log("[job] resultado:", resultado);
+      process.exit(0);
+    })
     .catch((err) => {
       console.error("[job] falhou:", err);
       process.exit(1);
