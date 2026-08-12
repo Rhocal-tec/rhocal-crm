@@ -16,3 +16,12 @@ export const TEMPERATURA_AUTOMATICA_DOT_VAR: Record<TemperaturaAutomatica, strin
   vermelho: '--accent-danger',
   cinza: '--text-muted',
 }
+
+// Fase 36.1: rótulos do badge de score de propensão — reaproveita as mesmas
+// 3 cores (TEMPERATURA_AUTOMATICA_BADGE_CLASSES['verde'|'amarelo'|'vermelho'],
+// 'cinza' nunca é produzido pelo score), só o texto muda.
+export const SCORE_PROPENSAO_LABELS: Record<'verde' | 'amarelo' | 'vermelho', string> = {
+  verde: 'Alto',
+  amarelo: 'Médio',
+  vermelho: 'Baixo',
+}

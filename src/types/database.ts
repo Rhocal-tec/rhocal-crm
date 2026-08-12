@@ -41,6 +41,10 @@ export type RecompraStatus = 'pendente' | 'contatado' | 'convertido' | 'nao_conv
 export type RecompraConfiabilidade = 'alta' | 'media' | 'baixa'
 export type RecompraOrigemCalculo = 'historico' | 'fallback_categoria'
 
+// Histórico de campanhas (fase 36.3). `status` tem check constraint no banco
+// — só esses 3 valores.
+export type CampanhaClienteStatus = 'enviado' | 'convertido' | 'nao_convertido'
+
 export interface Database {
   public: {
     Tables: {
@@ -676,6 +680,72 @@ export interface Database {
           total_pedidos_com_principal?: number
           frequencia_conjunta?: number
           atualizado_em?: string
+        }
+        Relationships: []
+      }
+      campanhas: {
+        Row: {
+          id: string
+          empresa_id: string
+          nome: string
+          descricao: string | null
+          filtros_aplicados: Record<string, unknown> | null
+          total_clientes: number
+          criado_por: string
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          empresa_id: string
+          nome: string
+          descricao?: string | null
+          filtros_aplicados?: Record<string, unknown> | null
+          total_clientes: number
+          criado_por: string
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          empresa_id?: string
+          nome?: string
+          descricao?: string | null
+          filtros_aplicados?: Record<string, unknown> | null
+          total_clientes?: number
+          criado_por?: string
+          criado_em?: string
+        }
+        Relationships: []
+      }
+      campanha_clientes: {
+        Row: {
+          id: string
+          campanha_id: string
+          cliente_omie_codigo: string | null
+          cliente_nome: string
+          cliente_cnpj: string | null
+          status: CampanhaClienteStatus
+          convertido_em: string | null
+          pedido_id: string | null
+        }
+        Insert: {
+          id?: string
+          campanha_id: string
+          cliente_omie_codigo?: string | null
+          cliente_nome: string
+          cliente_cnpj?: string | null
+          status?: CampanhaClienteStatus
+          convertido_em?: string | null
+          pedido_id?: string | null
+        }
+        Update: {
+          id?: string
+          campanha_id?: string
+          cliente_omie_codigo?: string | null
+          cliente_nome?: string
+          cliente_cnpj?: string | null
+          status?: CampanhaClienteStatus
+          convertido_em?: string | null
+          pedido_id?: string | null
         }
         Relationships: []
       }

@@ -2,9 +2,11 @@
 
 import { formatarCnpjInput, formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
 import type { ClienteInteligencia } from '@/lib/inteligencia/agregar'
-import { TEMPERATURA_AUTOMATICA_BADGE_CLASSES } from '@/lib/inteligencia/temperatura-cores'
+import { TEMPERATURA_AUTOMATICA_BADGE_CLASSES, SCORE_PROPENSAO_LABELS } from '@/lib/inteligencia/temperatura-cores'
 import { TEMPERATURA_AUTOMATICA_LABELS } from '@/lib/inteligencia/agregar'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
+
+export type OrdemScore = 'asc' | 'desc' | null
 
 export function TabelaInteligencia({
   clientes,
@@ -12,12 +14,16 @@ export function TabelaInteligencia({
   onAlternarSelecao,
   onAlternarSelecionarTodos,
   onVerFicha,
+  ordemScore,
+  onAlternarOrdemScore,
 }: {
   clientes: ClienteInteligencia[]
   selecionados: Set<string>
   onAlternarSelecao: (chave: string) => void
   onAlternarSelecionarTodos: () => void
   onVerFicha: (cliente: ClienteInteligencia) => void
+  ordemScore: OrdemScore
+  onAlternarOrdemScore: () => void
 }) {
   const todosMarcados = clientes.length > 0 && clientes.every((c) => selecionados.has(c.chave))
 
@@ -48,6 +54,18 @@ export function TabelaInteligencia({
             <th className="px-3 py-2.5 font-medium">Cidade/UF</th>
             <th className="px-3 py-2.5 font-medium">Temp. automática</th>
             <th className="px-3 py-2.5 font-medium">Temp. manual</th>
+            <th className="px-3 py-2.5 font-medium">
+              <button
+                type="button"
+                onClick={onAlternarOrdemScore}
+                className="flex items-center gap-1 font-medium text-muted transition-colors hover:text-primary"
+              >
+                Score
+                <span className="text-[10px]">
+                  {ordemScore === 'desc' ? '▼' : ordemScore === 'asc' ? '▲' : '↕'}
+                </span>
+              </button>
+            </th>
             <th className="px-3 py-2.5 font-medium">Última compra</th>
             <th className="px-3 py-2.5 font-medium">Qtd. pedidos</th>
             <th className="px-3 py-2.5 font-medium">Ticket médio</th>
@@ -90,6 +108,14 @@ export function TabelaInteligencia({
                 </span>
               </td>
               <td className="px-3 py-2.5 text-primary/80">{cliente.temperaturaManual ?? '—'}</td>
+              <td className="px-3 py-2.5">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${TEMPERATURA_AUTOMATICA_BADGE_CLASSES[cliente.faixaScorePropensao]}`}
+                  title={SCORE_PROPENSAO_LABELS[cliente.faixaScorePropensao as 'verde' | 'amarelo' | 'vermelho']}
+                >
+                  <span className="font-mono">{cliente.scorePropensao}</span>
+                </span>
+              </td>
               <td className="px-3 py-2.5 text-primary/80">
                 {cliente.ultimaCompra ? formatarDataSomente(cliente.ultimaCompra) : '—'}
               </td>

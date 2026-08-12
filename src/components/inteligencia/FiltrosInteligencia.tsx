@@ -8,6 +8,7 @@ import type { OportunidadeStatus } from '@/types/database'
 export type FaixaTicket = '' | 'ate_1k' | '1k_5k' | 'acima_5k'
 export type FaixaFrequencia = '' | '1x' | '2_5x' | '6x_mais'
 export type FaixaUltimaCompra = '' | '30' | '60' | '90' | '180' | 'nunca'
+export type FaixaScore = '' | 'alto' | 'medio' | 'baixo'
 
 export interface FiltrosState {
   temperaturasAutomaticas: Set<TemperaturaAutomatica>
@@ -20,6 +21,7 @@ export interface FiltrosState {
   faixaFrequencia: FaixaFrequencia
   faixaUltimaCompra: FaixaUltimaCompra
   vendedorId: string
+  faixaScore: FaixaScore
 }
 
 export function filtrosVazios(): FiltrosState {
@@ -34,6 +36,7 @@ export function filtrosVazios(): FiltrosState {
     faixaFrequencia: '',
     faixaUltimaCompra: '',
     vendedorId: '',
+    faixaScore: '',
   }
 }
 
@@ -45,24 +48,34 @@ const TODAS_ETAPAS = Object.keys(OPORTUNIDADE_STATUS_LABELS) as OportunidadeStat
 // encontrado nos dados também aparece na lista, mesclado com estes três.
 const TEMPERATURA_MANUAL_SUGERIDAS = ['Quente', 'Morno', 'Frio']
 
-const FAIXAS_TICKET: { valor: FaixaTicket; rotulo: string }[] = [
+// Exportadas (não só usadas aqui) — reaproveitadas pelo resumo legível de
+// filtros salvos na sub-aba Campanhas (fase 36.3).
+export const FAIXAS_TICKET: { valor: FaixaTicket; rotulo: string }[] = [
   { valor: 'ate_1k', rotulo: 'Até R$ 1.000' },
   { valor: '1k_5k', rotulo: 'R$ 1.000 – R$ 5.000' },
   { valor: 'acima_5k', rotulo: 'Acima de R$ 5.000' },
 ]
 
-const FAIXAS_FREQUENCIA: { valor: FaixaFrequencia; rotulo: string }[] = [
+export const FAIXAS_FREQUENCIA: { valor: FaixaFrequencia; rotulo: string }[] = [
   { valor: '1x', rotulo: '1 pedido' },
   { valor: '2_5x', rotulo: '2 a 5 pedidos' },
   { valor: '6x_mais', rotulo: '6 pedidos ou mais' },
 ]
 
-const FAIXAS_ULTIMA_COMPRA: { valor: FaixaUltimaCompra; rotulo: string }[] = [
+export const FAIXAS_ULTIMA_COMPRA: { valor: FaixaUltimaCompra; rotulo: string }[] = [
   { valor: '30', rotulo: 'Últimos 30 dias' },
   { valor: '60', rotulo: 'Últimos 60 dias' },
   { valor: '90', rotulo: 'Últimos 90 dias' },
   { valor: '180', rotulo: 'Últimos 180 dias' },
   { valor: 'nunca', rotulo: 'Nunca comprou' },
+]
+
+// Fase 36.1 — mesmas faixas do badge de score (verde 70-100 / amarelo 40-69
+// / vermelho 0-39), com rótulo "Alto/Médio/Baixo" (SCORE_PROPENSAO_LABELS).
+export const FAIXAS_SCORE: { valor: Exclude<FaixaScore, ''>; rotulo: string }[] = [
+  { valor: 'alto', rotulo: 'Alto (70-100)' },
+  { valor: 'medio', rotulo: 'Médio (40-69)' },
+  { valor: 'baixo', rotulo: 'Baixo (0-39)' },
 ]
 
 export function FiltrosInteligencia({
@@ -105,7 +118,8 @@ export function FiltrosInteligencia({
     filtros.faixaUltimaCompra !== '' ||
     filtros.cidade !== '' ||
     filtros.uf !== '' ||
-    filtros.vendedorId !== ''
+    filtros.vendedorId !== '' ||
+    filtros.faixaScore !== ''
 
   return (
     <div className="rounded-lg border border-white/10 bg-surface p-4">
@@ -247,6 +261,22 @@ export function FiltrosInteligencia({
         </div>
 
         <div>
+          <label className="block text-xs text-muted">Score de propensão</label>
+          <select
+            value={filtros.faixaScore}
+            onChange={(e) => atualizar('faixaScore', e.target.value as FaixaScore)}
+            className="input-field mt-1 w-full rounded-md px-2.5 py-1.5 text-sm"
+          >
+            <option value="">Todos</option>
+            {FAIXAS_SCORE.map((f) => (
+              <option key={f.valor} value={f.valor}>
+                {f.rotulo}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
           <label className="block text-xs text-muted">Cidade</label>
           <input
             type="text"
@@ -285,4 +315,61 @@ export function FiltrosInteligencia({
       )}
     </div>
   )
+}
+
+// Fase 36.3: snapshot dos filtros salvo em `campanhas.filtros_aplicados`
+// (jsonb) — Set não serializa em JSON.stringify, por isso vira array aqui.
+export function serializarFiltros(filtros: FiltrosState): Record<string, unknown> {
+  return {
+    temperaturasAutomaticas: Array.from(filtros.temperaturasAutomaticas),
+    temperaturaManual: filtros.temperaturaManual,
+    cidade: filtros.cidade,
+    uf: filtros.uf,
+    etapaFunil: filtros.etapaFunil,
+    origem: filtros.origem,
+    faixaTicket: filtros.faixaTicket,
+    faixaFrequencia: filtros.faixaFrequencia,
+    faixaUltimaCompra: filtros.faixaUltimaCompra,
+    vendedorId: filtros.vendedorId,
+    faixaScore: filtros.faixaScore,
+  }
+}
+
+const ROTULO_FAIXA_TICKET = Object.fromEntries(FAIXAS_TICKET.map((f) => [f.valor, f.rotulo]))
+const ROTULO_FAIXA_FREQUENCIA = Object.fromEntries(FAIXAS_FREQUENCIA.map((f) => [f.valor, f.rotulo]))
+const ROTULO_FAIXA_ULTIMA_COMPRA = Object.fromEntries(FAIXAS_ULTIMA_COMPRA.map((f) => [f.valor, f.rotulo]))
+const ROTULO_FAIXA_SCORE = Object.fromEntries(FAIXAS_SCORE.map((f) => [f.valor, f.rotulo]))
+
+// Resumo legível pra listagem de campanhas salvas (fase 36.3) — só mostra os
+// campos que estavam preenchidos no momento do salvamento.
+export function resumirFiltrosSalvos(json: Record<string, unknown> | null): string {
+  if (!json) return 'Nenhum filtro aplicado'
+  const partes: string[] = []
+
+  const temps = Array.isArray(json.temperaturasAutomaticas) ? (json.temperaturasAutomaticas as string[]) : []
+  if (temps.length > 0) {
+    partes.push(
+      `Temp.: ${temps.map((t) => TEMPERATURA_AUTOMATICA_LABELS[t as TemperaturaAutomatica] ?? t).join('/')}`,
+    )
+  }
+  if (json.temperaturaManual) partes.push(`Temp. manual: ${json.temperaturaManual}`)
+  if (json.etapaFunil) {
+    partes.push(`Etapa: ${OPORTUNIDADE_STATUS_LABELS[json.etapaFunil as OportunidadeStatus] ?? json.etapaFunil}`)
+  }
+  if (json.origem) partes.push(`Origem: ${json.origem}`)
+  if (json.faixaTicket) partes.push(`Ticket: ${ROTULO_FAIXA_TICKET[json.faixaTicket as string] ?? json.faixaTicket}`)
+  if (json.faixaFrequencia) {
+    partes.push(`Frequência: ${ROTULO_FAIXA_FREQUENCIA[json.faixaFrequencia as string] ?? json.faixaFrequencia}`)
+  }
+  if (json.faixaUltimaCompra) {
+    partes.push(
+      `Última compra: ${ROTULO_FAIXA_ULTIMA_COMPRA[json.faixaUltimaCompra as string] ?? json.faixaUltimaCompra}`,
+    )
+  }
+  if (json.faixaScore) partes.push(`Score: ${ROTULO_FAIXA_SCORE[json.faixaScore as string] ?? json.faixaScore}`)
+  if (json.cidade) partes.push(`Cidade: ${json.cidade}`)
+  if (json.uf) partes.push(`UF: ${json.uf}`)
+  if (json.vendedorId) partes.push('Vendedor filtrado')
+
+  return partes.length > 0 ? partes.join(' · ') : 'Nenhum filtro aplicado'
 }

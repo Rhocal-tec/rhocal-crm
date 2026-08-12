@@ -1087,3 +1087,74 @@ Botão "Ver ficha" por linha, abre um modal com:
 - **Oportunidades abertas**: oportunidades do cliente com status fora de `GANHO`/`PERDIDO`
 - **Tarefas pendentes**: tarefas (`situacao != 'Realizada'`) vinculadas a alguma oportunidade ou pedido desse cliente
 - **Histórico de contato**: resumo (qtd., tipo mais usado, último contato) + as 10 interações mais recentes (tipo, resultado, data)
+
+## Fase 36 — Inteligência Comercial avançada: score de propensão, alertas de churn e histórico de campanhas
+
+Estende a página `/inteligencia` (fase 35) com três ferramentas de ação sobre a base já segmentada: um score que ranqueia quem tem mais chance de comprar de novo, um alerta automático de quem está saindo do padrão de recompra, e um jeito de guardar campanhas já disparadas pra medir o resultado depois.
+
+### 36.1 — Score de propensão à compra (0-100)
+
+Calculado por cliente, direto na agregação já existente (`agregarClientesInteligencia`), a partir de 4 fatores normalizados pra 0-100 cada e depois combinados por peso:
+
+| Fator | Peso | Normalização (0-100) |
+|---|---|---|
+| Recência | 35% | `100 − (dias_desde_última_compra / 365) × 100`, limitado a [0,100]. Cliente sem nenhum pedido efetuado (`ultimaCompra = null`) recebe 0 |
+| Frequência | 30% | `min(qtd_pedidos_efetuados / 10, 1) × 100` — 10 pedidos efetuados ou mais já satura em 100 |
+| Valor | 25% | `valor_total_acumulado / maior_valor_total_acumulado_da_base × 100` — normalizado pelo maior valor acumulado **entre os clientes carregados na tela** (empresa ativa), não um teto fixo cravado; se ninguém da base tem valor acumulado, todos ficam em 0 |
+| Temperatura da oportunidade | 10% | Mapeamento fixo sobre `oportunidades.temperatura` (texto livre) da oportunidade mais recente do cliente: "Quente" = 100, "Morno" = 50, "Frio" = 0. Sem oportunidade ou com valor livre não mapeado: 50 (neutro — não penaliza a falta do dado como se fosse "Frio") |
+
+`score = round(frequência×0,30 + recência×0,35 + valor×0,25 + temperatura×0,10)`, sempre um inteiro entre 0 e 100.
+
+Exibição: nova coluna "Score" na tabela de resultados, com badge colorido (reaproveita as mesmas cores da temperatura automática — verde/âmbar/vermelho já usadas na fase 35, sem inventar paleta nova) — **verde 70-100, amarelo 40-69, vermelho 0-39**. Coluna ordenável: clicar no cabeçalho alterna desc → asc → ordem padrão (por nome). Novo filtro "Score de propensão" (Alto 70-100 / Médio 40-69 / Baixo 0-39), combinável com os demais filtros da fase 35.
+
+Esses pesos e limiares (10 pedidos = teto de frequência, 365 dias = piso de recência, faixas 70/40 do badge) são decisão de produto desta fase — ajustável depois se a régua não bater com a realidade comercial, mesmo espírito dos limiares 90/180 da fase 35.
+
+### 36.2 — Alertas de churn
+
+Reaproveita a mesma técnica de intervalo médio já usada no Motor de Recompra Preditiva (`src/lib/recompra/calculo-recorrencia.ts`) — média dos intervalos, em dias, entre compras consecutivas — só que calculada **por cliente** (sobre as datas de primeira efetuação de cada pedido, mesma fonte que já alimenta Recência/Frequência/Valor na fase 35) em vez de por item/categoria.
+
+- `intervalo_médio_dias` = média dos intervalos entre pedidos efetuados consecutivos. Exige pelo menos **2** pedidos efetuados — sem isso não há base pra média, e o cliente não entra no cálculo (não é "risco zero", é "sem dado suficiente pra avaliar")
+- Cliente em alerta quando `dias_desde_última_compra > 1,5 × intervalo_médio_dias`
+
+Seção dedicada no **topo da página** (acima dos cards de resumo), título "⚠️ Clientes em risco de churn (X)" — mostra o conjunto completo de clientes em risco da empresa ativa, **independente dos filtros de segmentação** aplicados mais abaixo na tela (é um painel de monitoramento fixo, não parte do fluxo de filtro/exportação). Cada linha mostra nome, dias desde a última compra e o intervalo médio de referência, com um botão "Criar tarefa".
+
+"Criar tarefa" abre um formulário compacto (mesmos campos da aba Tarefas — descrição, responsável, data prevista, tipo, importante/urgente — fases 32/33), pré-preenchido com uma descrição sugerida ("Contatar {cliente} — risco de churn"). A tarefa criada é vinculada automaticamente: à oportunidade **aberta mais recente** do cliente, se existir (permite sincronizar com o Omie, mesma regra da fase 33.4); senão, ao **pedido mais recente** do cliente (sempre existe, já que entrar em alerta de churn exige histórico de pelo menos 2 pedidos efetuados). `empresa_id` da tarefa é sempre a empresa ativa no momento.
+
+### 36.3 — Histórico de campanhas
+
+Reaproveita as tabelas `campanhas` e `campanha_clientes`, já criadas no Supabase:
+
+```sql
+create table campanhas (
+  id uuid primary key default gen_random_uuid(),
+  empresa_id uuid not null references empresas(id),
+  nome text not null,
+  descricao text,
+  filtros_aplicados jsonb,
+  total_clientes integer not null,
+  criado_por uuid not null references profiles(id),
+  criado_em timestamptz not null default now()
+);
+
+create table campanha_clientes (
+  id uuid primary key default gen_random_uuid(),
+  campanha_id uuid not null references campanhas(id),
+  cliente_omie_codigo text,
+  cliente_nome text not null,
+  cliente_cnpj text,
+  status text not null default 'enviado'
+    check (status in ('enviado', 'convertido', 'nao_convertido')),
+  convertido_em timestamptz,
+  pedido_id uuid references pedidos(id)
+);
+```
+
+**Salvar campanha:** botão "Salvar como campanha", ao lado de "Exportar CSV" — mesma base de clientes (selecionados na tabela, ou todos os filtrados se nada estiver selecionado). Pede um nome (obrigatório) e uma descrição (opcional) num modal curto. Ao confirmar:
+- Insere em `campanhas`: `empresa_id` = empresa ativa, `filtros_aplicados` = snapshot serializado do estado atual de todos os filtros da fase 35/36.1 (inclusive o novo filtro de score), `total_clientes` = tamanho da base salva, `criado_por` = usuário logado
+- Insere em `campanha_clientes`, uma linha por cliente da base, com `status` no valor padrão `'enviado'`: `cliente_omie_codigo` (o `omie_cliente_id` do cliente, convertido pra texto — vem do cadastro em `clientes`/fase 34 quando existe, senão do `cliente_omie_id` mais recente entre os pedidos do cliente), `cliente_nome`, `cliente_cnpj`
+
+**Sub-aba "Campanhas"** dentro de `/inteligencia` (junto da aba "Segmentação", que é a tela atual da fase 35/36.1/36.2): lista as campanhas da empresa ativa — nome, data de criação, total de clientes, e um resumo legível dos filtros usados (só os campos que estavam preenchidos no momento do salvamento).
+
+**"Ver resultado" por campanha:** recalcula e **persiste** o resultado em `campanha_clientes.status` (é pra isso que os 3 valores do `check` existem — `'enviado'` é o estado pendente de avaliação, a ação resolve pra `'convertido'` ou `'nao_convertido'`, idempotente: pode ser clicado de novo depois pra reavaliar com pedidos mais recentes). Pra cada cliente da campanha, busca entre os pedidos da mesma empresa criados **depois de `campanhas.criado_em`** (qualquer status — diferente da métrica RFM da fase 35, aqui não exige `PEDIDO_EFETUADO`: qualquer pedido novo já é sinal de reengajamento) um que bata com o cliente, na mesma prioridade de identificador usada no resto da fase 35 (`cliente_omie_codigo` > CNPJ > nome normalizado). Se achar, marca `status = 'convertido'`, `convertido_em` = data do pedido encontrado (o mais antigo depois da campanha) e `pedido_id`; se não achar nenhum, marca `status = 'nao_convertido'`. Exibe o resultado agregado: "X de Y clientes fizeram pelo menos 1 pedido depois desta campanha (Z%)".
+
+**RLS:** o schema enviado pelo usuário não incluía `enable row level security`/policies — testado ao vivo (insert anônimo contra a API), confirmou-se que RLS já estava ativo sem nenhuma policy permissiva (bloqueava até usuário autenticado). Migração `0011_campanhas_rls.sql` libera leitura/escrita pra qualquer autenticado, mesmo padrão já usado em `oportunidades`/`tarefas`/`interacoes` — precisa rodar no SQL Editor do Supabase antes de usar 36.3 em produção.

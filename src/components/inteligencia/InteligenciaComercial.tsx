@@ -18,9 +18,13 @@ import {
 } from '@/lib/inteligencia/agregar'
 import { exportarClientesCsv } from '@/lib/inteligencia/csv'
 import { FiltrosInteligencia, filtrosVazios, type FiltrosState } from './FiltrosInteligencia'
-import { TabelaInteligencia } from './TabelaInteligencia'
+import { TabelaInteligencia, type OrdemScore } from './TabelaInteligencia'
 import { FichaClienteModal } from './FichaClienteModal'
 import { CardsResumoInteligencia } from './CardsResumoInteligencia'
+import { AlertasChurn } from './AlertasChurn'
+import { CriarTarefaClienteModal } from './CriarTarefaClienteModal'
+import { SalvarCampanhaModal } from './SalvarCampanhaModal'
+import { CampanhasTab } from './CampanhasTab'
 
 function aplicaFiltroFaixaUltimaCompra(valor: string | null, faixa: FiltrosState['faixaUltimaCompra']): boolean {
   if (!faixa) return true
@@ -44,6 +48,13 @@ function aplicaFiltroFaixaTicket(ticket: number | null, faixa: FiltrosState['fai
   return ticket > 5000
 }
 
+function aplicaFiltroFaixaScore(score: number, faixa: FiltrosState['faixaScore']): boolean {
+  if (!faixa) return true
+  if (faixa === 'alto') return score >= 70
+  if (faixa === 'medio') return score >= 40 && score <= 69
+  return score <= 39
+}
+
 export function InteligenciaComercial() {
   const { empresaAtiva } = useEmpresa()
   const [supabase] = useState(() => createClient())
@@ -53,6 +64,10 @@ export function InteligenciaComercial() {
   const [filtros, setFiltros] = useState<FiltrosState>(filtrosVazios())
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [fichaAberta, setFichaAberta] = useState<ClienteInteligencia | null>(null)
+  const [aba, setAba] = useState<'segmentacao' | 'campanhas'>('segmentacao')
+  const [ordemScore, setOrdemScore] = useState<OrdemScore>(null)
+  const [clienteParaTarefa, setClienteParaTarefa] = useState<ClienteInteligencia | null>(null)
+  const [modalCampanhaAberto, setModalCampanhaAberto] = useState(false)
 
   useEffect(() => {
     if (!empresaAtiva) return
@@ -207,9 +222,23 @@ export function InteligenciaComercial() {
       }
       if (filtros.uf && c.estado !== filtros.uf) return false
       if (filtros.vendedorId && c.vendedorId !== filtros.vendedorId) return false
+      if (!aplicaFiltroFaixaScore(c.scorePropensao, filtros.faixaScore)) return false
       return true
     })
   }, [clientes, filtros])
+
+  const clientesOrdenados = useMemo(() => {
+    if (!ordemScore) return clientesFiltrados
+    const copia = [...clientesFiltrados]
+    copia.sort((a, b) =>
+      ordemScore === 'asc' ? a.scorePropensao - b.scorePropensao : b.scorePropensao - a.scorePropensao,
+    )
+    return copia
+  }, [clientesFiltrados, ordemScore])
+
+  function alternarOrdemScore() {
+    setOrdemScore((atual) => (atual === 'desc' ? 'asc' : atual === 'asc' ? null : 'desc'))
+  }
 
   function alternarSelecao(chave: string) {
     setSelecionados((atual) => {
@@ -228,9 +257,15 @@ export function InteligenciaComercial() {
     })
   }
 
+  // Base de clientes usada tanto pelo Exportar CSV quanto por "Salvar como
+  // campanha": selecionados na tabela, ou todos os filtrados se nada
+  // estiver selecionado.
+  function baseParaAcao(): ClienteInteligencia[] {
+    return selecionados.size > 0 ? clientesFiltrados.filter((c) => selecionados.has(c.chave)) : clientesFiltrados
+  }
+
   function handleExportar() {
-    const base =
-      selecionados.size > 0 ? clientesFiltrados.filter((c) => selecionados.has(c.chave)) : clientesFiltrados
+    const base = baseParaAcao()
     if (base.length === 0) return
     const hoje = new Date().toISOString().slice(0, 10)
     exportarClientesCsv(base, `inteligencia-comercial-${empresaAtiva?.slug ?? 'rhocal'}-${hoje}.csv`)
@@ -250,43 +285,102 @@ export function InteligenciaComercial() {
 
       {!carregando && (
         <div className="mt-6">
-          <CardsResumoInteligencia clientes={clientesFiltrados} />
+          <AlertasChurn clientes={clientes} onCriarTarefa={setClienteParaTarefa} />
         </div>
       )}
 
-      <div className="mt-6">
-        <FiltrosInteligencia filtros={filtros} onChange={setFiltros} opcoes={opcoes} />
-      </div>
-
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted">
-          {clientesFiltrados.length} cliente(s) encontrado(s)
-          {selecionados.size > 0 ? ` · ${selecionados.size} selecionado(s)` : ''}
-        </p>
+      <div className="mt-6 flex gap-2 border-b border-white/10">
         <button
-          onClick={handleExportar}
-          disabled={clientesFiltrados.length === 0}
-          className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+          type="button"
+          onClick={() => setAba('segmentacao')}
+          className={`px-3 py-2 text-sm font-medium transition-colors ${
+            aba === 'segmentacao'
+              ? 'border-b-2 border-accent-primary text-primary'
+              : 'text-muted hover:text-primary'
+          }`}
         >
-          Exportar CSV{selecionados.size > 0 ? ` (${selecionados.size})` : ''}
+          Segmentação
+        </button>
+        <button
+          type="button"
+          onClick={() => setAba('campanhas')}
+          className={`px-3 py-2 text-sm font-medium transition-colors ${
+            aba === 'campanhas' ? 'border-b-2 border-accent-primary text-primary' : 'text-muted hover:text-primary'
+          }`}
+        >
+          Campanhas
         </button>
       </div>
 
-      {carregando ? (
-        <p className="mt-8 text-center text-sm text-muted">Carregando…</p>
+      {aba === 'campanhas' ? (
+        <CampanhasTab />
       ) : (
-        <div className="mt-4">
-          <TabelaInteligencia
-            clientes={clientesFiltrados}
-            selecionados={selecionados}
-            onAlternarSelecao={alternarSelecao}
-            onAlternarSelecionarTodos={alternarSelecionarTodos}
-            onVerFicha={setFichaAberta}
-          />
-        </div>
+        <>
+          {!carregando && (
+            <div className="mt-6">
+              <CardsResumoInteligencia clientes={clientesFiltrados} />
+            </div>
+          )}
+
+          <div className="mt-6">
+            <FiltrosInteligencia filtros={filtros} onChange={setFiltros} opcoes={opcoes} />
+          </div>
+
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted">
+              {clientesFiltrados.length} cliente(s) encontrado(s)
+              {selecionados.size > 0 ? ` · ${selecionados.size} selecionado(s)` : ''}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setModalCampanhaAberto(true)}
+                disabled={clientesFiltrados.length === 0}
+                className="rounded-md border border-white/15 px-4 py-2 text-sm font-medium text-primary/80 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Salvar como campanha
+              </button>
+              <button
+                onClick={handleExportar}
+                disabled={clientesFiltrados.length === 0}
+                className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Exportar CSV{selecionados.size > 0 ? ` (${selecionados.size})` : ''}
+              </button>
+            </div>
+          </div>
+
+          {carregando ? (
+            <p className="mt-8 text-center text-sm text-muted">Carregando…</p>
+          ) : (
+            <div className="mt-4">
+              <TabelaInteligencia
+                clientes={clientesOrdenados}
+                selecionados={selecionados}
+                onAlternarSelecao={alternarSelecao}
+                onAlternarSelecionarTodos={alternarSelecionarTodos}
+                onVerFicha={setFichaAberta}
+                ordemScore={ordemScore}
+                onAlternarOrdemScore={alternarOrdemScore}
+              />
+            </div>
+          )}
+        </>
       )}
 
       <FichaClienteModal cliente={fichaAberta} onClose={() => setFichaAberta(null)} />
+      <CriarTarefaClienteModal
+        cliente={clienteParaTarefa}
+        empresaId={empresaAtiva?.id ?? null}
+        onClose={() => setClienteParaTarefa(null)}
+      />
+      <SalvarCampanhaModal
+        aberto={modalCampanhaAberto}
+        clientes={baseParaAcao()}
+        filtros={filtros}
+        empresaId={empresaAtiva?.id ?? null}
+        onClose={() => setModalCampanhaAberto(false)}
+        onSalva={() => setAba('campanhas')}
+      />
     </main>
   )
 }

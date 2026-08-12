@@ -33,6 +33,94 @@ export function calcularTemperaturaAutomatica(ultimaCompra: string | null): Temp
   return 'vermelho'
 }
 
+// Fase 36.1: score de propensão à compra (0-100) — 4 fatores ponderados
+// (frequência 30%, recência 35%, valor 25%, temperatura da oportunidade
+// 10%), cada fator normalizado pra 0-100 antes de aplicar o peso. Pesos e
+// limiares são decisão de produto desta fase, ajustável depois — ver
+// CLAUDE.md pro racional de cada normalização.
+export const PESOS_SCORE_PROPENSAO = {
+  frequencia: 0.3,
+  recencia: 0.35,
+  valor: 0.25,
+  temperatura: 0.1,
+}
+
+const FREQUENCIA_TETO_PEDIDOS = 10
+const RECENCIA_TETO_DIAS = 365
+
+const TEMPERATURA_MANUAL_SCORE: Record<string, number> = {
+  Quente: 100,
+  Morno: 50,
+  Frio: 0,
+}
+// Sem oportunidade ou com valor livre não mapeado: neutro — não penaliza a
+// falta do dado como se fosse "Frio".
+const TEMPERATURA_MANUAL_SCORE_PADRAO = 50
+
+function calcularScoreRecencia(diasDesdeUltimaCompra: number | null): number {
+  if (diasDesdeUltimaCompra === null) return 0
+  const score = 100 - (diasDesdeUltimaCompra / RECENCIA_TETO_DIAS) * 100
+  return Math.round(Math.max(0, Math.min(100, score)))
+}
+
+function calcularScoreFrequencia(qtdPedidosEfetuados: number): number {
+  return Math.round(Math.min(qtdPedidosEfetuados / FREQUENCIA_TETO_PEDIDOS, 1) * 100)
+}
+
+function calcularScoreValor(valorTotalAcumulado: number, maiorValorTotalAcumulado: number): number {
+  if (maiorValorTotalAcumulado <= 0) return 0
+  return Math.round(Math.min(valorTotalAcumulado / maiorValorTotalAcumulado, 1) * 100)
+}
+
+function calcularScoreTemperatura(temperaturaManual: string | null): number {
+  if (!temperaturaManual) return TEMPERATURA_MANUAL_SCORE_PADRAO
+  return TEMPERATURA_MANUAL_SCORE[temperaturaManual] ?? TEMPERATURA_MANUAL_SCORE_PADRAO
+}
+
+function calcularScorePropensao(params: {
+  diasDesdeUltimaCompra: number | null
+  qtdPedidosEfetuados: number
+  valorTotalAcumulado: number
+  maiorValorTotalAcumulado: number
+  temperaturaManual: string | null
+}): number {
+  const total =
+    calcularScoreFrequencia(params.qtdPedidosEfetuados) * PESOS_SCORE_PROPENSAO.frequencia +
+    calcularScoreRecencia(params.diasDesdeUltimaCompra) * PESOS_SCORE_PROPENSAO.recencia +
+    calcularScoreValor(params.valorTotalAcumulado, params.maiorValorTotalAcumulado) * PESOS_SCORE_PROPENSAO.valor +
+    calcularScoreTemperatura(params.temperaturaManual) * PESOS_SCORE_PROPENSAO.temperatura
+
+  return Math.round(Math.max(0, Math.min(100, total)))
+}
+
+// Reaproveita o mesmo tipo/paleta da temperatura automática (verde/amarelo/
+// vermelho) pro badge de score — nunca produz 'cinza'.
+export function faixaDoScorePropensao(score: number): TemperaturaAutomatica {
+  if (score >= 70) return 'verde'
+  if (score >= 40) return 'amarelo'
+  return 'vermelho'
+}
+
+// Fase 36.2: alerta de churn — mesma técnica de intervalo médio já usada no
+// Motor de Recompra Preditiva (src/lib/recompra/calculo-recorrencia.ts):
+// média dos intervalos, em dias, entre compras consecutivas — só que
+// calculada por CLIENTE (sobre as datas de efetuação de cada pedido) em vez
+// de por item/categoria. Exige pelo menos 2 pedidos efetuados; sem isso não
+// há base pra média e o cliente não entra no cálculo de risco.
+export const MULTIPLICADOR_ALERTA_CHURN = 1.5
+
+function calcularIntervaloMedioDiasCompra(datasEfetuacaoAsc: string[]): number | null {
+  if (datasEfetuacaoAsc.length < 2) return null
+  const intervalos: number[] = []
+  for (let i = 1; i < datasEfetuacaoAsc.length; i++) {
+    const dias =
+      (new Date(datasEfetuacaoAsc[i]).getTime() - new Date(datasEfetuacaoAsc[i - 1]).getTime()) /
+      (1000 * 60 * 60 * 24)
+    intervalos.push(dias)
+  }
+  return Math.round(intervalos.reduce((soma, n) => soma + n, 0) / intervalos.length)
+}
+
 export interface PedidoInteligencia {
   id: string
   numero: number
@@ -107,6 +195,22 @@ export interface ClienteInteligencia {
   qtdInteracoes: number
   tipoInteracaoMaisUsado: string | null
   ultimoContato: string | null
+
+  // Fase 36.1
+  scorePropensao: number
+  faixaScorePropensao: TemperaturaAutomatica
+
+  // Fase 36.2
+  diasDesdeUltimaCompra: number | null
+  intervaloMedioDiasCompra: number | null
+  emRiscoChurn: boolean
+  // Vínculo sugerido pra "Criar tarefa" a partir do alerta de churn:
+  // oportunidade aberta mais recente, senão pedido mais recente.
+  vinculoTarefaTipo: 'oportunidade' | 'pedido' | null
+  vinculoTarefaId: string | null
+
+  // Fase 36.3 — pra registrar cliente_omie_codigo em campanha_clientes
+  omieClienteId: number | null
 
   historicoPedidos: PedidoInteligencia[]
   oportunidadesAbertas: OportunidadeInteligencia[]
@@ -253,6 +357,8 @@ interface Acumulador {
   oportunidades: OportunidadeInteligencia[]
   vendedorId: string | null
   vendedorAtualizadoEm: string
+  omieClienteId: number | null
+  omieClienteIdAtualizadoEm: string
 }
 
 // Reconstrói, a partir do audit_log já ordenado por data_hora crescente, a
@@ -335,6 +441,8 @@ export function agregarClientesInteligencia(params: {
       oportunidades: [],
       vendedorId: null,
       vendedorAtualizadoEm: '',
+      omieClienteId: null,
+      omieClienteIdAtualizadoEm: '',
     }
     acumuladores.set(chave, novo)
     return novo
@@ -365,6 +473,10 @@ export function agregarClientesInteligencia(params: {
     if (pedido.criado_em >= acc.vendedorAtualizadoEm) {
       acc.vendedorId = pedido.criado_por
       acc.vendedorAtualizadoEm = pedido.criado_em
+    }
+    if (pedido.cliente_omie_id !== null && pedido.criado_em >= acc.omieClienteIdAtualizadoEm) {
+      acc.omieClienteId = pedido.cliente_omie_id
+      acc.omieClienteIdAtualizadoEm = pedido.criado_em
     }
 
     const total = (totalPorPedido.get(pedido.id) ?? 0) + Number(pedido.valor_frete ?? 0)
@@ -435,7 +547,11 @@ export function agregarClientesInteligencia(params: {
     }
   }
 
-  const resultado: ClienteInteligencia[] = []
+  // Fase 36.1 precisa do maior valorTotalAcumulado de TODA a base pra
+  // normalizar o fator "valor" — por isso a montagem roda em duas passadas:
+  // 1) monta cada cliente sem o score, 2) acha o maior valor e só então
+  // calcula o score de cada um.
+  const preResultado: Array<Omit<ClienteInteligencia, 'scorePropensao' | 'faixaScorePropensao'>> = []
 
   for (const acc of Array.from(acumuladores.values())) {
     const cadastro = cadastroPorChave.get(acc.chave) ?? null
@@ -470,10 +586,32 @@ export function agregarClientesInteligencia(params: {
       null,
     )
 
-    const oportunidadesAbertas = acc.oportunidades.filter(
-      (o) => o.status !== 'GANHO' && o.status !== 'PERDIDO',
-    )
+    const oportunidadesAbertas = acc.oportunidades
+      .filter((o) => o.status !== 'GANHO' && o.status !== 'PERDIDO')
+      .sort((a, b) => (a.criado_em < b.criado_em ? 1 : -1))
     const valorEstimadoAberto = oportunidadesAbertas.reduce((soma, o) => soma + (o.valor_estimado ?? 0), 0)
+
+    const historicoPedidosOrdenado = [...acc.pedidos].sort((a, b) => (a.criado_em < b.criado_em ? 1 : -1))
+
+    // Fase 36.2: intervalo médio entre compras consecutivas + alerta de churn.
+    const datasEfetuacaoAsc = pedidosEfetuados.map((p) => p.dataEfetuacao as string).sort()
+    const intervaloMedioDiasCompra = calcularIntervaloMedioDiasCompra(datasEfetuacaoAsc)
+    const diasDesdeUltimaCompra = ultimaCompra ? diasDesde(ultimaCompra) : null
+    const emRiscoChurn =
+      intervaloMedioDiasCompra !== null &&
+      diasDesdeUltimaCompra !== null &&
+      diasDesdeUltimaCompra > MULTIPLICADOR_ALERTA_CHURN * intervaloMedioDiasCompra
+
+    // Vínculo sugerido pro botão "Criar tarefa" do alerta de churn:
+    // oportunidade aberta mais recente, senão o pedido mais recente.
+    const vinculoTarefaTipo: 'oportunidade' | 'pedido' | null =
+      oportunidadesAbertas.length > 0 ? 'oportunidade' : historicoPedidosOrdenado.length > 0 ? 'pedido' : null
+    const vinculoTarefaId =
+      vinculoTarefaTipo === 'oportunidade'
+        ? oportunidadesAbertas[0].id
+        : vinculoTarefaTipo === 'pedido'
+          ? historicoPedidosOrdenado[0].id
+          : null
 
     const idsOportunidades = new Set(acc.oportunidades.map((o) => o.id))
     const idsPedidos = new Set(acc.pedidos.map((p) => p.id))
@@ -526,7 +664,7 @@ export function agregarClientesInteligencia(params: {
       }
     }
 
-    resultado.push({
+    preResultado.push({
       chave: acc.chave,
       clienteId: cadastro?.id ?? acc.clienteId,
       nome: cadastro?.nome_fantasia || acc.nome,
@@ -561,7 +699,15 @@ export function agregarClientesInteligencia(params: {
       tipoInteracaoMaisUsado,
       ultimoContato: interacoesDoCliente[0]?.criado_em ?? null,
 
-      historicoPedidos: [...acc.pedidos].sort((a, b) => (a.criado_em < b.criado_em ? 1 : -1)),
+      diasDesdeUltimaCompra,
+      intervaloMedioDiasCompra,
+      emRiscoChurn,
+      vinculoTarefaTipo,
+      vinculoTarefaId,
+
+      omieClienteId: cadastro?.omie_cliente_id ?? acc.omieClienteId,
+
+      historicoPedidos: historicoPedidosOrdenado,
       oportunidadesAbertas,
       tarefasPendentes: tarefasPendentes.map((t) => ({
         id: t.id,
@@ -577,6 +723,23 @@ export function agregarClientesInteligencia(params: {
       })),
     })
   }
+
+  const maiorValorTotalAcumulado = Math.max(0, ...preResultado.map((c) => c.valorTotalAcumulado))
+
+  const resultado: ClienteInteligencia[] = preResultado.map((c) => {
+    const scorePropensao = calcularScorePropensao({
+      diasDesdeUltimaCompra: c.diasDesdeUltimaCompra,
+      qtdPedidosEfetuados: c.qtdPedidosEfetuados,
+      valorTotalAcumulado: c.valorTotalAcumulado,
+      maiorValorTotalAcumulado,
+      temperaturaManual: c.temperaturaManual,
+    })
+    return {
+      ...c,
+      scorePropensao,
+      faixaScorePropensao: faixaDoScorePropensao(scorePropensao),
+    }
+  })
 
   return resultado.sort((a, b) => a.nome.localeCompare(b.nome))
 }
