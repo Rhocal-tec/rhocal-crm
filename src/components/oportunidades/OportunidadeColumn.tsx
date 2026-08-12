@@ -2,6 +2,7 @@
 
 import { useDroppable } from '@dnd-kit/core'
 import { OPORTUNIDADE_STATUS_LABELS, OPORTUNIDADE_STATUS_STRIPE_VAR } from '@/lib/oportunidades/status'
+import { formatarMoeda } from '@/lib/kanban/formatacao'
 import { OportunidadeCard } from './OportunidadeCard'
 import type { Database, OportunidadeStatus } from '@/types/database'
 
@@ -22,6 +23,10 @@ export function OportunidadeColumn({
 
   const stripeVar = OPORTUNIDADE_STATUS_STRIPE_VAR[status] ?? '--text-primary'
 
+  // Fase 37.2: soma do valor_estimado da coluna, ao lado do contador — omite
+  // quando dá zero (cobre tanto "nenhuma tem valor" quanto "soma é zero").
+  const valorTotalColuna = oportunidades.reduce((soma, o) => soma + (o.valor_estimado ?? 0), 0)
+
   return (
     <div className="flex w-72 shrink-0 flex-col rounded-lg bg-white/[0.03]">
       <div
@@ -37,6 +42,7 @@ export function OportunidadeColumn({
         </h2>
         <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-primary/70">
           {oportunidades.length}
+          {valorTotalColuna > 0 && ` · ${formatarMoeda(valorTotalColuna)}`}
         </span>
       </div>
       <div

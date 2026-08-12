@@ -1158,3 +1158,38 @@ create table campanha_clientes (
 **"Ver resultado" por campanha:** recalcula e **persiste** o resultado em `campanha_clientes.status` (é pra isso que os 3 valores do `check` existem — `'enviado'` é o estado pendente de avaliação, a ação resolve pra `'convertido'` ou `'nao_convertido'`, idempotente: pode ser clicado de novo depois pra reavaliar com pedidos mais recentes). Pra cada cliente da campanha, busca entre os pedidos da mesma empresa criados **depois de `campanhas.criado_em`** (qualquer status — diferente da métrica RFM da fase 35, aqui não exige `PEDIDO_EFETUADO`: qualquer pedido novo já é sinal de reengajamento) um que bata com o cliente, na mesma prioridade de identificador usada no resto da fase 35 (`cliente_omie_codigo` > CNPJ > nome normalizado). Se achar, marca `status = 'convertido'`, `convertido_em` = data do pedido encontrado (o mais antigo depois da campanha) e `pedido_id`; se não achar nenhum, marca `status = 'nao_convertido'`. Exibe o resultado agregado: "X de Y clientes fizeram pelo menos 1 pedido depois desta campanha (Z%)".
 
 **RLS:** o schema enviado pelo usuário não incluía `enable row level security`/policies — testado ao vivo (insert anônimo contra a API), confirmou-se que RLS já estava ativo sem nenhuma policy permissiva (bloqueava até usuário autenticado). Migração `0011_campanhas_rls.sql` libera leitura/escrita pra qualquer autenticado, mesmo padrão já usado em `oportunidades`/`tarefas`/`interacoes` — precisa rodar no SQL Editor do Supabase antes de usar 36.3 em produção.
+
+## Fase 37 — Melhorias no kanban de Oportunidades
+
+Quatro ajustes visuais no card e na coluna do kanban de Oportunidades (fase 31), sem mudar schema nem regras de movimentação — só dar mais contexto de leitura rápida pro Comercial/SDR sem precisar abrir o modal.
+
+### 37.1 — Temperatura no card
+
+Indicador de cor no canto superior direito do card (mesma linha do "Oportunidade #N", ponta direita — já é o topo do card), baseado em `oportunidades.temperatura` (texto livre, fase 31): círculo sólido de 10px.
+
+| Temperatura | Cor |
+|---|---|
+| Quente | `#DC2626` |
+| Morno | `#EAB308` |
+| Frio | `#2563EB` |
+| (vazio ou qualquer outro valor livre) | sem indicador |
+
+Cores literais (não os tokens `--accent-*`) — de propósito, pra não colidir visualmente com o âmbar/vermelho já usados no mesmo card pro alerta de dias parado (fase 37.3), que fica numa posição diferente do card mas pode aparecer ao mesmo tempo.
+
+### 37.2 — Valor total por coluna
+
+No cabeçalho de cada coluna, ao lado do contador de cards já existente (badge no canto direito do cabeçalho), soma o `valor_estimado` de todas as oportunidades daquela coluna e exibe junto do contador (ex: "4 · R$ 23.400"). Omite a soma quando for zero (cobre os dois casos do pedido original — nenhuma oportunidade com valor, ou soma dando exatamente zero — é a mesma checagem).
+
+### 37.3 — Contador de dias parado
+
+Mesma fonte de dados já usada no alerta âmbar existente do card (`ultima_movimentacao`), mas com um segundo patamar que ainda não existia nesse card:
+
+- **3 a 6 dias**: destaque âmbar (`accent-alert`, mesmo tom já usado no card), texto "Xd parado"
+- **7+ dias**: destaque vermelho (`accent-danger`), texto "Xd parado" — precedência sobre o âmbar
+- **Menos de 3 dias**: sem destaque
+
+Novo helper `estaCritico` (limite 7 dias) em `src/lib/kanban/dias-parado.ts`, ao lado do `estaParado` (limite 3) já existente — arquivo compartilhado entre os kanbans de Pedidos e Oportunidades, mas só o card de Oportunidades passa a usar os dois patamares (o de Pedidos continua com o comportamento de hoje, sem 2º patamar por dias — lá quem ocupa o vermelho é a regra de "cotação atrasada" da fase 18.6, um alerta diferente).
+
+### 37.4 — Responsável no card
+
+Nova linha no rodapé do card: "Responsável: {nome}", resolvido a partir de `oportunidades.criado_por` via join com `profiles` (sempre o criador original — diferente da linha "Movido por {nome}" já existente, que reflete `movido_por` e muda a cada movimentação). Mesmo padrão visual (texto pequeno, `text-muted/80`) já usado no "Movido por" do kanban de Pedidos.
