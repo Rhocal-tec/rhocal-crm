@@ -164,7 +164,9 @@ export function OportunidadeDetalheModal({
             </div>
           )}
 
-          {aba === 'tarefas' && <TarefasTab oportunidadeId={oportunidade.id} />}
+          {aba === 'tarefas' && (
+            <TarefasTab oportunidadeId={oportunidade.id} empresaId={oportunidade.empresa_id} />
+          )}
 
           {aba === 'historico' && <HistoricoContatoTab oportunidadeId={oportunidade.id} />}
         </div>

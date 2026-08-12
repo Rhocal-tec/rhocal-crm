@@ -891,3 +891,199 @@ Estender o Painel executivo (fase 14), com uma seção dedicada a Oportunidades 
 ### 32.3 — Cadastro relâmpago de lead
 
 Um formulário compacto e rápido para o SDR cadastrar um lead em segundos: nome do cliente + telefone + origem. Botão "Cadastro rápido" separado do "Novo Lead" completo, abrindo um modal pequeno. Ao salvar, cria a oportunidade normalmente (status NOVO_LEAD), completando os demais dados depois, a qualquer momento.
+
+## Fase 33 — Kanban de Tarefas: importação, sincronização bidirecional com o Omie e melhorias próprias
+
+Nova página `/tarefas`, separada dos modais de oportunidade/pedido (onde a aba Tarefas da fase 31 continua existindo) — um kanban dedicado ao acompanhamento do dia a dia do Comercial/SDR, agrupado por **PRAZO**, diferente do Omie (que agrupa por situação).
+
+Colunas `tarefas` estendidas: `tipo` (text, opcional — Ligação/WhatsApp/E-mail/Reunião/Outro), `situacao` (text, default `'Pendente'`; `'Realizada'` mantido em sincronia com `concluida` em todo lugar que a tarefa é concluída), `importante`/`urgente` (boolean, default false), `omie_tarefa_id` (bigint), `empresa_id` (uuid, references empresas), `descricao_completa_omie` (text — ver 33.5).
+
+Link "Tarefas" no header, visível para comercial e gestor (mesma regra de acesso de Oportunidades — compras não participa).
+
+### 33.1 — Kanban por PRAZO
+
+4 colunas, calculadas (não são movidas manualmente, sem drag-and-drop):
+- **Atrasadas** — `data_prevista` no passado e `situacao != 'Realizada'` (destaque vermelho)
+- **Hoje** — `data_prevista = hoje`
+- **Futuras** — `data_prevista` no futuro, ou tarefa sem `data_prevista` preenchida
+- **Concluídas** — `situacao = 'Realizada'` (tem prioridade sobre a data: uma tarefa realizada cai aqui mesmo que a data prevista seja passada/hoje/futura)
+
+Escopado pela empresa ativa (`EmpresaContext`, via `tarefas.empresa_id`). Cada cartão mostra: descrição, cliente (resolvido via `oportunidade_id`/`pedido_id`), tipo (se preenchido), responsável, data prevista, e badges quando `importante`/`urgente`.
+
+### 33.2 — Quatro melhorias próprias
+
+- **Minha fila**: toggle no topo da página, filtra a visão para `responsavel = usuário logado`
+- **Concluir com um clique**: botão no próprio cartão, marca `situacao = 'Realizada'` e `concluida = true` direto, sem abrir modal
+- **Encadeamento**: ao concluir, abre um formulário opcional "Criar próxima tarefa?" (descrição + data sugerida = hoje + 3 dias), vinculado à mesma oportunidade/pedido — pode ser dispensado sem criar nada
+- **Contador de tentativas**: na aba Tarefas do modal de oportunidade, mostra quantas tarefas com tipo de contato (Ligação/WhatsApp/E-mail/Reunião) já foram marcadas como Realizada
+
+### 33.3 — Importação do `ListarTarefas` (Omie CRM) — formato confirmado ao vivo
+
+Igual às integrações anteriores (fases 18.5/20/31), nada abaixo está documentado no portal do desenvolvedor Omie — só foi possível confirmar chamando a API de verdade:
+
+- Endpoint `https://app.omie.com.br/api/v1/crm/tarefas/`, call `ListarTarefas`. Diferente do `ListarOportunidades`, os campos vêm **achatados direto no item** (sem sub-objetos `identificacao`/`ticket`/`fasesStatus`): `cDescricao`, `cImportante`/`cUrgente`/`cRealizada` ("S"/"N"), `cHora` ("HH:MM"), `dData` ("DD/MM/AAAA"), `nCodAtividade` (código de atividade opaco, não mapeado), `nCodNotif`, `nCodOp` (código da Oportunidade — **mesmo espaço de código de `identificacao.nCodOp` do `ListarOportunidades`**, usado para linkar a tarefa importada à nossa oportunidade via `omie_oportunidade_id`), `nCodTarefa` (id da tarefa, salvo em `omie_tarefa_id`), `nCodUsuario`/`nIncluidoPor` (códigos de usuário do Omie, sem mapeamento para `profiles.id` neste projeto)
+- **`registros_por_pagina` tem teto real de 100** mesmo pedindo mais (confirmado pedindo 500, a API devolveu 100) — mesmo comportamento já visto no `ListarOportunidades`
+- **`cRealizada` funciona como filtro server-side**, mesmo sem estar documentado: passar `cRealizada: 'N'` derrubou `total_de_registros` de 5033 para 83 num teste ao vivo contra a conta da RHOCAL. `filtrar_realizada` (nome alternativo testado) é rejeitado (`FILTRAR_REALIZADA não faz parte da estrutura`) — o nome certo é o mesmo campo do retorno (`cRealizada`)
+- **`cDescricao` não é uma descrição curta** — na prática é um log corrido, com várias entradas de datas diferentes concatenadas na mesma tarefa (ex: histórico de tentativas de contato ao longo de meses). Decisão: `descricao` guarda uma versão truncada (~300 caracteres + "…"), e o texto original completo vai para `descricao_completa_omie` — nada é perdido, só a exibição padrão fica resumida (um "ver mais" no detalhe da tarefa fica para depois, não implementado ainda)
+
+Botão **"Importar tarefas do Omie"**, exclusivo do gestor, na página `/tarefas`. Importa **por padrão só as pendentes** (`cRealizada: 'N'`) — decisão consciente para não inundar o kanban com anos de histórico já concluído (nada impede importar o resto depois, se fizer sentido). Evita duplicar comparando `omie_tarefa_id` já gravado. Resolve `oportunidade_id` via `nCodOp` → `oportunidades.omie_oportunidade_id`; tarefa cujo `nCodOp` ainda não corresponde a nenhuma oportunidade nossa (oportunidade ainda não importada) é importada mesmo assim, só fica com `oportunidade_id = null`. `responsavel` fica sempre `null` nas tarefas importadas — sem tentativa de mapear `nCodUsuario`/`nIncluidoPor`, a equipe reatribui manualmente.
+
+### 33.4 — Sincronização bidirecional (`IncluirTarefa`/`AlterarTarefa`)
+
+Ao criar ou editar uma tarefa no nosso CRM (TarefasTab, kanban `/tarefas`, encadeamento), reflete no Omie via rota server-side `POST /api/omie/sincronizar-tarefa`, usando as credenciais da empresa da oportunidade vinculada (fase 30). Ao concluir uma tarefa aqui (por qualquer caminho — checkbox na aba Tarefas ou botão "Concluir" no kanban), o mesmo fluxo marca `cRealizada: 'S'` lá.
+
+**Só sincroniza tarefas vinculadas a uma oportunidade que já tem `omie_oportunidade_id`** — o módulo CRM do Omie só tem tarefas presas a Oportunidades, não existe equivalente para tarefas de pedido (`pedido_id`) nem para oportunidades ainda não sincronizadas com o Omie. Nesses casos a sincronização é pulada silenciosamente (não é erro, só não se aplica).
+
+**`IncluirTarefa`/`AlterarTarefa` foram implementados por inferência** (simetria com os campos que o próprio `ListarTarefas` devolve — `cDescricao`, `dData`, `cHora`, `cImportante`, `cUrgente`, `cRealizada`, mais `nCodOp` no Incluir e `nCodTarefa` no Alterar), **sem confirmação ao vivo com uma escrita de teste** — ao contrário do resto da investigação desta fase, não foi feita uma chamada de gravação real contra a conta de produção do Omie sem autorização explícita. `cHora` usa um horário fixo de fallback (`'09:00'`), já que a UI não coleta horário. Caso os nomes de campo estejam errados, o Omie retorna um fault, que cai no tratamento do parágrafo abaixo — vale conferir `error_log` (fase 25) depois do primeiro uso real para validar o formato.
+
+Falhas de sincronização (Omie fora do ar, campo rejeitado, credencial ausente) são registradas em `error_log` (fase 25) e **nunca bloqueiam a tela** — a tarefa já está salva no nosso banco antes de qualquer tentativa de sincronizar, e a chamada ao Omie é best-effort/fire-and-forget a partir do client.
+
+### 33.5 — Schema
+
+```sql
+alter table public.tarefas add column if not exists tipo text;
+alter table public.tarefas add column if not exists situacao text not null default 'Pendente';
+alter table public.tarefas add column if not exists importante boolean not null default false;
+alter table public.tarefas add column if not exists urgente boolean not null default false;
+alter table public.tarefas add column if not exists omie_tarefa_id bigint;
+alter table public.tarefas add column if not exists empresa_id uuid references public.empresas(id);
+alter table public.tarefas add column if not exists descricao_completa_omie text;
+```
+
+## Fase 34 — Módulo de Clientes
+
+Cadastro próprio de clientes no CRM, centralizando o que hoje acontece espalhado a cada Novo Orçamento/Novo Lead (busca por nome/CNPJ no Omie, fallback na Receita Federal, cadastro manual no Omie — fases 18.2/23/24). Em vez de repetir essa busca a cada pedido ou oportunidade, mantém um cadastro único, pesquisável e sincronizado com o Omie.
+
+Nova aba "Clientes" no header (`/clientes`), visível a **todos os perfis** — junto com Kanban/Busca/Arquivados, é uma das únicas telas sem restrição por setor (compras também participa, diferente de Oportunidades/Tarefas/Painel).
+
+**Tabela `clientes` (já criada no Supabase):**
+- **Não é escopada por `empresa_id`** — diferente de pedidos/oportunidades/tarefas. RHOCAL e MATSEG compartilham o mesmo cadastro de clientes no Omie (fase 30, recurso "Compartilhamento de Cadastros entre Aplicativos"): o mesmo `codigo_cliente_omie` vale para as duas contas, então um único registro nosso serve às duas empresas — não existe um "dono" fixo do registro como em pedidos/oportunidades. Chamadas ao Omie feitas a partir desta tela usam a empresa **ativa** no seletor do header no momento da chamada.
+- Campos: `razao_social`, `nome_fantasia`, `cnpj` (dígitos, único quando preenchido), `telefone`, `contato`, `email`, `endereco`, `endereco_numero`, `bairro`, `cidade`, `estado`, `cep`, `observacoes` (texto livre, adicionado na fase 35 pra alimentar a ficha do cliente na Inteligência Comercial), `omie_cliente_id` (único quando preenchido), `criado_por`, `criado_em`, `atualizado_em` (atualizado via trigger a cada edição, mesmo padrão de `ultima_movimentacao`).
+
+**Página `/clientes`:**
+- Listagem com busca por nome ou CNPJ (filtro simples sobre os clientes carregados)
+- Botão "Novo Cliente" abre o formulário de cadastro; clicar numa linha da lista abre o mesmo formulário em modo edição
+- Botão "Importar clientes do Omie", exclusivo do gestor — mesma posição/padrão visual do botão equivalente em Oportunidades (fase 31) e Tarefas (fase 33.3)
+
+**Formulário de cadastro/edição — reaproveita ao máximo a lógica das fases 23/24:**
+- Campo CNPJ com busca automática ao perder o foco: primeiro consulta o Omie (`ListarClientes` filtrando por `cnpj_cpf`, mesma rota `POST /api/omie/buscar-cliente-cnpj` da fase 18.2/23, enviando a empresa ativa como `empresaSlug`); se não encontrado, cai no fallback da Receita Federal (`POST /api/cnpj/consultar`, fase 23), preenchendo razão social/nome fantasia/telefone/endereço automaticamente
+- Encontrado no Omie: preenche razão social/nome fantasia e vincula `omie_cliente_id` — o cliente já nasce sincronizado
+- Encontrado só na Receita Federal (ainda não cadastrado no Omie): preenche os campos disponíveis e mostra o aviso já existente da fase 23 ("Cliente encontrado na Receita Federal, mas ainda não está cadastrado no Omie") — o cadastro no Omie acontece no momento de salvar (ver sincronização abaixo)
+- Não encontrado em nenhum dos dois: segue com preenchimento manual, sem bloquear
+
+**Sincronização bidirecional com o Omie — reaproveita `POST /api/omie/cadastrar-cliente` (fase 24), que ganha suporte a edição:**
+- Salvar um cliente **sem** `omie_cliente_id`: a rota chama `IncluirCliente` (comportamento já existente da fase 24) e grava o `codigo_cliente_omie` retornado
+- Salvar um cliente **com** `omie_cliente_id` já preenchido: a rota passa a aceitar um `codigoClienteOmie` no corpo da requisição — quando presente, chama `AlterarCliente` em vez de `IncluirCliente` (mesmo formato de payload/campos de entrada). Igual à fase 33.4, `AlterarCliente` foi implementado por simetria com `IncluirCliente`, sem confirmação ao vivo de uma escrita de teste — falhas caem no tratamento de erro padrão e ficam registradas em `error_log` (fase 25), e vale conferir lá após o primeiro uso real
+- Falha na sincronização com o Omie **nunca** impede salvar o cliente no nosso banco — o registro local é sempre salvo primeiro; o erro do Omie aparece só como um banner `accent-danger`, mesmo padrão das outras integrações
+
+**Botão "Importar clientes do Omie"** (rota nova `POST /api/omie/importar-clientes`, exclusiva do gestor — checagem também no servidor, não só escondendo o botão): usa `ListarClientes` com paginação (teto real de 100 registros por página, mesmo comportamento já confirmado nos outros `Listar*` do Omie — fases 31/33.3) e evita duplicar comparando `omie_cliente_id` já gravado. Usa a empresa ativa (`empresaSlug`) para resolver as credenciais.
+
+**Integração com o campo de cliente em Novo Orçamento (`NovoOrcamentoModal`) e Novo Lead (`NovaOportunidadeModal`/`CadastroRelampagoModal`, fase 32.3):** a busca por nome (fase 18.2) e por CNPJ (fase 23) passam a consultar primeiro a tabela `clientes` local — mais rápida, sem round-trip ao Omie/Receita. Na busca por nome, os resultados locais aparecem combinados com os do Omie (quando aplicável); na busca por CNPJ, um cliente já cadastrado localmente é usado direto, pulando a chamada ao Omie/Receita nesse caso. Selecionar uma sugestão vinda da tabela local também preenche telefone e nome do contato quando disponíveis — dado que a busca direta no Omie não tinha, já que o cadastro do Omie não guarda esses dois campos.
+
+### Schema
+
+```sql
+create table if not exists public.clientes (
+  id uuid primary key default gen_random_uuid(),
+  razao_social text not null,
+  nome_fantasia text,
+  cnpj text,
+  telefone text,
+  contato text,
+  email text,
+  endereco text,
+  endereco_numero text,
+  bairro text,
+  cidade text,
+  estado text,
+  cep text,
+  observacoes text, -- fase 35: alimenta a ficha do cliente na Inteligência Comercial
+  omie_cliente_id bigint,
+  criado_por uuid references public.profiles(id),
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+alter table public.clientes enable row level security;
+
+drop policy if exists "clientes leitura" on public.clientes;
+create policy "clientes leitura" on public.clientes for select to authenticated using (true);
+
+drop policy if exists "clientes escrita" on public.clientes;
+create policy "clientes escrita" on public.clientes for all to authenticated using (true) with check (true);
+
+drop index if exists clientes_cnpj_unico;
+create unique index clientes_cnpj_unico on public.clientes (cnpj) where cnpj is not null;
+drop index if exists clientes_omie_cliente_id_unico;
+create unique index clientes_omie_cliente_id_unico on public.clientes (omie_cliente_id) where omie_cliente_id is not null;
+```
+
+## Fase 35 — Inteligência Comercial (segmentação RFM para campanhas de marketing)
+
+Página `/inteligencia`, exclusiva do **gestor** (mesma regra de acesso do Painel executivo — link "Inteligência" no header só aparece pra esse perfil, e a página redireciona qualquer outro perfil pro Kanban). Não é um relatório fixo como o Painel (fase 14): é uma ferramenta de segmentação — cruza clientes + oportunidades + pedidos + interações, filtra por múltiplos critérios combinados e exporta o resultado em CSV para campanhas de marketing/reativação (Meta Ads, Google Ads, RD Station etc.).
+
+**Escopo:** pedidos e oportunidades são filtrados pela empresa **ativa** (`EmpresaContext`, mesmo padrão do Painel/fase 30) — a base de comparação é sempre "os clientes da RHOCAL" ou "os clientes da MATSEG", nunca as duas juntas; trocar de empresa no seletor do header já refiltra a página inteira, sem precisar de um seletor próprio dentro da tela. Já a tabela `clientes` (fase 34) **não** é escopada por empresa (cadastro compartilhado no Omie) — entra como enriquecimento (e-mail, cidade/UF, CEP, observações) quando existe um cadastro correspondente; nem todo cliente com pedido/oportunidade no histórico tem necessariamente um registro em `clientes` ainda, então esses campos podem aparecer vazios até o cadastro ser feito.
+
+**Como um "cliente" é identificado (matching):** nenhuma das quatro tabelas (`clientes`, `pedidos`, `oportunidades`, `interacoes`) tem FK direta pras outras — a junção é reconstruída em memória com um **union-find** sobre os identificadores disponíveis, priorizando `cliente_omie_id` (só existe em `pedidos` e em `clientes.omie_cliente_id`) e caindo pra CNPJ (dígitos) e depois nome normalizado como fallback:
+- Um registro que carregue **dois identificadores ao mesmo tempo** (ex: um cadastro em `clientes` com `omie_cliente_id` E `cnpj` preenchidos, ou um pedido com `cliente_omie_id` E `cliente_cnpj` preenchidos) serve de **ponte** entre os dois espaços de chave — é assim que um pedido só com `cliente_omie_id` e uma oportunidade do mesmo cliente só com `cliente_cnpj` acabam caindo no mesmo grupo, mesmo sem nenhum dos dois registros conhecer o identificador do outro diretamente
+- `interacoes` e `tarefas` não entram nesse matching por identificador — elas se conectam ao grupo através da FK que já têm (`oportunidade_id`/`pedido_id`), então herdam o cliente da oportunidade/pedido a que já pertencem
+- É uma heurística, não uma chave garantida — um cliente cujo nome está escrito de formas diferentes em registros sem CNPJ nem `cliente_omie_id` preenchido em nenhum deles não é unificado automaticamente
+- Todo cliente cadastrado em `clientes` (fase 34) aparece na tela mesmo com **zero** pedidos/oportunidades — o cruzamento não exige histórico prévio, só existir o cadastro
+
+**O que conta como "compra" (para Recência/Frequência/Valor):** um pedido só entra nas métricas RFM se ele **já passou** pelo status `PEDIDO_EFETUADO` em algum momento ("pedido convertido") — reconstruído a partir do `audit_log` (mesma técnica já usada no Painel para tempo médio por etapa/taxa de conversão), não pelo status atual. Isso é necessário porque o job de arquivamento por inatividade (7 dias sem movimentação) acaba arquivando a maioria dos pedidos efetuados depois de um tempo — se a métrica olhasse só `status = PEDIDO_EFETUADO`, ela perderia quase todo o histórico já arquivado. A **data da compra** é o momento em que o `audit_log` registra a primeira transição para `PEDIDO_EFETUADO`. Pedidos que nunca chegaram a `PEDIDO_EFETUADO` (orçamentos perdidos, abandonados, ainda em cotação) não contam pra Recência/Frequência/Valor, mas aparecem normalmente no histórico completo da ficha do cliente e na "quantidade total de pedidos" (que conta qualquer status).
+
+Duas contagens de pedidos aparecem lado a lado, com propósitos diferentes:
+- `qtdPedidosTotal`: **todos** os pedidos do cliente, qualquer status (orçamentos ainda em aberto, perdidos, etc.)
+- `qtdPedidosEfetuados`: só os convertidos — é essa que alimenta Frequência (RFM) e o filtro "Frequência de compra"
+
+**Temperatura automática** — badge colorido calculado a partir da Recência (dias desde o último pedido convertido), sem depender de nenhum campo manual:
+- 🟢 **Verde**: último pedido convertido há **menos de 90 dias**
+- 🟡 **Amarelo**: último pedido convertido entre **91 e 180 dias**
+- 🔴 **Vermelho**: último pedido convertido **há mais de 180 dias**
+- ⚪ **Cinza**: nunca teve um pedido convertido (inclui quem só tem oportunidade, sem pedido nenhum, e quem tem pedidos mas nenhum chegou a `PEDIDO_EFETUADO`)
+
+Esses limiares (90/180 dias) são uma decisão de produto desta fase, ajustada pro ciclo de recompra de EPI (mais espaçado que varejo comum) — não é um valor cravado, ajustável depois se a segmentação não bater com a realidade.
+
+**Diferente da temperatura manual** (`oportunidades.temperatura`, texto livre digitado pelo comercial na fase 31 — o filtro sugere "Quente"/"Morno"/"Frio" como atalho, mas aceita qualquer outro valor já usado nos dados) — as duas colunas aparecem lado a lado porque respondem perguntas diferentes: a automática mede histórico de compra real, a manual mede a percepção do comercial sobre o momento do lead. Quando um cliente tem mais de uma oportunidade, usa-se a mais recente (`criado_em`) pra temperatura manual, **etapa do funil**, **origem**, **valor estimado** (soma do `valor_estimado` das oportunidades ABERTAS do cliente, não só da mais recente) e **data de criação**.
+
+**Vendedor** = quem criou (`criado_por`) o registro mais recente do cliente entre pedidos e oportunidades (qualquer um dos dois, o que for mais novo).
+
+**Interações** (`interacoes`, fase 32.1): contadas e resumidas por cliente via as mesmas FKs `oportunidade_id`/`pedido_id` usadas pra tarefas — quantidade total, tipo mais frequente (`tipo` com mais ocorrências) e data da mais recente ("último contato").
+
+### Cards de resumo (topo da página, mesmo padrão visual do Painel)
+
+Refletem o conjunto **filtrado** (não a base inteira) — dão feedback imediato de quantos clientes cada filtro deixa de pé:
+- Total ativos (verde) / esfriando (amarelo) / frios (vermelho) / sem compra (cinza)
+- Valor total em pipeline: soma do `valor_estimado` das oportunidades abertas de todos os clientes filtrados
+- Ticket médio geral: média ponderada (soma do valor de todos os pedidos convertidos ÷ soma da quantidade de pedidos convertidos) — não a média simples dos tickets médios individuais, que sobre-representaria cliente de baixo volume
+
+### Filtros (combináveis entre si — E lógico entre todos, todos opcionais)
+
+- Temperatura automática (verde/amarelo/vermelho/cinza, múltipla escolha)
+- Temperatura manual (Quente/Morno/Frio sugeridos + qualquer valor livre encontrado nos dados)
+- Etapa do funil (`OPORTUNIDADE_STATUS_LABELS`, fase 31)
+- Origem (`ORIGEM_OPCOES`, fase 31, mais qualquer valor livre encontrado nos dados)
+- Última compra: faixas fixas — últimos 30/60/90/180 dias, ou "nunca comprou" (em vez de um intervalo de datas livre)
+- Frequência de compra: faixas fixas sobre `qtdPedidosEfetuados` — 1 pedido / 2 a 5 pedidos / 6 pedidos ou mais
+- Ticket médio: faixas fixas — até R$ 1.000 / R$ 1.000–5.000 / acima de R$ 5.000
+- Cidade (contém, texto livre) / UF (valores encontrados nos dados)
+- Vendedor (valores encontrados nos dados)
+- Empresa ativa: não é um filtro dentro da página — é o seletor do header (`EmpresaContext`), que já escopa toda a consulta de pedidos/oportunidades (ver "Escopo" acima)
+
+### Tabela de resultados
+
+Colunas: nome, CNPJ, cidade/UF, temperatura automática (badge), temperatura manual, última compra, qtd. pedidos (efetuados, com o total geral ao lado quando diferente), ticket médio, etapa do funil, origem, vendedor, qtd. interações. Checkbox de seleção por linha (+ selecionar todos os filtrados).
+
+### Exportar CSV
+
+Botão "Exportar CSV", gerado **client-side** com `papaparse` (`Papa.unparse`) — sem round-trip ao servidor, já que os dados já estão todos carregados na tela. Exporta os clientes **selecionados** (se nenhum estiver selecionado, exporta todos os que passaram pelo filtro atual); BOM UTF-8 na frente do arquivo pra acentuação não corromper ao abrir no Excel. Colunas do CSV (nesta ordem, uma linha por cliente): nome, razão social, nome fantasia, CNPJ, e-mail, telefone, contato, cidade, UF, CEP, observações, temperatura automática, temperatura manual, etapa funil, origem, valor estimado pipeline, vendedor, data criação oportunidade, última compra, qtd. pedidos total, qtd. pedidos efetuados, ticket médio, valor total acumulado, itens mais comprados (top 5, formato "descrição (qtd); descrição (qtd)..."), qtd. interações, tipo de interação mais usado, último contato.
+
+### Ver ficha
+
+Botão "Ver ficha" por linha, abre um modal com:
+- **Dados cadastrais**: razão social, nome fantasia, CNPJ, e-mail, telefone, contato, cidade/UF, CEP, vendedor e observações (quando preenchidos)
+- **Resumo de compras (RFM)**: última compra, qtd. de pedidos (total/efetuados), ticket médio, valor total acumulado, itens mais comprados (top 5)
+- **Histórico de pedidos**: todos os pedidos do cliente (qualquer status, não só os convertidos) — número, status, data, valor
+- **Oportunidades abertas**: oportunidades do cliente com status fora de `GANHO`/`PERDIDO`
+- **Tarefas pendentes**: tarefas (`situacao != 'Realizada'`) vinculadas a alguma oportunidade ou pedido desse cliente
+- **Histórico de contato**: resumo (qtd., tipo mais usado, último contato) + as 10 interações mais recentes (tipo, resultado, data)

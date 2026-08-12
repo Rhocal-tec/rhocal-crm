@@ -1,12 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { Modal } from '@/components/ui/Modal'
 import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { ORIGEM_OPCOES } from '@/lib/oportunidades/status'
+import { buscarClientesLocalPorNome, type ClienteSugestao } from '@/lib/clientes/buscar'
+
+// Mesmo mínimo/debounce usados na busca por nome de Novo Orçamento (fase 18.2).
+const MIN_CARACTERES_BUSCA_CLIENTE = 3
+const DEBOUNCE_BUSCA_CLIENTE_MS = 400
 
 export function NovaOportunidadeModal({
   open,
@@ -28,6 +33,38 @@ export function NovaOportunidadeModal({
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
+  // Fase 34: autocomplete contra a tabela `clientes` local — mais rápido que
+  // consultar o Omie a cada lead novo, e já traz telefone/contato junto.
+  const [sugestoesCliente, setSugestoesCliente] = useState<ClienteSugestao[]>([])
+  const [dropdownClienteAberto, setDropdownClienteAberto] = useState(false)
+  const debounceClienteRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function atualizarClienteNome(valor: string) {
+    setClienteNome(valor)
+    setDropdownClienteAberto(true)
+
+    if (debounceClienteRef.current) clearTimeout(debounceClienteRef.current)
+
+    const termo = valor.trim()
+    if (termo.length < MIN_CARACTERES_BUSCA_CLIENTE) {
+      setSugestoesCliente([])
+      return
+    }
+
+    debounceClienteRef.current = setTimeout(async () => {
+      setSugestoesCliente(await buscarClientesLocalPorNome(supabase, termo))
+    }, DEBOUNCE_BUSCA_CLIENTE_MS)
+  }
+
+  function selecionarCliente(cliente: ClienteSugestao) {
+    setClienteNome(cliente.razaoSocial)
+    if (cliente.cnpj) setClienteCnpj(cliente.cnpj)
+    if (cliente.telefone) setClienteTelefone(formatarTelefoneInput(cliente.telefone))
+    if (cliente.contato) setClienteContato(cliente.contato)
+    setSugestoesCliente([])
+    setDropdownClienteAberto(false)
+  }
+
   function resetar() {
     setClienteNome('')
     setClienteCnpj('')
@@ -36,6 +73,9 @@ export function NovaOportunidadeModal({
     setOrigem('')
     setTemperatura('')
     setValorEstimado('')
+    setSugestoesCliente([])
+    setDropdownClienteAberto(false)
+    if (debounceClienteRef.current) clearTimeout(debounceClienteRef.current)
     setErro(null)
   }
 
@@ -93,16 +133,35 @@ export function NovaOportunidadeModal({
   return (
     <Modal open={open} onClose={fechar} title="Novo Lead" widthClassName="max-w-lg">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div>
+        <div className="relative">
           <label className="block text-sm font-medium text-primary/80">Nome do cliente</label>
           <input
             type="text"
             value={clienteNome}
-            onChange={(e) => setClienteNome(e.target.value)}
+            onChange={(e) => atualizarClienteNome(e.target.value)}
+            onFocus={() => setDropdownClienteAberto(true)}
+            onBlur={() => setTimeout(() => setDropdownClienteAberto(false), 150)}
+            autoComplete="off"
             className="input-field mt-1 w-full rounded-md px-3 py-2 text-sm"
             placeholder="Ex: Cliente Teste LTDA"
             disabled={salvando}
           />
+          {dropdownClienteAberto && sugestoesCliente.length > 0 && (
+            <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-white/10 bg-surface-alt py-1 shadow-lg">
+              {sugestoesCliente.map((cliente) => (
+                <li key={cliente.id}>
+                  <button
+                    type="button"
+                    onMouseDown={() => selecionarCliente(cliente)}
+                    className="block w-full truncate px-3 py-1.5 text-left text-sm text-primary hover:bg-white/10"
+                  >
+                    {cliente.razaoSocial}
+                    {cliente.cnpj && <span className="ml-1.5 text-xs text-muted">— {cliente.cnpj}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3">

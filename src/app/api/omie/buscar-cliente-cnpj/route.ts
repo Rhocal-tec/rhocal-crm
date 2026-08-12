@@ -29,7 +29,11 @@ export async function POST(request: Request) {
     .eq('id', user.id)
     .single()
 
-  if (!profile || (profile.setor !== 'comercial' && profile.setor !== 'gestor')) {
+  // Antes exclusivo de comercial/gestor (a única chamada era da criação de
+  // pedido). A partir da fase 34, o módulo de Clientes também usa esta rota
+  // e é visível a todos os perfis — liberada pra qualquer autenticado, mesmo
+  // padrão já usado em buscar-clientes-nome.
+  if (!profile) {
     return NextResponse.json(
       { erro: 'Seu perfil não pode buscar clientes no Omie.' },
       { status: 403 },

@@ -6,6 +6,8 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { podeAcessarOportunidades } from '@/lib/oportunidades/permissions'
+import { podeAcessarTarefas } from '@/lib/tarefas/permissions'
+import { podeAcessarRecompra } from '@/lib/recompra/permissions'
 import type { SetorTipo } from '@/types/database'
 
 const SETOR_LABEL: Record<SetorTipo, string> = {
@@ -26,11 +28,18 @@ const LINKS = [
   { href: '/dashboard', label: 'Kanban' },
   { href: '/busca', label: 'Busca' },
   { href: '/arquivados', label: 'Arquivados' },
+  { href: '/clientes', label: 'Clientes' },
 ]
 
 const LINK_GESTOR = { href: '/painel', label: 'Painel' }
 
+const LINK_INTELIGENCIA = { href: '/inteligencia', label: 'Inteligência' }
+
 const LINK_OPORTUNIDADES = { href: '/oportunidades', label: 'Oportunidades' }
+
+const LINK_TAREFAS = { href: '/tarefas', label: 'Tarefas' }
+
+const LINK_RECOMPRA = { href: '/recompra', label: 'Hora de Recomprar' }
 
 export function AppHeader() {
   const pathname = usePathname()
@@ -88,6 +97,26 @@ export function AppHeader() {
               {LINK_OPORTUNIDADES.label}
             </Link>
           )}
+          {profile && podeAcessarTarefas(profile.setor) && (
+            <Link
+              href={LINK_TAREFAS.href}
+              className={`text-sm font-medium ${
+                pathname === LINK_TAREFAS.href ? 'text-primary' : 'text-muted hover:text-primary/80'
+              }`}
+            >
+              {LINK_TAREFAS.label}
+            </Link>
+          )}
+          {profile && podeAcessarRecompra(profile.setor) && (
+            <Link
+              href={LINK_RECOMPRA.href}
+              className={`text-sm font-medium ${
+                pathname === LINK_RECOMPRA.href ? 'text-primary' : 'text-muted hover:text-primary/80'
+              }`}
+            >
+              {LINK_RECOMPRA.label}
+            </Link>
+          )}
           {profile?.setor === 'gestor' && (
             <Link
               href={LINK_GESTOR.href}
@@ -96,6 +125,16 @@ export function AppHeader() {
               }`}
             >
               {LINK_GESTOR.label}
+            </Link>
+          )}
+          {profile?.setor === 'gestor' && (
+            <Link
+              href={LINK_INTELIGENCIA.href}
+              className={`text-sm font-medium ${
+                pathname === LINK_INTELIGENCIA.href ? 'text-primary' : 'text-muted hover:text-primary/80'
+              }`}
+            >
+              {LINK_INTELIGENCIA.label}
             </Link>
           )}
         </nav>

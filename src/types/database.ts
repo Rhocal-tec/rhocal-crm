@@ -29,6 +29,18 @@ export type OportunidadeStatus =
   | 'GANHO'
   | 'PERDIDO'
 
+// `situacao` é text livre no banco (mesmo padrão de AuditAcao) — o
+// mapeamento fino para os status do Omie (ListarTarefas) fica para a
+// sincronização da fase 33, ainda não implementada.
+export type TarefaSituacao = 'Pendente' | 'Realizada' | string
+
+// Motor de Recompra Preditiva. `status` é text livre no banco (mesmo padrão
+// de TarefaSituacao/AuditAcao) — os quatro valores usados pela aplicação são
+// 'pendente' (default do job), 'contatado', 'convertido' e 'nao_converteu'.
+export type RecompraStatus = 'pendente' | 'contatado' | 'convertido' | 'nao_converteu' | string
+export type RecompraConfiabilidade = 'alta' | 'media' | 'baixa'
+export type RecompraOrigemCalculo = 'historico' | 'fallback_categoria'
+
 export interface Database {
   public: {
     Tables: {
@@ -82,18 +94,21 @@ export interface Database {
           id: string
           nome: string
           setor: SetorTipo
+          vendedor_omie_id: string | null
           criado_em: string
         }
         Insert: {
           id: string
           nome: string
           setor: SetorTipo
+          vendedor_omie_id?: string | null
           criado_em?: string
         }
         Update: {
           id?: string
           nome?: string
           setor?: SetorTipo
+          vendedor_omie_id?: string | null
           criado_em?: string
         }
         Relationships: []
@@ -394,6 +409,13 @@ export interface Database {
           responsavel: string | null
           data_prevista: string | null
           concluida: boolean
+          tipo: string | null
+          situacao: TarefaSituacao
+          importante: boolean
+          urgente: boolean
+          omie_tarefa_id: number | null
+          empresa_id: string | null
+          descricao_completa_omie: string | null
           criado_por: string
           criado_em: string
         }
@@ -405,6 +427,13 @@ export interface Database {
           responsavel?: string | null
           data_prevista?: string | null
           concluida?: boolean
+          tipo?: string | null
+          situacao?: TarefaSituacao
+          importante?: boolean
+          urgente?: boolean
+          omie_tarefa_id?: number | null
+          empresa_id?: string | null
+          descricao_completa_omie?: string | null
           criado_por: string
           criado_em?: string
         }
@@ -416,8 +445,78 @@ export interface Database {
           responsavel?: string | null
           data_prevista?: string | null
           concluida?: boolean
+          tipo?: string | null
+          situacao?: TarefaSituacao
+          importante?: boolean
+          urgente?: boolean
+          omie_tarefa_id?: number | null
+          empresa_id?: string | null
+          descricao_completa_omie?: string | null
           criado_por?: string
           criado_em?: string
+        }
+        Relationships: []
+      }
+      clientes: {
+        Row: {
+          id: string
+          razao_social: string
+          nome_fantasia: string | null
+          cnpj: string | null
+          telefone: string | null
+          contato: string | null
+          email: string | null
+          endereco: string | null
+          endereco_numero: string | null
+          bairro: string | null
+          cidade: string | null
+          estado: string | null
+          cep: string | null
+          observacoes: string | null
+          omie_cliente_id: number | null
+          criado_por: string | null
+          criado_em: string
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          razao_social: string
+          nome_fantasia?: string | null
+          cnpj?: string | null
+          telefone?: string | null
+          contato?: string | null
+          email?: string | null
+          endereco?: string | null
+          endereco_numero?: string | null
+          bairro?: string | null
+          cidade?: string | null
+          estado?: string | null
+          cep?: string | null
+          observacoes?: string | null
+          omie_cliente_id?: number | null
+          criado_por?: string | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          razao_social?: string
+          nome_fantasia?: string | null
+          cnpj?: string | null
+          telefone?: string | null
+          contato?: string | null
+          email?: string | null
+          endereco?: string | null
+          endereco_numero?: string | null
+          bairro?: string | null
+          cidade?: string | null
+          estado?: string | null
+          cep?: string | null
+          observacoes?: string | null
+          omie_cliente_id?: number | null
+          criado_por?: string | null
+          criado_em?: string
+          atualizado_em?: string
         }
         Relationships: []
       }
@@ -454,8 +553,166 @@ export interface Database {
         }
         Relationships: []
       }
+      // Motor de Recompra Preditiva. Escrita real feita pelo job
+      // (src/lib/recompra/sync-recompra-preditiva.ts), que roda fora deste
+      // client tipado (usa @/lib/recompra/supabase-client, sem generic
+      // Database, com a service role key) — aqui só o necessário pra
+      // RecompraCard/HoraDeRecomprarTab lerem e atualizarem `status`,
+      // `pedido_id`, `motivo_nao_conversao`.
+      recompra_previsao: {
+        Row: {
+          id: string
+          cliente_omie_codigo: string
+          cliente_nome: string
+          cliente_cnpj: string | null
+          item_codigo: string
+          item_nome: string
+          categoria: string
+          ca: string | null
+          origem_calculo: RecompraOrigemCalculo
+          intervalo_medio_dias: number | null
+          consumo_diario: number | null
+          data_ultima_compra: string
+          quantidade_ultima_compra: number
+          dias_ate_precisar: number
+          data_prevista_recompra: string
+          confiabilidade: RecompraConfiabilidade
+          valor_unitario_medio: number
+          valor_estimado_pedido: number
+          vendedor_omie_id: string | null
+          vendedor_nome: string | null
+          status: RecompraStatus
+          ca_vencendo: boolean
+          ca_data_vencimento: string | null
+          pedido_id: string | null
+          motivo_nao_conversao: string | null
+          texto_sugerido_ia: string | null
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          cliente_omie_codigo: string
+          cliente_nome: string
+          cliente_cnpj?: string | null
+          item_codigo: string
+          item_nome: string
+          categoria: string
+          ca?: string | null
+          origem_calculo: RecompraOrigemCalculo
+          intervalo_medio_dias?: number | null
+          consumo_diario?: number | null
+          data_ultima_compra: string
+          quantidade_ultima_compra: number
+          dias_ate_precisar: number
+          data_prevista_recompra: string
+          confiabilidade: RecompraConfiabilidade
+          valor_unitario_medio: number
+          valor_estimado_pedido: number
+          vendedor_omie_id?: string | null
+          vendedor_nome?: string | null
+          status?: RecompraStatus
+          ca_vencendo?: boolean
+          ca_data_vencimento?: string | null
+          pedido_id?: string | null
+          motivo_nao_conversao?: string | null
+          texto_sugerido_ia?: string | null
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          cliente_omie_codigo?: string
+          cliente_nome?: string
+          cliente_cnpj?: string | null
+          item_codigo?: string
+          item_nome?: string
+          categoria?: string
+          ca?: string | null
+          origem_calculo?: RecompraOrigemCalculo
+          intervalo_medio_dias?: number | null
+          consumo_diario?: number | null
+          data_ultima_compra?: string
+          quantidade_ultima_compra?: number
+          dias_ate_precisar?: number
+          data_prevista_recompra?: string
+          confiabilidade?: RecompraConfiabilidade
+          valor_unitario_medio?: number
+          valor_estimado_pedido?: number
+          vendedor_omie_id?: string | null
+          vendedor_nome?: string | null
+          status?: RecompraStatus
+          ca_vencendo?: boolean
+          ca_data_vencimento?: string | null
+          pedido_id?: string | null
+          motivo_nao_conversao?: string | null
+          texto_sugerido_ia?: string | null
+          atualizado_em?: string
+        }
+        Relationships: []
+      }
+      itens_associados: {
+        Row: {
+          item_codigo_principal: string
+          item_codigo_associado: string
+          nome_associado: string
+          vezes_juntos: number
+          total_pedidos_com_principal: number
+          frequencia_conjunta: number
+          atualizado_em: string
+        }
+        Insert: {
+          item_codigo_principal: string
+          item_codigo_associado: string
+          nome_associado: string
+          vezes_juntos: number
+          total_pedidos_com_principal: number
+          frequencia_conjunta: number
+          atualizado_em?: string
+        }
+        Update: {
+          item_codigo_principal?: string
+          item_codigo_associado?: string
+          nome_associado?: string
+          vezes_juntos?: number
+          total_pedidos_com_principal?: number
+          frequencia_conjunta?: number
+          atualizado_em?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
+      v_recompra_priorizada: {
+        Row: {
+          id: string
+          cliente_omie_codigo: string
+          cliente_nome: string
+          cliente_cnpj: string | null
+          item_codigo: string
+          item_nome: string
+          categoria: string
+          ca: string | null
+          origem_calculo: RecompraOrigemCalculo
+          intervalo_medio_dias: number | null
+          consumo_diario: number | null
+          data_ultima_compra: string
+          quantidade_ultima_compra: number
+          dias_ate_precisar: number
+          data_prevista_recompra: string
+          confiabilidade: RecompraConfiabilidade
+          valor_unitario_medio: number
+          valor_estimado_pedido: number
+          vendedor_omie_id: string | null
+          vendedor_nome: string | null
+          status: RecompraStatus
+          ca_vencendo: boolean
+          ca_data_vencimento: string | null
+          pedido_id: string | null
+          motivo_nao_conversao: string | null
+          texto_sugerido_ia: string | null
+          atualizado_em: string
+        }
+        Relationships: []
+      }
       vw_historico_ca: {
         Row: {
           ca: string | null

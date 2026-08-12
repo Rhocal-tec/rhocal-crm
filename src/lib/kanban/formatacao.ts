@@ -33,3 +33,17 @@ export function formatarTelefoneInput(valor: string): string {
   }
   return `(${digitos.slice(0, 2)}) ${digitos.slice(2, 7)}-${digitos.slice(7)}`
 }
+
+// Máscara progressiva de CNPJ, aplicada a cada tecla digitada: XX.XXX.XXX/XXXX-XX.
+// Só formata dígitos — texto colado com pontuação é limpo antes.
+export function formatarCnpjInput(valor: string): string {
+  const digitos = valor.replace(/\D/g, '').slice(0, 14)
+  if (digitos.length === 0) return ''
+  if (digitos.length <= 2) return digitos
+  if (digitos.length <= 5) return `${digitos.slice(0, 2)}.${digitos.slice(2)}`
+  if (digitos.length <= 8) return `${digitos.slice(0, 2)}.${digitos.slice(2, 5)}.${digitos.slice(5)}`
+  if (digitos.length <= 12) {
+    return `${digitos.slice(0, 2)}.${digitos.slice(2, 5)}.${digitos.slice(5, 8)}/${digitos.slice(8)}`
+  }
+  return `${digitos.slice(0, 2)}.${digitos.slice(2, 5)}.${digitos.slice(5, 8)}/${digitos.slice(8, 12)}-${digitos.slice(12)}`
+}

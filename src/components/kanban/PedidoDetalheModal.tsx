@@ -624,7 +624,7 @@ export function PedidoDetalheModal({
           )}
 
           {aba === 'tarefas' && (setor === 'comercial' || setor === 'gestor') && (
-            <TarefasTab pedidoId={pedido.id} />
+            <TarefasTab pedidoId={pedido.id} empresaId={pedido.empresa_id} />
           )}
         </div>
       )}

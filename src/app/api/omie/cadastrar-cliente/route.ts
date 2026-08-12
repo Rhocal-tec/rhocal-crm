@@ -26,7 +26,11 @@ export async function POST(request: Request) {
     .eq('id', user.id)
     .single()
 
-  if (!profile || (profile.setor !== 'comercial' && profile.setor !== 'gestor')) {
+  // Antes exclusivo de comercial/gestor (a única chamada era da criação de
+  // pedido). A partir da fase 34, o módulo de Clientes também usa esta rota
+  // (para IncluirCliente e AlterarCliente) e é visível a todos os perfis —
+  // liberada pra qualquer autenticado.
+  if (!profile) {
     return NextResponse.json(
       { erro: 'Seu perfil não pode cadastrar clientes no Omie.' },
       { status: 403 },
@@ -55,12 +59,21 @@ export async function POST(request: Request) {
   const estado = campoTexto(body?.estado)
   const email = campoTexto(body?.email)
 
+  // Presente (fase 34, edição de um cliente já sincronizado) => AlterarCliente
+  // em vez de IncluirCliente, mesmo payload de campos de entrada — simetria
+  // não confirmada ao vivo com uma escrita de teste (mesma ressalva já
+  // documentada para AlterarOportunidade/AlterarTarefa nas fases 31/33.4).
+  const codigoClienteOmieExistente =
+    typeof body?.codigoClienteOmie === 'number' ? body.codigoClienteOmie : null
+
   // codigo_cliente_integracao com base no CNPJ (em vez de timestamp): torna a
   // chamada idempotente — se o comercial tentar cadastrar de novo o mesmo
   // CNPJ (ex: depois de uma falha de rede), o Omie atualiza o mesmo registro
   // em vez de arriscar duplicar o cadastro.
   const payload = {
-    codigo_cliente_integracao: `RHOCAL-CRM-CLI-${cnpj}`,
+    ...(codigoClienteOmieExistente !== null
+      ? { codigo_cliente_omie: codigoClienteOmieExistente }
+      : { codigo_cliente_integracao: `RHOCAL-CRM-CLI-${cnpj}` }),
     razao_social: razaoSocial,
     nome_fantasia: nomeFantasia,
     cnpj_cpf: cnpj,
@@ -76,9 +89,11 @@ export async function POST(request: Request) {
 
   try {
     const credenciais = await resolverCredenciaisOmie(supabase, body)
-    const resultado = await chamarOmie(OMIE_CLIENTES_URL, 'IncluirCliente', payload, credenciais)
+    const call = codigoClienteOmieExistente !== null ? 'AlterarCliente' : 'IncluirCliente'
+    const resultado = await chamarOmie(OMIE_CLIENTES_URL, call, payload, credenciais)
 
-    const codigoClienteOmie = resultado.codigo_cliente_omie as number | undefined
+    const codigoClienteOmie =
+      (resultado.codigo_cliente_omie as number | undefined) ?? codigoClienteOmieExistente ?? undefined
     if (typeof codigoClienteOmie !== 'number') {
       throw new Error('O Omie não retornou o código do cliente cadastrado.')
     }

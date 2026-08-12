@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { Modal } from '@/components/ui/Modal'
 import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
+import { buscarClientesLocalPorNome, buscarClienteLocalPorCnpj } from '@/lib/clientes/buscar'
 
 type StatusCodigoOmie = 'idle' | 'buscando' | 'encontrado' | 'nao_encontrado' | 'erro'
 
@@ -19,6 +20,18 @@ interface ClienteOmieSugestao {
   razaoSocial: string
   nomeFantasia: string | null
   cnpjCpf: string | null
+}
+
+// Fase 34: sugestão unificada, combinando a tabela `clientes` local (mais
+// rápida, já traz telefone/contato) com o resultado do Omie — a busca por
+// nome mostra as duas fontes juntas, sem repetir o mesmo cliente duas vezes.
+interface SugestaoClienteUnificada {
+  chave: string
+  razaoSocial: string
+  cnpj: string | null
+  omieClienteId: number | null
+  telefone: string | null
+  contato: string | null
 }
 
 // Dados capturados da Receita Federal (fase 23) que não são usados para
@@ -116,7 +129,7 @@ export function NovoOrcamentoModal({
   const [avisoCnpj, setAvisoCnpj] = useState<string | null>(null)
   const [clienteOmieId, setClienteOmieId] = useState<number | null>(null)
   const [clienteNome, setClienteNome] = useState('')
-  const [sugestoesCliente, setSugestoesCliente] = useState<ClienteOmieSugestao[]>([])
+  const [sugestoesCliente, setSugestoesCliente] = useState<SugestaoClienteUnificada[]>([])
   const [buscandoCliente, setBuscandoCliente] = useState(false)
   const [dropdownClienteAberto, setDropdownClienteAberto] = useState(false)
   // Timer de debounce não entra no estado — não deve disparar re-render.
@@ -167,15 +180,48 @@ export function NovoOrcamentoModal({
   async function buscarClientesPorNome(termo: string) {
     setBuscandoCliente(true)
     try {
-      const resposta = await fetch('/api/omie/buscar-clientes-nome', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome: termo, empresaSlug: empresaAtiva?.slug }),
-      })
-      const dados = await resposta.json().catch(() => null)
-      if (resposta.ok && dados && Array.isArray(dados.clientes)) {
-        setSugestoesCliente(dados.clientes)
+      const [locais, respostaOmie] = await Promise.all([
+        buscarClientesLocalPorNome(supabase, termo),
+        fetch('/api/omie/buscar-clientes-nome', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nome: termo, empresaSlug: empresaAtiva?.slug }),
+        })
+          .then((r) => r.json())
+          .catch(() => null),
+      ])
+
+      const unificados: SugestaoClienteUnificada[] = locais.map((c) => ({
+        chave: `local-${c.id}`,
+        razaoSocial: c.razaoSocial,
+        cnpj: c.cnpj,
+        omieClienteId: c.omieClienteId,
+        telefone: c.telefone,
+        contato: c.contato,
+      }))
+
+      // Evita repetir o mesmo cliente: um cliente local já sincronizado com
+      // o Omie (omieClienteId preenchido) não precisa aparecer de novo vindo
+      // da busca direta no Omie.
+      const omieIdsJaListados = new Set(
+        unificados.map((u) => u.omieClienteId).filter((id): id is number => id !== null),
+      )
+      const omieClientes: ClienteOmieSugestao[] = Array.isArray(respostaOmie?.clientes)
+        ? respostaOmie.clientes
+        : []
+      for (const c of omieClientes) {
+        if (omieIdsJaListados.has(c.codigoClienteOmie)) continue
+        unificados.push({
+          chave: `omie-${c.codigoClienteOmie}`,
+          razaoSocial: c.razaoSocial,
+          cnpj: c.cnpjCpf,
+          omieClienteId: c.codigoClienteOmie,
+          telefone: null,
+          contato: null,
+        })
       }
+
+      setSugestoesCliente(unificados)
     } finally {
       setBuscandoCliente(false)
     }
@@ -202,10 +248,14 @@ export function NovoOrcamentoModal({
     )
   }
 
-  function selecionarCliente(cliente: ClienteOmieSugestao) {
+  function selecionarCliente(cliente: SugestaoClienteUnificada) {
     setClienteNome(cliente.razaoSocial)
-    setClienteOmieId(cliente.codigoClienteOmie)
-    if (cliente.cnpjCpf) setCnpj(cliente.cnpjCpf)
+    setClienteOmieId(cliente.omieClienteId)
+    if (cliente.cnpj) setCnpj(cliente.cnpj)
+    // Só a tabela local guarda telefone/contato — a busca direta no Omie não
+    // tem esses dois campos, então não sobrescreve o que já foi digitado.
+    if (cliente.telefone) setClienteTelefone(formatarTelefoneInput(cliente.telefone))
+    if (cliente.contato) setClienteContato(cliente.contato)
     setSugestoesCliente([])
     setDropdownClienteAberto(false)
   }
@@ -220,6 +270,21 @@ export function NovoOrcamentoModal({
     setAvisoCnpj(null)
     setBuscandoCnpj(true)
     try {
+      // Cliente já cadastrado localmente (fase 34): usa direto, pulando a
+      // chamada ao Omie/Receita — já tem tudo que essas duas fontes dariam,
+      // mais telefone/contato, que nenhuma das duas guarda.
+      const local = await buscarClienteLocalPorCnpj(supabase, digitos)
+      if (local) {
+        setClienteNome(local.razaoSocial)
+        setClienteOmieId(local.omieClienteId)
+        if (local.telefone && !clienteTelefone.trim()) {
+          setClienteTelefone(formatarTelefoneInput(local.telefone))
+        }
+        if (local.contato && !clienteContato.trim()) setClienteContato(local.contato)
+        setAvisoCnpj(null)
+        return
+      }
+
       const resposta = await fetch('/api/omie/buscar-cliente-cnpj', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -671,15 +736,15 @@ export function NovoOrcamentoModal({
           {dropdownClienteAberto && sugestoesCliente.length > 0 && (
             <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-white/10 bg-surface-alt py-1 shadow-lg">
               {sugestoesCliente.map((cliente) => (
-                <li key={cliente.codigoClienteOmie}>
+                <li key={cliente.chave}>
                   <button
                     type="button"
                     onMouseDown={() => selecionarCliente(cliente)}
                     className="block w-full truncate px-3 py-1.5 text-left text-sm text-primary hover:bg-white/10"
                   >
                     {cliente.razaoSocial}
-                    {cliente.cnpjCpf && (
-                      <span className="ml-1.5 text-xs text-muted">— {cliente.cnpjCpf}</span>
+                    {cliente.cnpj && (
+                      <span className="ml-1.5 text-xs text-muted">— {cliente.cnpj}</span>
                     )}
                   </button>
                 </li>

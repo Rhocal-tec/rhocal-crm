@@ -4,19 +4,26 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatarDataSomente } from '@/lib/kanban/formatacao'
+import { TAREFA_TIPO_OPCOES, TAREFA_TIPOS_CONTATO } from '@/lib/tarefas/opcoes'
+import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
 import type { Database } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
 type Profile = Database['public']['Tables']['profiles']['Row']
 
 // Aba de acompanhamento reutilizada tanto no modal de oportunidade quanto no
-// modal de pedido (fase 31) — recebe exatamente um dos dois ids.
+// modal de pedido (fase 31) — recebe exatamente um dos dois ids. empresaId
+// vem do registro pai (oportunidade/pedido), não do EmpresaContext ativo, pra
+// nunca gravar a empresa errada caso o usuário troque de empresa no meio da
+// tela (mesmo cuidado da fase 30 para as chamadas Omie).
 export function TarefasTab({
   oportunidadeId,
   pedidoId,
+  empresaId,
 }: {
   oportunidadeId?: string
   pedidoId?: string
+  empresaId?: string | null
 }) {
   const { user } = useAuth()
   const [supabase] = useState(() => createClient())
@@ -26,6 +33,9 @@ export function TarefasTab({
   const [descricao, setDescricao] = useState('')
   const [responsavel, setResponsavel] = useState('')
   const [dataPrevista, setDataPrevista] = useState('')
+  const [tipo, setTipo] = useState('')
+  const [importante, setImportante] = useState(false)
+  const [urgente, setUrgente] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -59,6 +69,12 @@ export function TarefasTab({
     return profiles.find((p) => p.id === id)?.nome ?? '—'
   }
 
+  // Fase 33.4: contador de tentativas — quantas tarefas com tipo de contato
+  // (Ligação/WhatsApp/E-mail/Reunião) já foram marcadas como Realizada.
+  const tentativasConcluidas = tarefas.filter(
+    (t) => t.situacao === 'Realizada' && t.tipo && TAREFA_TIPOS_CONTATO.includes(t.tipo),
+  ).length
+
   async function adicionarTarefa(e: React.FormEvent) {
     e.preventDefault()
     setErro(null)
@@ -76,9 +92,13 @@ export function TarefasTab({
       .insert({
         oportunidade_id: oportunidadeId ?? null,
         pedido_id: pedidoId ?? null,
+        empresa_id: empresaId ?? null,
         descricao: descricao.trim(),
         responsavel: responsavel || null,
         data_prevista: dataPrevista || null,
+        tipo: tipo || null,
+        importante,
+        urgente,
         criado_por: user.id,
       })
       .select()
@@ -95,24 +115,37 @@ export function TarefasTab({
     setDescricao('')
     setResponsavel('')
     setDataPrevista('')
+    setTipo('')
+    setImportante(false)
+    setUrgente(false)
+
+    if (data.oportunidade_id) sincronizarTarefaComOmie(data.id)
   }
 
   async function alternarConcluida(tarefa: Tarefa) {
-    const novoValor = !tarefa.concluida
+    const concluidaAtual = tarefa.situacao === 'Realizada'
+    const novoValor = !concluidaAtual
+    const novaSituacao = novoValor ? 'Realizada' : 'Pendente'
+
     setTarefas((atual) =>
-      atual.map((t) => (t.id === tarefa.id ? { ...t, concluida: novoValor } : t)),
+      atual.map((t) => (t.id === tarefa.id ? { ...t, concluida: novoValor, situacao: novaSituacao } : t)),
     )
 
     const { error } = await supabase
       .from('tarefas')
-      .update({ concluida: novoValor })
+      .update({ concluida: novoValor, situacao: novaSituacao })
       .eq('id', tarefa.id)
 
     if (error) {
       setTarefas((atual) =>
-        atual.map((t) => (t.id === tarefa.id ? { ...t, concluida: tarefa.concluida } : t)),
+        atual.map((t) =>
+          t.id === tarefa.id ? { ...t, concluida: tarefa.concluida, situacao: tarefa.situacao } : t,
+        ),
       )
+      return
     }
+
+    if (tarefa.oportunidade_id) sincronizarTarefaComOmie(tarefa.id)
   }
 
   if (carregando) {
@@ -121,6 +154,13 @@ export function TarefasTab({
 
   return (
     <div className="mt-4 flex flex-col gap-4">
+      {oportunidadeId && tarefas.length > 0 && (
+        <p className="text-xs text-muted">
+          <span className="font-medium text-primary/80">{tentativasConcluidas}</span> tentativa(s) de
+          contato concluída(s) (Ligação/WhatsApp/E-mail/Reunião marcadas como Realizada)
+        </p>
+      )}
+
       <form
         onSubmit={adicionarTarefa}
         className="flex flex-col gap-2 rounded-md border border-white/10 bg-surface-alt p-3"
@@ -164,6 +204,46 @@ export function TarefasTab({
             />
           </div>
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs text-muted">Tipo (opcional)</label>
+            <select
+              value={tipo}
+              onChange={(e) => setTipo(e.target.value)}
+              className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+              disabled={salvando}
+            >
+              <option value="">—</option>
+              {TAREFA_TIPO_OPCOES.map((opcao) => (
+                <option key={opcao} value={opcao}>
+                  {opcao}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end gap-3 pb-1.5">
+            <label className="flex items-center gap-1.5 text-xs text-primary/80">
+              <input
+                type="checkbox"
+                checked={importante}
+                onChange={(e) => setImportante(e.target.checked)}
+                disabled={salvando}
+                className="h-4 w-4 accent-accent-primary"
+              />
+              Importante
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-primary/80">
+              <input
+                type="checkbox"
+                checked={urgente}
+                onChange={(e) => setUrgente(e.target.checked)}
+                disabled={salvando}
+                className="h-4 w-4 accent-accent-danger"
+              />
+              Urgente
+            </label>
+          </div>
+        </div>
         {erro && <p className="text-xs text-accent-danger">{erro}</p>}
         <button
           type="submit"
@@ -178,34 +258,50 @@ export function TarefasTab({
         {tarefas.length === 0 && (
           <p className="text-center text-xs text-muted/60">Nenhuma tarefa cadastrada.</p>
         )}
-        {tarefas.map((tarefa) => (
-          <div
-            key={tarefa.id}
-            className={`flex items-start gap-3 rounded-md border p-2.5 ${
-              tarefa.concluida
-                ? 'border-white/5 bg-white/[0.02] opacity-60'
-                : 'border-white/10 bg-surface'
-            }`}
-          >
-            <input
-              type="checkbox"
-              checked={tarefa.concluida}
-              onChange={() => alternarConcluida(tarefa)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-accent-success"
-            />
-            <div className="flex-1">
-              <p
-                className={`text-sm text-primary ${tarefa.concluida ? 'line-through' : ''}`}
-              >
-                {tarefa.descricao}
-              </p>
-              <p className="mt-0.5 text-[11px] text-muted">
-                {nomeDoResponsavel(tarefa.responsavel)}
-                {tarefa.data_prevista && ` · até ${formatarDataSomente(tarefa.data_prevista)}`}
-              </p>
+        {tarefas.map((tarefa) => {
+          const concluida = tarefa.situacao === 'Realizada'
+          return (
+            <div
+              key={tarefa.id}
+              className={`flex items-start gap-3 rounded-md border p-2.5 ${
+                concluida ? 'border-white/5 bg-white/[0.02] opacity-60' : 'border-white/10 bg-surface'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={concluida}
+                onChange={() => alternarConcluida(tarefa)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-accent-success"
+              />
+              <div className="flex-1">
+                <p className={`text-sm text-primary ${concluida ? 'line-through' : ''}`}>{tarefa.descricao}</p>
+                <p className="mt-0.5 text-[11px] text-muted">
+                  {nomeDoResponsavel(tarefa.responsavel)}
+                  {tarefa.data_prevista && ` · até ${formatarDataSomente(tarefa.data_prevista)}`}
+                </p>
+                {(tarefa.tipo || tarefa.importante || tarefa.urgente) && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {tarefa.tipo && (
+                      <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-muted">
+                        {tarefa.tipo}
+                      </span>
+                    )}
+                    {tarefa.importante && (
+                      <span className="inline-flex rounded-full border border-accent-primary/40 bg-accent-primary/15 px-2 py-0.5 text-[10px] font-semibold text-accent-primary">
+                        ★ Importante
+                      </span>
+                    )}
+                    {tarefa.urgente && (
+                      <span className="inline-flex rounded-full border border-accent-danger/40 bg-accent-danger/15 px-2 py-0.5 text-[10px] font-semibold text-accent-danger">
+                        Urgente
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
