@@ -186,8 +186,8 @@ interface ConsultarPedidoResponse {
     };
     inf_adic: { codigo_categoria_item: string };
   }>;
-  infoCadastro: { dInc: string; cancelado: string };
-  informacoes_adicionais: { codVend: number };
+  infoCadastro?: { dInc: string; cancelado: string };
+  informacoes_adicionais?: { codVend: number };
 }
 
 export async function consultarPedido(codigoPedido: number): Promise<OmiePedido | null> {
@@ -201,14 +201,33 @@ export async function consultarPedido(codigoPedido: number): Promise<OmiePedido 
     80
   );
 
+  // Confirmado ao vivo (Vercel Function Logs): alguns pedidos voltam do
+  // ConsultarPedido sem infoCadastro/informacoes_adicionais/det preenchidos
+  // (motivo exato não confirmado — provavelmente pedido em algum estado
+  // incomum no Omie). Sem essas checagens, um único pedido nesse estado
+  // derrubava o job inteiro em vez de só ser pulado.
+  if (!resposta.infoCadastro) {
+    console.warn("[omie] pedido sem infoCadastro, pulando:", codigoPedido);
+    return null;
+  }
+
   if (resposta.infoCadastro.cancelado === "S") return null;
+
+  if (!resposta.det || resposta.det.length === 0) {
+    console.warn("[omie] pedido sem itens (det), pulando:", codigoPedido);
+    return null;
+  }
+
+  if (!resposta.informacoes_adicionais) {
+    console.warn("[omie] pedido sem informacoes_adicionais, vendedor ficará vazio:", codigoPedido);
+  }
 
   return {
     numero_pedido: resposta.cabecalho.numero_pedido,
     codigo_pedido_omie: String(resposta.cabecalho.codigo_pedido),
     data_pedido: resposta.infoCadastro.dInc,
     codigo_cliente_omie: String(resposta.cabecalho.codigo_cliente),
-    codigo_vendedor_omie: String(resposta.informacoes_adicionais.codVend ?? ""),
+    codigo_vendedor_omie: String(resposta.informacoes_adicionais?.codVend ?? ""),
     itens: resposta.det.map((item) => ({
       codigo_produto: String(item.produto.codigo_produto),
       descricao: item.produto.descricao,
