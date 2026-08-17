@@ -58,9 +58,10 @@ const TIMEOUT_REQUISICAO_MS = 20_000;
 async function chamarOmie<T>(
   endpoint: string,
   call: string,
-  param: Record<string, unknown>
+  param: Record<string, unknown>,
+  delayMs: number = DELAY_ENTRE_REQUISICOES_MS
 ): Promise<T> {
-  await sleep(DELAY_ENTRE_REQUISICOES_MS);
+  await sleep(delayMs);
 
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     throw new Error(
@@ -147,39 +148,30 @@ interface ListarPedidosResponse {
   total_de_paginas: number;
 }
 
-export async function listarCodigosDePedidos(): Promise<number[]> {
-  const codigos: number[] = [];
-  let pagina = 1;
-  let totalPaginas = 1;
-  const inicio = Date.now();
+export interface PaginaDePedidos {
+  codigos: number[];
+  totalPaginas: number;
+}
 
-  do {
-    const resposta = await chamarOmie<ListarPedidosResponse>(
-      "produtos/pedido",
-      "ListarPedidos",
-      {
-        pagina,
-        registros_por_pagina: 100,
-        apenas_importado_api: "N",
-      }
-    );
-
-    totalPaginas = resposta.total_de_paginas;
-    // Log por página — se a listagem inteira estourar o tempo de novo, essa
-    // linha (a última impressa antes do corte) mostra exatamente em qual
-    // página parou e quanto tempo cada uma está levando.
-    console.log(
-      `[omie] página ${pagina}/${totalPaginas} da listagem de pedidos (${Date.now() - inicio}ms acumulados)`
-    );
-
-    for (const p of resposta.pedido_venda_produto ?? []) {
-      codigos.push(p.cabecalho.codigo_pedido);
+// Busca só UMA página por chamada (não pagina tudo de uma vez) — listar o
+// histórico inteiro do Omie antes de processar qualquer coisa estourava
+// sozinho o tempo de execução da function na Vercel. O cursor de qual
+// página buscar a seguir vive em sync_estado (ver CHAVE_PAGINA_CURSOR_SYNC
+// em sync-recompra-preditiva.ts), não aqui.
+export async function listarPaginaDePedidos(pagina: number): Promise<PaginaDePedidos> {
+  const resposta = await chamarOmie<ListarPedidosResponse>(
+    "produtos/pedido",
+    "ListarPedidos",
+    {
+      pagina,
+      registros_por_pagina: 50,
+      apenas_importado_api: "N",
     }
+  );
 
-    pagina++;
-  } while (pagina <= totalPaginas);
+  const codigos = (resposta.pedido_venda_produto ?? []).map((p) => p.cabecalho.codigo_pedido);
 
-  return codigos;
+  return { codigos, totalPaginas: resposta.total_de_paginas };
 }
 
 interface ConsultarPedidoResponse {
@@ -199,10 +191,14 @@ interface ConsultarPedidoResponse {
 }
 
 export async function consultarPedido(codigoPedido: number): Promise<OmiePedido | null> {
+  // Delay reduzido (80ms em vez do padrão 150ms) — chamada de detalhe feita
+  // uma vez por pedido novo, dentro do teto já apertado de maxDuration da
+  // rota de cron; dá mais margem pra processar mais pedidos por execução.
   const resposta = await chamarOmie<ConsultarPedidoResponse>(
     "produtos/pedido",
     "ConsultarPedido",
-    { codigo_pedido: codigoPedido }
+    { codigo_pedido: codigoPedido },
+    80
   );
 
   if (resposta.infoCadastro.cancelado === "S") return null;

@@ -3,8 +3,9 @@
 // Job diário de sincronização — v2
 //
 // Fluxo:
-//   1. Lista todos os códigos de pedido existentes no Omie
-//   2. Descobre quais códigos já estão no nosso histórico (pulados)
+//   1. Lista UMA página de códigos de pedido no Omie (cursor de página em
+//      sync_estado, avança a cada execução)
+//   2. Descobre quais códigos dessa página já estão no nosso histórico (pulados)
 //   3. Consulta o DETALHE só dos pedidos novos (ConsultarPedido)
 //   4. Resolve cliente e vendedor (com cache)
 //   5. Grava no histórico
@@ -16,7 +17,7 @@
 // ===============================================
 
 import {
-  listarCodigosDePedidos,
+  listarPaginaDePedidos,
   consultarPedido,
   resolverCliente,
   resolverVendedor,
@@ -33,56 +34,60 @@ import { cotacaoVencida } from "@/lib/kanban/cotacao-vencida";
 // histórico inteiro de uma vez, o que não cabe nesse orçamento.
 const LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO = 15;
 
-const CHAVE_CURSOR_SYNC = "recompra_ultimo_codigo_processado";
+const CHAVE_PAGINA_CURSOR_SYNC = "recompra_pagina_atual";
 
-// Cursor persistido em sync_estado — é o que faz a próxima execução (cron
-// diário) continuar de onde esta parou, mesmo que o pedido não tenha virado
-// linha em pedidos_itens_historico (ex: pedido cancelado, pulado de
-// propósito). Sem o cursor, um pedido cancelado apareceria pra sempre como
-// "novo" (nunca entra no histórico) e a cada execução a função perderia
-// tempo reconsultando o mesmo código.
-async function lerCursorSync(): Promise<number | null> {
+// Cursor persistido em sync_estado — qual página do ListarPedidos buscar na
+// próxima execução. Listar TODAS as páginas de uma vez (comportamento
+// antigo) estourava sozinho o tempo de execução da function antes mesmo de
+// processar qualquer pedido; buscando uma página por vez, o backfill
+// completo acontece ao longo de várias execuções (cron diário). Ao alcançar
+// a última página, volta pra página 1 (recomeça o ciclo, pra pegar pedidos
+// novos criados desde o início do backfill).
+async function lerPaginaCursorSync(): Promise<number> {
   const { data, error } = await supabase
     .from("sync_estado")
     .select("valor")
-    .eq("chave", CHAVE_CURSOR_SYNC)
+    .eq("chave", CHAVE_PAGINA_CURSOR_SYNC)
     .maybeSingle();
 
   if (error) {
-    console.error(`[sync] erro ao ler cursor: ${error.message}`);
-    return null;
+    console.error(`[sync] erro ao ler página cursor: ${error.message}`);
+    return 1;
   }
-  if (!data?.valor) return null;
 
-  const numero = Number(data.valor);
-  return Number.isFinite(numero) ? numero : null;
+  const numero = Number(data?.valor);
+  return Number.isFinite(numero) && numero >= 1 ? numero : 1;
 }
 
-async function salvarCursorSync(codigo: number): Promise<void> {
+async function salvarPaginaCursorSync(pagina: number): Promise<void> {
   const { error } = await supabase
     .from("sync_estado")
     .upsert(
-      { chave: CHAVE_CURSOR_SYNC, valor: String(codigo), atualizado_em: new Date().toISOString() },
+      { chave: CHAVE_PAGINA_CURSOR_SYNC, valor: String(pagina), atualizado_em: new Date().toISOString() },
       { onConflict: "chave" }
     );
 
-  if (error) console.error(`[sync] erro ao salvar cursor: ${error.message}`);
+  if (error) console.error(`[sync] erro ao salvar página cursor: ${error.message}`);
 }
 
 // -----------------------------------------------------------
-// 1) Sincronização em lotes: só busca detalhe de até
-// LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO pedidos novos por execução, a partir do
-// cursor salvo em sync_estado. O backfill completo acontece ao longo de
-// várias execuções (cron diário) — nenhuma lógica especial de "continuar"
-// além de reler o cursor a cada chamada.
+// 1) Sincronização em lotes: busca só UMA página de pedidos no Omie por
+// execução (cursor de página em sync_estado) e, dentro dela, processa
+// detalhe de até LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO pedidos novos. O backfill
+// completo acontece ao longo de várias execuções (cron diário).
 // -----------------------------------------------------------
 async function sincronizarHistorico(): Promise<{ processados: number; restantes: number }> {
+  const paginaAtual = await lerPaginaCursorSync();
+
   const inicioListagem = Date.now();
-  console.log("[sync] listando códigos de pedido no Omie...");
-  const codigosNoOmie = await listarCodigosDePedidos();
+  console.log(`[sync] listando página ${paginaAtual} de pedidos no Omie...`);
+  const { codigos: codigosDaPagina, totalPaginas } = await listarPaginaDePedidos(paginaAtual);
   console.log(
-    `[sync] ${codigosNoOmie.length} pedidos encontrados no Omie (listagem levou ${Date.now() - inicioListagem}ms)`
+    `[sync] página ${paginaAtual}/${totalPaginas} — ${codigosDaPagina.length} pedidos (listagem levou ${Date.now() - inicioListagem}ms)`
   );
+
+  const proximaPagina = paginaAtual >= totalPaginas ? 1 : paginaAtual + 1;
+  await salvarPaginaCursorSync(proximaPagina);
 
   const { data: existentes, error } = await supabase
     .from("pedidos_itens_historico")
@@ -91,18 +96,13 @@ async function sincronizarHistorico(): Promise<{ processados: number; restantes:
   if (error) throw new Error(`[sync] erro ao ler histórico existente: ${error.message}`);
 
   const codigosJaSincronizados = new Set((existentes ?? []).map((l) => l.pedido_omie_id));
-  const codigosNovosOrdenados = codigosNoOmie
-    .filter((c) => !codigosJaSincronizados.has(String(c)))
-    .sort((a, b) => a - b);
+  const novos = codigosDaPagina.filter((c) => !codigosJaSincronizados.has(String(c)));
 
-  const cursor = await lerCursorSync();
-  const candidatos = cursor === null ? codigosNovosOrdenados : codigosNovosOrdenados.filter((c) => c > cursor);
-
-  const lote = candidatos.slice(0, LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO);
-  const restantes = candidatos.length - lote.length;
+  const lote = novos.slice(0, LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO);
+  const restantes = novos.length - lote.length;
 
   console.log(
-    `[sync] cursor atual: ${cursor ?? "(nenhum, primeira execução)"} — ${candidatos.length} pedidos novos a partir dele, processando ${lote.length} nesta execução (${restantes} restantes)`
+    `[sync] página ${paginaAtual}: ${novos.length} pedidos novos, processando ${lote.length} nesta execução (${restantes} ficam pendentes nesta página; próxima execução vai pra página ${proximaPagina})`
   );
 
   const inicioDetalhe = Date.now();
@@ -142,11 +142,7 @@ async function sincronizarHistorico(): Promise<{ processados: number; restantes:
       if (upsertError) {
         console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
       }
-    } // pedido === null: cancelado, pula (mas o cursor ainda avança por ele)
-  }
-
-  if (lote.length > 0) {
-    await salvarCursorSync(lote[lote.length - 1]);
+    } // pedido === null: cancelado, pula
   }
 
   console.log(
