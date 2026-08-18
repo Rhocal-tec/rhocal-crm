@@ -24,22 +24,20 @@ const SETOR_BADGE_CLASSES: Record<SetorTipo, string> = {
   gestor: 'bg-accent-primary/15 text-accent-primary',
 }
 
-const LINKS = [
+// Ordem de exibição fixa no header: Kanban, Oportunidades, Tarefas,
+// Hora de Recomprar, Clientes, Busca, Arquivados, Painel, Inteligência.
+// `check` restringe a visibilidade por perfil; ausência de `check` = visível a todos.
+const NAV_ITEMS: { href: string; label: string; check?: (setor: SetorTipo) => boolean }[] = [
   { href: '/dashboard', label: 'Kanban' },
+  { href: '/oportunidades', label: 'Oportunidades', check: podeAcessarOportunidades },
+  { href: '/tarefas', label: 'Tarefas', check: podeAcessarTarefas },
+  { href: '/recompra', label: 'Hora de Recomprar', check: podeAcessarRecompra },
+  { href: '/clientes', label: 'Clientes' },
   { href: '/busca', label: 'Busca' },
   { href: '/arquivados', label: 'Arquivados' },
-  { href: '/clientes', label: 'Clientes' },
+  { href: '/painel', label: 'Painel', check: (setor) => setor === 'gestor' },
+  { href: '/inteligencia', label: 'Inteligência', check: (setor) => setor === 'gestor' },
 ]
-
-const LINK_GESTOR = { href: '/painel', label: 'Painel' }
-
-const LINK_INTELIGENCIA = { href: '/inteligencia', label: 'Inteligência' }
-
-const LINK_OPORTUNIDADES = { href: '/oportunidades', label: 'Oportunidades' }
-
-const LINK_TAREFAS = { href: '/tarefas', label: 'Tarefas' }
-
-const LINK_RECOMPRA = { href: '/recompra', label: 'Hora de Recomprar' }
 
 export function AppHeader() {
   const pathname = usePathname()
@@ -76,66 +74,18 @@ export function AppHeader() {
           )}
         </div>
         <nav className="flex items-center gap-4">
-          {LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`text-sm font-medium ${
-                pathname === link.href ? 'text-primary' : 'text-muted hover:text-primary/80'
-              }`}
-            >
-              {link.label}
-            </Link>
-          ))}
-          {profile && podeAcessarOportunidades(profile.setor) && (
-            <Link
-              href={LINK_OPORTUNIDADES.href}
-              className={`text-sm font-medium ${
-                pathname === LINK_OPORTUNIDADES.href ? 'text-primary' : 'text-muted hover:text-primary/80'
-              }`}
-            >
-              {LINK_OPORTUNIDADES.label}
-            </Link>
-          )}
-          {profile && podeAcessarTarefas(profile.setor) && (
-            <Link
-              href={LINK_TAREFAS.href}
-              className={`text-sm font-medium ${
-                pathname === LINK_TAREFAS.href ? 'text-primary' : 'text-muted hover:text-primary/80'
-              }`}
-            >
-              {LINK_TAREFAS.label}
-            </Link>
-          )}
-          {profile && podeAcessarRecompra(profile.setor) && (
-            <Link
-              href={LINK_RECOMPRA.href}
-              className={`text-sm font-medium ${
-                pathname === LINK_RECOMPRA.href ? 'text-primary' : 'text-muted hover:text-primary/80'
-              }`}
-            >
-              {LINK_RECOMPRA.label}
-            </Link>
-          )}
-          {profile?.setor === 'gestor' && (
-            <Link
-              href={LINK_GESTOR.href}
-              className={`text-sm font-medium ${
-                pathname === LINK_GESTOR.href ? 'text-primary' : 'text-muted hover:text-primary/80'
-              }`}
-            >
-              {LINK_GESTOR.label}
-            </Link>
-          )}
-          {profile?.setor === 'gestor' && (
-            <Link
-              href={LINK_INTELIGENCIA.href}
-              className={`text-sm font-medium ${
-                pathname === LINK_INTELIGENCIA.href ? 'text-primary' : 'text-muted hover:text-primary/80'
-              }`}
-            >
-              {LINK_INTELIGENCIA.label}
-            </Link>
+          {NAV_ITEMS.filter((link) => !link.check || (profile && link.check(profile.setor))).map(
+            (link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`text-sm font-medium ${
+                  pathname === link.href ? 'text-primary' : 'text-muted hover:text-primary/80'
+                }`}
+              >
+                {link.label}
+              </Link>
+            )
           )}
         </nav>
       </div>
