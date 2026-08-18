@@ -28,11 +28,25 @@ import { calcularCoOcorrencia, ItemPedido } from "@/lib/recompra/calculo-cross-s
 import { cotacaoVencida } from "@/lib/kanban/cotacao-vencida";
 
 // Teto de pedidos NOVOS (ConsultarPedido, 1 chamada Omie cada + resolverCliente/
-// resolverVendedor) processados POR EXECUÇÃO. Confirmado ao vivo
-// (FUNCTION_INVOCATION_TIMEOUT nos logs da Vercel) que o plano atual dá só
-// ~10s por invocação — sem isso, uma única chamada teria que dar conta do
-// histórico inteiro de uma vez, o que não cabe nesse orçamento.
-const LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO = 15;
+// resolverVendedor) processados POR EXECUÇÃO. Confirmado ao vivo que mesmo
+// com a listagem já paginada (1 página do Omie por execução), processar até
+// 15 pedidos de detalhe ainda estourava o maxDuration=60s da rota — reduzido
+// pra 5. Com lotes de 5 por execução e cron diário, o backfill de centenas
+// de pedidos leva algumas semanas — proposital: confiabilidade > velocidade.
+const LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO = 5;
+
+// Teto de tempo interno, sempre abaixo do maxDuration=60s da rota (ver
+// route.ts) — checado entre iterações de qualquer loop potencialmente longo
+// deste job (detalhe de pedidos, recorrência, cruzamento de CA). Ao
+// estourar, a execução atual para de processar mais itens e retorna
+// ok:true com o que já foi feito (e já persistido) até aqui, em vez de
+// deixar a Vercel matar a function no meio (FUNCTION_INVOCATION_TIMEOUT,
+// sem resposta nenhuma e sem o cursor necessariamente salvo).
+const LIMITE_TEMPO_MS = 45_000;
+
+function tempoEsgotado(inicioJob: number): boolean {
+  return Date.now() - inicioJob > LIMITE_TEMPO_MS;
+}
 
 const CHAVE_PAGINA_CURSOR_SYNC = "recompra_pagina_atual";
 
@@ -76,7 +90,9 @@ async function salvarPaginaCursorSync(pagina: number): Promise<void> {
 // detalhe de até LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO pedidos novos. O backfill
 // completo acontece ao longo de várias execuções (cron diário).
 // -----------------------------------------------------------
-async function sincronizarHistorico(): Promise<{ processados: number; restantes: number }> {
+async function sincronizarHistorico(
+  inicioJob: number
+): Promise<{ processados: number; restantes: number; paginaAtual: number }> {
   const paginaAtual = await lerPaginaCursorSync();
 
   const inicioListagem = Date.now();
@@ -99,15 +115,25 @@ async function sincronizarHistorico(): Promise<{ processados: number; restantes:
   const novos = codigosDaPagina.filter((c) => !codigosJaSincronizados.has(String(c)));
 
   const lote = novos.slice(0, LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO);
-  const restantes = novos.length - lote.length;
+  let restantes = novos.length - lote.length;
 
   console.log(
-    `[sync] página ${paginaAtual}: ${novos.length} pedidos novos, processando ${lote.length} nesta execução (${restantes} ficam pendentes nesta página; próxima execução vai pra página ${proximaPagina})`
+    `[sync] página ${paginaAtual}: ${novos.length} pedidos novos, processando até ${lote.length} nesta execução (${restantes} ficam pendentes nesta página; próxima execução vai pra página ${proximaPagina})`
   );
 
   const inicioDetalhe = Date.now();
+  let processados = 0;
 
   for (const codigo of lote) {
+    if (tempoEsgotado(inicioJob)) {
+      const faltam = lote.length - processados;
+      restantes += faltam;
+      console.warn(
+        `[sync] tempo esgotado (${LIMITE_TEMPO_MS}ms) — parando com ${processados}/${lote.length} pedidos processados nesta execução, ${faltam} ficam pra próxima`
+      );
+      break;
+    }
+
     const pedido = await consultarPedido(codigo);
     if (pedido) {
       const { nome: clienteNome, cnpj: clienteCnpj } = await resolverCliente(
@@ -142,14 +168,16 @@ async function sincronizarHistorico(): Promise<{ processados: number; restantes:
       if (upsertError) {
         console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
       }
-    } // pedido === null: cancelado, pula
+    } // pedido === null: cancelado ou campo ausente (omie-client.ts já loga o motivo), pula
+
+    processados++;
   }
 
   console.log(
-    `[sync] lote concluído em ${Date.now() - inicioDetalhe}ms — ${lote.length} processados, ${restantes} restantes`
+    `[sync] lote concluído em ${Date.now() - inicioDetalhe}ms — ${processados} processados, ${restantes} restantes`
   );
 
-  return { processados: lote.length, restantes };
+  return { processados, restantes, paginaAtual };
 }
 
 // -----------------------------------------------------------
@@ -207,7 +235,7 @@ interface LinhaHistorico {
 // -----------------------------------------------------------
 // 2) Recalcula recorrência por par cliente+item
 // -----------------------------------------------------------
-async function recalcularRecorrencias(): Promise<void> {
+async function recalcularRecorrencias(inicioJob: number): Promise<void> {
   const { data: historico, error } = await supabase
     .from("pedidos_itens_historico")
     .select("*")
@@ -227,7 +255,17 @@ async function recalcularRecorrencias(): Promise<void> {
     grupos.set(chave, lista);
   }
 
-  for (const [, linhas] of Array.from(grupos.entries())) {
+  const entradas = Array.from(grupos.entries());
+  let recalculadas = 0;
+
+  for (const [, linhas] of entradas) {
+    if (tempoEsgotado(inicioJob)) {
+      console.warn(
+        `[recorrencia] tempo esgotado (${LIMITE_TEMPO_MS}ms) — parando com ${recalculadas}/${entradas.length} pares recalculados (cada upsert já feito fica salvo; retoma no próximo run)`
+      );
+      break;
+    }
+
     const ultima = linhas[linhas.length - 1];
 
     const pedidosParaCalculo: Pedido[] = linhas.map((l) => ({
@@ -268,9 +306,10 @@ async function recalcularRecorrencias(): Promise<void> {
     };
 
     await upsertPreservandoStatus(registro);
+    recalculadas++;
   }
 
-  console.log(`[recorrencia] ${grupos.size} previsões recalculadas`);
+  console.log(`[recorrencia] ${recalculadas}/${entradas.length} previsões recalculadas`);
 }
 
 interface RegistroPrevisao {
@@ -380,7 +419,7 @@ function calcularDataLimiteISO(diasAFrente: number): string {
   return limite.toISOString().slice(0, 10);
 }
 
-async function cruzarComVencimentoCA(): Promise<void> {
+async function cruzarComVencimentoCA(inicioJob: number): Promise<void> {
   const { data: previsoesPendentes, error } = await supabase
     .from("recompra_previsao")
     .select("id, ca")
@@ -391,8 +430,17 @@ async function cruzarComVencimentoCA(): Promise<void> {
 
   const dataLimite30Dias = calcularDataLimiteISO(30);
   let marcadas = 0;
+  let avaliadas = 0;
 
   for (const previsao of previsoesPendentes) {
+    if (tempoEsgotado(inicioJob)) {
+      console.warn(
+        `[CA] tempo esgotado (${LIMITE_TEMPO_MS}ms) — parando com ${avaliadas}/${previsoesPendentes.length} previsões avaliadas (o que já foi marcado fica salvo; retoma no próximo run)`
+      );
+      break;
+    }
+    avaliadas++;
+
     if (!previsao.ca) continue; // item sem CA vinculado (fase 26 é opcional) — nada a cruzar
 
     // Cotação vencedora mais recente registrada pra esse CA, em qualquer
@@ -430,19 +478,46 @@ async function cruzarComVencimentoCA(): Promise<void> {
     marcadas++;
   }
 
-  console.log(`[CA] cruzamento concluído — ${marcadas} previsões marcadas com CA vencendo/vencida`);
+  console.log(
+    `[CA] cruzamento concluído — ${avaliadas}/${previsoesPendentes.length} avaliadas, ${marcadas} marcadas com CA vencendo/vencida`
+  );
 }
 
 // -----------------------------------------------------------
 // ORQUESTRAÇÃO
 // -----------------------------------------------------------
-export async function rodarSincronizacaoDiaria(): Promise<{ processados: number; restantes: number }> {
+export async function rodarSincronizacaoDiaria(): Promise<{
+  processados: number;
+  restantes: number;
+  paginaAtual: number;
+}> {
+  const inicioJob = Date.now();
   console.log("=== iniciando job de recompra preditiva ===");
-  const resultadoSync = await sincronizarHistorico();
-  await recalcularRecorrencias();
-  await recalcularCrossSell();
-  await cruzarComVencimentoCA();
-  console.log("=== job concluído ===");
+
+  const resultadoSync = await sincronizarHistorico(inicioJob);
+
+  // Cada fase abaixo processa a tabela inteira (não só o lote sincronizado
+  // agora), então também respeita o mesmo teto de tempo — sem isso, o job
+  // podia estourar aqui mesmo com o lote de sync já reduzido pra 5.
+  if (tempoEsgotado(inicioJob)) {
+    console.warn("[job] tempo esgotado após sincronizarHistorico — pulando recorrência/cross-sell/CA nesta execução");
+  } else {
+    await recalcularRecorrencias(inicioJob);
+
+    if (tempoEsgotado(inicioJob)) {
+      console.warn("[job] tempo esgotado após recorrência — pulando cross-sell/CA nesta execução");
+    } else {
+      await recalcularCrossSell();
+
+      if (tempoEsgotado(inicioJob)) {
+        console.warn("[job] tempo esgotado após cross-sell — pulando cruzamento de CA nesta execução");
+      } else {
+        await cruzarComVencimentoCA(inicioJob);
+      }
+    }
+  }
+
+  console.log(`=== job concluído em ${Date.now() - inicioJob}ms ===`);
   return resultadoSync;
 }
 

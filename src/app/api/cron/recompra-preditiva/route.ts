@@ -28,7 +28,8 @@ export async function GET(request: Request) {
       ok: true,
       executado_em: new Date().toISOString(),
       processados: resultado.processados,
-      restantes: resultado.restantes,
+      pagina_atual: resultado.paginaAtual,
+      restantes_estimado: resultado.restantes,
     })
   } catch (err) {
     const mensagem =

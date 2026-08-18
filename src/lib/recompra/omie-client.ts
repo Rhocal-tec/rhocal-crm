@@ -191,14 +191,14 @@ interface ConsultarPedidoResponse {
 }
 
 export async function consultarPedido(codigoPedido: number): Promise<OmiePedido | null> {
-  // Delay reduzido (80ms em vez do padrão 150ms) — chamada de detalhe feita
+  // Delay reduzido (50ms em vez do padrão 150ms) — chamada de detalhe feita
   // uma vez por pedido novo, dentro do teto já apertado de maxDuration da
   // rota de cron; dá mais margem pra processar mais pedidos por execução.
   const resposta = await chamarOmie<ConsultarPedidoResponse>(
     "produtos/pedido",
     "ConsultarPedido",
     { codigo_pedido: codigoPedido },
-    80
+    50
   );
 
   // Confirmado ao vivo (Vercel Function Logs): alguns pedidos voltam do
