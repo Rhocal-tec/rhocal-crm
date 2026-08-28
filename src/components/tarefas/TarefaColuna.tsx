@@ -12,12 +12,14 @@ export function TarefaColuna({
   clienteLabelPorTarefa,
   responsavelPorId,
   onConcluir,
+  onIniciar,
 }: {
   bucket: PrazoBucket
   tarefas: Tarefa[]
   clienteLabelPorTarefa: Record<string, string | null>
   responsavelPorId: Record<string, string>
   onConcluir: (tarefa: Tarefa) => void
+  onIniciar: (tarefa: Tarefa) => void
 }) {
   const stripeVar = PRAZO_STRIPE_VAR[bucket]
 
@@ -47,6 +49,7 @@ export function TarefaColuna({
             responsavelNome={tarefa.responsavel ? responsavelPorId[tarefa.responsavel] ?? null : null}
             atrasada={bucket === 'ATRASADAS'}
             onConcluir={onConcluir}
+            onIniciar={onIniciar}
           />
         ))}
         {tarefas.length === 0 && (

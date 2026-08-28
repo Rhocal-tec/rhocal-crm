@@ -1,10 +1,45 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { registrarErro } from '@/lib/omie/registrar-erro'
-import { chamarOmie, obterCredenciaisOmiePorEmpresaId } from '@/lib/omie/chamar-omie'
+import { obterCredenciaisOmiePorEmpresaId, type CredenciaisOmie } from '@/lib/omie/chamar-omie'
 
 // Nunca expor OMIE_APP_KEY_*/OMIE_APP_SECRET_* no client — só lidas aqui, server-side.
 const OMIE_CRM_TAREFAS_URL = 'https://app.omie.com.br/api/v1/crm/tarefas/'
+
+// DEBUG TEMPORÁRIO (fase 33.4) — chamarOmie() (lib/omie/chamar-omie.ts) só
+// preserva `faultstring` em caso de erro, descartando o resto do corpo
+// (faultcode, e qualquer outro campo). Pra ver a resposta REALMENTE
+// completa do Omie na primeira escrita de teste contra IncluirTarefa/
+// AlterarTarefa (nunca confirmada ao vivo até agora), esta rota usa um
+// fetch bruto só aqui, sem passar pelo helper compartilhado. Remover e
+// voltar a usar chamarOmie() assim que o formato estiver validado.
+async function chamarOmieComLogCompleto(
+  call: string,
+  param: Record<string, unknown>,
+  credenciais: CredenciaisOmie,
+): Promise<Record<string, unknown>> {
+  console.log(`[sincronizar-tarefa] DEBUG payload ${call}:`, JSON.stringify(param))
+
+  const resposta = await fetch(OMIE_CRM_TAREFAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call,
+      app_key: credenciais.appKey,
+      app_secret: credenciais.appSecret,
+      param: [param],
+    }),
+  })
+
+  const textoBruto = await resposta.text()
+  console.log(`[sincronizar-tarefa] DEBUG resposta bruta ${call} (HTTP ${resposta.status}):`, textoBruto)
+
+  const dados = JSON.parse(textoBruto) as Record<string, unknown>
+  if (typeof dados.faultstring === 'string') {
+    throw new Error(dados.faultstring)
+  }
+  return dados
+}
 
 // Converte um `date` do Postgres ('YYYY-MM-DD', sem hora) pro formato do
 // Omie (DD/MM/AAAA) fatiando a string em vez de passar por `Date` — mesmo
@@ -83,23 +118,23 @@ export async function POST(request: Request) {
       nCodOp: oportunidade.omie_oportunidade_id,
       cDescricao: (tarefa.descricao_completa_omie || tarefa.descricao).slice(0, 4000),
       dData: dataPrevistaParaOmie(tarefa.data_prevista),
-      cHora: '09:00', // não coletamos horário na nossa UI — horário fixo de fallback
+      // Fase 39: usa hora_prevista (vinda do cHora na importação) quando existe;
+      // '09:00' só como fallback quando a tarefa não tem horário definido.
+      cHora:
+        typeof tarefa.hora_prevista === 'string' && /^\d{1,2}:\d{2}/.test(tarefa.hora_prevista.trim())
+          ? tarefa.hora_prevista.trim().slice(0, 5)
+          : '09:00',
       cImportante: tarefa.importante ? 'S' : 'N',
       cUrgente: tarefa.urgente ? 'S' : 'N',
       cRealizada: tarefa.situacao === 'Realizada' ? 'S' : 'N',
     }
 
     if (tarefa.omie_tarefa_id) {
-      await chamarOmie(
-        OMIE_CRM_TAREFAS_URL,
-        'AlterarTarefa',
-        { ...payload, nCodTarefa: tarefa.omie_tarefa_id },
-        credenciais,
-      )
+      await chamarOmieComLogCompleto('AlterarTarefa', { ...payload, nCodTarefa: tarefa.omie_tarefa_id }, credenciais)
       return NextResponse.json({ sincronizada: true, acao: 'alterada' })
     }
 
-    const resultado = await chamarOmie(OMIE_CRM_TAREFAS_URL, 'IncluirTarefa', payload, credenciais)
+    const resultado = await chamarOmieComLogCompleto('IncluirTarefa', payload, credenciais)
     const novoCodigo = typeof resultado.nCodTarefa === 'number' ? resultado.nCodTarefa : null
 
     if (novoCodigo) {
@@ -109,6 +144,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ sincronizada: true, acao: 'incluida' })
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : 'Erro desconhecido ao sincronizar tarefa com o Omie.'
+    // LOG TEMPORÁRIO (fase 33.4) — ver comentário acima.
+    console.log('[sincronizar-tarefa] DEBUG erro capturado:', err)
     await registrarErro(supabase, {
       rota: '/api/omie/sincronizar-tarefa',
       mensagem,

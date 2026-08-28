@@ -1,0 +1,11 @@
+-- Fase 39 — Tarefas enriquecidas.
+--
+-- Nova coluna hora_prevista (text, formato 'HH:MM') — populada na importação
+-- a partir do cHora do ListarTarefas e usada na sincronização de saída no
+-- lugar do fallback fixo '09:00'. Os campos `tipo` e `situacao` já existiam
+-- (0006): situacao ganha 'Em Execução' como terceiro valor de uso (vindo do
+-- cEmExecucao), sem mudança de schema por ser text livre. Rodada manualmente
+-- no SQL Editor do Supabase antes do código que a usa (mesmo padrão de
+-- 0013/0014) — este arquivo só formaliza a alteração no controle de
+-- migrations do repo.
+alter table public.tarefas add column if not exists hora_prevista text;

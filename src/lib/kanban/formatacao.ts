@@ -8,6 +8,24 @@ export function formatarDataSomente(valor: string | null): string {
   return `${dia}/${mes}/${ano}`
 }
 
+// Combina uma data pura (Postgres `date`) com um horário 'HH:MM' opcional
+// (tarefas.hora_prevista, fase 39). Com hora preenchida: "15/09 às 10:31"
+// (sem o ano — leitura rápida no card/lista de tarefas). Sem hora: cai no
+// formato de data completo (DD/MM/AAAA).
+export function formatarDataHoraPrevista(
+  data: string | null,
+  hora: string | null,
+): string {
+  if (!data) return '—'
+  const [ano, mes, dia] = data.slice(0, 10).split('-')
+  if (!ano || !mes || !dia) return '—'
+  const horaLimpa = typeof hora === 'string' ? hora.trim() : ''
+  if (/^\d{1,2}:\d{2}/.test(horaLimpa)) {
+    return `${dia}/${mes} às ${horaLimpa.slice(0, 5)}`
+  }
+  return `${dia}/${mes}/${ano}`
+}
+
 // Aceita string além de number porque o Postgres/PostgREST devolve colunas
 // `numeric` como string (ex: "150.00") para não perder precisão — sem essa
 // coerção, valor.toLocaleString(...) em uma string ignora as opções de

@@ -1210,3 +1210,27 @@ Novos campos em `oportunidades` (migração já rodada pelo usuário no Supabase
 **Edição:** todos os campos novos são editáveis inline, mesmo padrão dos demais campos do modal — salvam automaticamente ao perder o foco (blur) ou via botão de salvar por seção.
 
 Segue o design system em todos os elementos novos.
+
+## Fase 39 — Tarefas enriquecidas
+
+Três campos novos da tarefa, todos vindos de campos que o próprio `ListarTarefas` do Omie já devolve (fase 33.3) e que até agora eram ignorados na importação. Migração já rodada pelo usuário no Supabase: `tarefas.hora_prevista` (text). `tipo` e `situacao` já existiam.
+
+### 39.1 — Hora prevista (`cHora`)
+
+- Nova coluna `tarefas.hora_prevista` (text, formato `"HH:MM"`, opcional)
+- **Importação** (`/api/omie/importar-tarefas`): popular `hora_prevista` com o valor de `cHora` (`"HH:MM"` no retorno do `ListarTarefas`), quando presente e no formato esperado
+- **Sincronização de saída** (`/api/omie/sincronizar-tarefa`, `IncluirTarefa`/`AlterarTarefa`): usar `tarefa.hora_prevista` no campo `cHora` em vez do fallback fixo `'09:00'` que estava hardcoded — só cai no `'09:00'` quando `hora_prevista` estiver vazia
+- **Exibição** (card do kanban `/tarefas` e aba Tarefas do modal): mostrar data + hora combinadas — `"15/09 às 10:31"` quando `hora_prevista` estiver preenchida, ou só a data (formato completo `DD/MM/AAAA`) quando não estiver. Helper `formatarDataHoraPrevista(data, hora)` em `src/lib/kanban/formatacao.ts`
+
+### 39.2 — Terceiro estado "Em Execução" (`cEmExecucao`)
+
+- `tarefas.situacao` (text livre, já existente) passa a ter três valores de uso: `'Pendente'`, `'Em Execução'`, `'Realizada'`
+- **Importação**: se `cEmExecucao === 'S'` e `cRealizada === 'N'`, gravar `situacao = 'Em Execução'` (em vez de `'Pendente'`). `cRealizada === 'S'` continua tendo prioridade (→ `'Realizada'`)
+- **Kanban por PRAZO** (`classificarPrazo`): `'Em Execução'` cai nas colunas calculadas por data (Atrasadas/Hoje/Futuras) igual a `'Pendente'` — só `'Realizada'` vai para Concluídas. Comportamento já correto (o filtro só desvia `'Realizada'`), sem mudança necessária
+- **Badge visual de 3 estados** (card do kanban e aba Tarefas): Pendente = cinza (`#8A939B`), Em Execução = azul (`#3B7DD8`), Realizada = verde (`#2FAE66`). Helper `badgeSituacao(situacao)` em `src/lib/tarefas/situacao.ts`
+- **Botão "Iniciar"** no card do kanban `/tarefas`: visível só quando `situacao === 'Pendente'`, muda `situacao` para `'Em Execução'` (mesmo padrão do botão "Concluir" já existente — update direto no banco + `sincronizarTarefaComOmie`)
+
+### 39.3 — Tipo de atividade (`nCodAtividade`)
+
+- **Importação**: salvar `nCodAtividade` (código numérico opaco de atividade do Omie) como texto no campo `tarefas.tipo` já existente (ex: `"1"`) — só quando a tarefa importada não tiver um `tipo` derivado de outra fonte
+- **Exibição**: o `tipo` já aparece como badge no card e na aba Tarefas; garantir que aparece também no detalhe da aba Tarefas do modal quando preenchido

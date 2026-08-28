@@ -194,6 +194,23 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
     setTarefaEncadeando(atualizada)
   }
 
+  async function iniciarTarefa(tarefa: Tarefa) {
+    const atualizada = { ...tarefa, situacao: 'Em Execução' }
+    setTarefas((atual) => atual.map((t) => (t.id === tarefa.id ? atualizada : t)))
+
+    const { error } = await supabase
+      .from('tarefas')
+      .update({ situacao: 'Em Execução' })
+      .eq('id', tarefa.id)
+
+    if (error) {
+      setTarefas((atual) => atual.map((t) => (t.id === tarefa.id ? tarefa : t)))
+      return
+    }
+
+    sincronizarTarefaComOmie(tarefa.id)
+  }
+
   async function importarDoOmie() {
     if (!empresaAtiva) return
     setImportando(true)
@@ -270,6 +287,7 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
             clienteLabelPorTarefa={clienteLabelPorTarefa}
             responsavelPorId={profilesPorId}
             onConcluir={concluirTarefa}
+            onIniciar={iniciarTarefa}
           />
         ))}
       </div>

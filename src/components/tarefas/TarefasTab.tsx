@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
-import { formatarDataSomente } from '@/lib/kanban/formatacao'
+import { formatarDataHoraPrevista } from '@/lib/kanban/formatacao'
+import { badgeSituacao } from '@/lib/tarefas/situacao'
 import { TAREFA_TIPO_OPCOES, TAREFA_TIPOS_CONTATO } from '@/lib/tarefas/opcoes'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
 import type { Database } from '@/types/database'
@@ -277,27 +278,37 @@ export function TarefasTab({
                 <p className={`text-sm text-primary ${concluida ? 'line-through' : ''}`}>{tarefa.descricao}</p>
                 <p className="mt-0.5 text-[11px] text-muted">
                   {nomeDoResponsavel(tarefa.responsavel)}
-                  {tarefa.data_prevista && ` · até ${formatarDataSomente(tarefa.data_prevista)}`}
+                  {tarefa.data_prevista &&
+                    ` · até ${formatarDataHoraPrevista(tarefa.data_prevista, tarefa.hora_prevista)}`}
                 </p>
-                {(tarefa.tipo || tarefa.importante || tarefa.urgente) && (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {tarefa.tipo && (
-                      <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-muted">
-                        {tarefa.tipo}
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {(() => {
+                    const badge = badgeSituacao(tarefa.situacao)
+                    return (
+                      <span
+                        className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        style={{ color: badge.cor, backgroundColor: badge.bg }}
+                      >
+                        {badge.label}
                       </span>
-                    )}
-                    {tarefa.importante && (
-                      <span className="inline-flex rounded-full border border-accent-primary/40 bg-accent-primary/15 px-2 py-0.5 text-[10px] font-semibold text-accent-primary">
-                        ★ Importante
-                      </span>
-                    )}
-                    {tarefa.urgente && (
-                      <span className="inline-flex rounded-full border border-accent-danger/40 bg-accent-danger/15 px-2 py-0.5 text-[10px] font-semibold text-accent-danger">
-                        Urgente
-                      </span>
-                    )}
-                  </div>
-                )}
+                    )
+                  })()}
+                  {tarefa.tipo && (
+                    <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-muted">
+                      {tarefa.tipo}
+                    </span>
+                  )}
+                  {tarefa.importante && (
+                    <span className="inline-flex rounded-full border border-accent-primary/40 bg-accent-primary/15 px-2 py-0.5 text-[10px] font-semibold text-accent-primary">
+                      ★ Importante
+                    </span>
+                  )}
+                  {tarefa.urgente && (
+                    <span className="inline-flex rounded-full border border-accent-danger/40 bg-accent-danger/15 px-2 py-0.5 text-[10px] font-semibold text-accent-danger">
+                      Urgente
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           )

@@ -1,6 +1,7 @@
 'use client'
 
-import { formatarDataSomente } from '@/lib/kanban/formatacao'
+import { formatarDataHoraPrevista } from '@/lib/kanban/formatacao'
+import { badgeSituacao } from '@/lib/tarefas/situacao'
 import type { Database } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
@@ -11,14 +12,17 @@ export function TarefaCard({
   responsavelNome,
   atrasada,
   onConcluir,
+  onIniciar,
 }: {
   tarefa: Tarefa
   clienteLabel: string | null
   responsavelNome: string | null
   atrasada: boolean
   onConcluir: (tarefa: Tarefa) => void
+  onIniciar: (tarefa: Tarefa) => void
 }) {
   const concluida = tarefa.situacao === 'Realizada'
+  const badge = badgeSituacao(tarefa.situacao)
 
   return (
     <div
@@ -49,6 +53,12 @@ export function TarefaCard({
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span
+          className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold"
+          style={{ color: badge.cor, backgroundColor: badge.bg }}
+        >
+          {badge.label}
+        </span>
         {tarefa.tipo && (
           <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-medium text-muted">
             {tarefa.tipo}
@@ -68,18 +78,28 @@ export function TarefaCard({
         <span>{responsavelNome ?? 'Sem responsável'}</span>
         {tarefa.data_prevista && (
           <span className={atrasada ? 'font-medium text-accent-danger' : ''}>
-            {formatarDataSomente(tarefa.data_prevista)}
+            {formatarDataHoraPrevista(tarefa.data_prevista, tarefa.hora_prevista)}
           </span>
         )}
       </div>
 
       {!concluida && (
-        <button
-          onClick={() => onConcluir(tarefa)}
-          className="mt-2.5 w-full rounded-md border border-accent-success/40 bg-accent-success/10 py-1.5 text-xs font-medium text-accent-success transition-colors hover:bg-accent-success/20"
-        >
-          ✓ Concluir
-        </button>
+        <div className="mt-2.5 flex gap-2">
+          {tarefa.situacao === 'Pendente' && (
+            <button
+              onClick={() => onIniciar(tarefa)}
+              className="flex-1 rounded-md border border-accent-compras/40 bg-accent-compras/10 py-1.5 text-xs font-medium text-accent-compras transition-colors hover:bg-accent-compras/20"
+            >
+              ▶ Iniciar
+            </button>
+          )}
+          <button
+            onClick={() => onConcluir(tarefa)}
+            className="flex-1 rounded-md border border-accent-success/40 bg-accent-success/10 py-1.5 text-xs font-medium text-accent-success transition-colors hover:bg-accent-success/20"
+          >
+            ✓ Concluir
+          </button>
+        </div>
       )}
     </div>
   )

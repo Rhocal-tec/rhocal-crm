@@ -25,7 +25,23 @@ function truncar(texto: string, tamanho: number): string {
   return `${texto.slice(0, tamanho).trimEnd()}...`
 }
 
+// cHora vem como 'HH:MM' no retorno do ListarTarefas (fase 33.3). Guarda só
+// quando bate o formato esperado — evita gravar lixo em hora_prevista.
+function horaOmie(hora: unknown): string | null {
+  if (typeof hora !== 'string') return null
+  const limpa = hora.trim()
+  return /^\d{1,2}:\d{2}$/.test(limpa) ? limpa : null
+}
+
+// nCodAtividade é um código numérico opaco de atividade do Omie (fase 39.3)
+// — salvo como texto no campo `tipo` já existente, sem tradução.
+function atividadeOmie(codigo: unknown): string | null {
+  if (typeof codigo === 'number' && Number.isFinite(codigo)) return String(codigo)
+  return null
+}
+
 export async function POST(request: Request) {
+  console.log('[DEBUG importar-tarefas] rota chamada')
   const supabase = createClient()
 
   const {
@@ -99,6 +115,12 @@ export async function POST(request: Request) {
       pagina += 1
     } while (pagina <= totalDePaginas && pagina <= LIMITE_PAGINAS)
 
+    // TEMP DEBUG (fase 33 — investigação de campos não importados): imprime
+    // a primeira tarefa bruta, sem nenhum parsing. Remover depois de coletar.
+    if (cadastrosBrutos.length > 0) {
+      console.log('[DEBUG importar-tarefas] primeira tarefa bruta:', JSON.stringify(cadastrosBrutos[0], null, 2))
+    }
+
     // Campos achatados direto no item (sem sub-objetos, diferente do
     // ListarOportunidades) — formato confirmado ao vivo (fase 33):
     // cDescricao (log corrido, não uma descrição curta — ver migração
@@ -112,16 +134,20 @@ export async function POST(request: Request) {
         const omieId = typeof item.nCodTarefa === 'number' ? item.nCodTarefa : null
         const nCodOp = typeof item.nCodOp === 'number' ? item.nCodOp : null
         const descricaoCompleta = typeof item.cDescricao === 'string' ? item.cDescricao : ''
+        const realizada = item.cRealizada === 'S'
+        const emExecucao = item.cEmExecucao === 'S' && !realizada
         return {
           omieId,
           nCodOp,
           descricao: truncar(descricaoCompleta.trim() || 'Tarefa importada do Omie', TAMANHO_RESUMO),
           descricaoCompleta,
           dataPrevista: dataOmieParaIso(item.dData),
+          horaPrevista: horaOmie(item.cHora),
+          tipo: atividadeOmie(item.nCodAtividade),
           importante: item.cImportante === 'S',
           urgente: item.cUrgente === 'S',
-          situacao: item.cRealizada === 'S' ? 'Realizada' : 'Pendente',
-          concluida: item.cRealizada === 'S',
+          situacao: realizada ? 'Realizada' : emExecucao ? 'Em Execução' : 'Pendente',
+          concluida: realizada,
         }
       })
       .filter((item): item is typeof item & { omieId: number } => item.omieId !== null)
@@ -180,6 +206,8 @@ export async function POST(request: Request) {
           descricao: item.descricao,
           descricao_completa_omie: item.descricaoCompleta || null,
           data_prevista: item.dataPrevista,
+          hora_prevista: item.horaPrevista,
+          tipo: item.tipo,
           importante: item.importante,
           urgente: item.urgente,
           situacao: item.situacao,

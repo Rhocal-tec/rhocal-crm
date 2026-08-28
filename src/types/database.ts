@@ -29,10 +29,10 @@ export type OportunidadeStatus =
   | 'GANHO'
   | 'PERDIDO'
 
-// `situacao` é text livre no banco (mesmo padrão de AuditAcao) — o
-// mapeamento fino para os status do Omie (ListarTarefas) fica para a
-// sincronização da fase 33, ainda não implementada.
-export type TarefaSituacao = 'Pendente' | 'Realizada' | string
+// `situacao` é text livre no banco (mesmo padrão de AuditAcao). Fase 39
+// adicionou 'Em Execução' como terceiro estado (vindo do cEmExecucao do
+// ListarTarefas) — só 'Realizada' desvia o card para a coluna Concluídas.
+export type TarefaSituacao = 'Pendente' | 'Em Execução' | 'Realizada' | string
 
 // Motor de Recompra Preditiva. `status` é text livre no banco (mesmo padrão
 // de TarefaSituacao/AuditAcao) — os quatro valores usados pela aplicação são
@@ -430,6 +430,7 @@ export interface Database {
           descricao: string
           responsavel: string | null
           data_prevista: string | null
+          hora_prevista: string | null
           concluida: boolean
           tipo: string | null
           situacao: TarefaSituacao
@@ -448,6 +449,7 @@ export interface Database {
           descricao: string
           responsavel?: string | null
           data_prevista?: string | null
+          hora_prevista?: string | null
           concluida?: boolean
           tipo?: string | null
           situacao?: TarefaSituacao
@@ -466,6 +468,7 @@ export interface Database {
           descricao?: string
           responsavel?: string | null
           data_prevista?: string | null
+          hora_prevista?: string | null
           concluida?: boolean
           tipo?: string | null
           situacao?: TarefaSituacao
