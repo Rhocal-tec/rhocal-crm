@@ -33,6 +33,18 @@ export function OportunidadeCard({
   const nomeUltimoResponsavel = nomesPorId[oportunidade.movido_por ?? oportunidade.criado_por]
   const nomeResponsavel = nomesPorId[oportunidade.criado_por]
   const corTemperatura = oportunidade.temperatura ? TEMPERATURA_CARD_CORES[oportunidade.temperatura] : undefined
+  // Fase 38: badge "Fecha DD/MM" — formata só dia/mês (sem passar por Date,
+  // mesmo cuidado de fuso já usado em formatarDataSomente).
+  const previsaoFechamentoLabel = (() => {
+    if (!oportunidade.previsao_fechamento) return null
+    const [, mes, dia] = oportunidade.previsao_fechamento.slice(0, 10).split('-')
+    if (!mes || !dia) return null
+    return `Fecha ${dia}/${mes}`
+  })()
+  const produtoServicoTruncado =
+    oportunidade.produto_servico && oportunidade.produto_servico.length > 40
+      ? `${oportunidade.produto_servico.slice(0, 40)}…`
+      : oportunidade.produto_servico
 
   const style = {
     transform: CSS.Translate.toString(transform),
@@ -68,6 +80,9 @@ export function OportunidadeCard({
         )}
       </div>
       <p className="mt-1 truncate text-sm text-primary/80">{oportunidade.cliente_nome}</p>
+      {produtoServicoTruncado && (
+        <p className="mt-0.5 truncate text-xs text-muted">{produtoServicoTruncado}</p>
+      )}
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-muted">
           {OPORTUNIDADE_STATUS_LABELS[oportunidade.status]}
@@ -78,6 +93,11 @@ export function OportunidadeCard({
           </span>
         )}
       </div>
+      {previsaoFechamentoLabel && (
+        <span className="mt-1.5 inline-flex rounded-full border border-accent-compras/40 bg-accent-compras/15 px-2 py-0.5 text-xs font-medium text-accent-compras">
+          {previsaoFechamentoLabel}
+        </span>
+      )}
       {(critico || parado) && (
         <p className={`mt-1.5 text-xs font-medium ${critico ? 'text-accent-danger' : 'text-accent-alert'}`}>
           {dias}d parado

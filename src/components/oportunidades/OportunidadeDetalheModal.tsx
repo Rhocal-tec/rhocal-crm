@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Modal } from '@/components/ui/Modal'
-import { formatarMoeda } from '@/lib/kanban/formatacao'
+import { MoedaInput } from '@/components/ui/MoedaInput'
+import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { TarefasTab } from '@/components/tarefas/TarefasTab'
 import { HistoricoContatoTab } from '@/components/interacoes/HistoricoContatoTab'
@@ -12,6 +13,14 @@ import { MarcarOportunidadePerdidaSection } from './MarcarOportunidadePerdidaSec
 import type { Database, SetorTipo } from '@/types/database'
 
 type Oportunidade = Database['public']['Tables']['oportunidades']['Row']
+
+type CampoTexto =
+  | 'contato_nome'
+  | 'contato_cargo'
+  | 'contato_email'
+  | 'produto_servico'
+  | 'concorrentes'
+  | 'cliente_telefone'
 
 type Aba = 'dados' | 'tarefas' | 'historico'
 
@@ -28,6 +37,17 @@ export function OportunidadeDetalheModal({
   const [aba, setAba] = useState<Aba>('dados')
   const [oportunidade, setOportunidade] = useState<Oportunidade | null>(null)
   const [carregando, setCarregando] = useState(false)
+
+  // Fase 38: estado local dos campos editáveis inline (mesmo padrão de
+  // input controlado + salvar no blur já usado no modal de Pedido).
+  const [previsaoFechamentoInput, setPrevisaoFechamentoInput] = useState('')
+  const [produtoServicoInput, setProdutoServicoInput] = useState('')
+  const [concorrentesInput, setConcorrentesInput] = useState('')
+  const [contatoNomeInput, setContatoNomeInput] = useState('')
+  const [contatoCargoInput, setContatoCargoInput] = useState('')
+  const [contatoEmailInput, setContatoEmailInput] = useState('')
+  const [clienteTelefoneInput, setClienteTelefoneInput] = useState('')
+  const [valorEstimadoInput, setValorEstimadoInput] = useState('')
 
   useEffect(() => {
     if (!oportunidadeId) {
@@ -47,6 +67,18 @@ export function OportunidadeDetalheModal({
       .then(({ data }) => {
         if (!ativo) return
         setOportunidade(data ?? null)
+        setPrevisaoFechamentoInput(data?.previsao_fechamento ?? '')
+        setProdutoServicoInput(data?.produto_servico ?? '')
+        setConcorrentesInput(data?.concorrentes ?? '')
+        setContatoNomeInput(data?.contato_nome ?? '')
+        setContatoCargoInput(data?.contato_cargo ?? '')
+        setContatoEmailInput(data?.contato_email ?? '')
+        setClienteTelefoneInput(data?.cliente_telefone ?? '')
+        setValorEstimadoInput(
+          data?.valor_estimado !== undefined && data?.valor_estimado !== null
+            ? String(data.valor_estimado)
+            : '',
+        )
         setCarregando(false)
       })
 
@@ -54,6 +86,41 @@ export function OportunidadeDetalheModal({
       ativo = false
     }
   }, [oportunidadeId, supabase])
+
+  async function salvarCampoTexto(campo: CampoTexto, valor: string) {
+    if (!oportunidade) return
+    const novoValor = valor.trim() || null
+    const atualizacao: Partial<Oportunidade> = { [campo]: novoValor }
+    const { error } = await supabase
+      .from('oportunidades')
+      .update(atualizacao)
+      .eq('id', oportunidade.id)
+    if (!error) setOportunidade({ ...oportunidade, ...atualizacao })
+  }
+
+  async function salvarPrevisaoFechamento(valor: string) {
+    if (!oportunidade) return
+    const novoValor = valor || null
+    const { error } = await supabase
+      .from('oportunidades')
+      .update({ previsao_fechamento: novoValor })
+      .eq('id', oportunidade.id)
+    if (!error) setOportunidade({ ...oportunidade, previsao_fechamento: novoValor })
+  }
+
+  async function salvarValorEstimado(valor: string) {
+    if (!oportunidade) return
+    const numero = valor.trim() === '' ? null : Number(valor)
+    if (numero !== null && !Number.isFinite(numero)) return
+    const { error } = await supabase
+      .from('oportunidades')
+      .update({ valor_estimado: numero })
+      .eq('id', oportunidade.id)
+    if (!error) {
+      setOportunidade({ ...oportunidade, valor_estimado: numero })
+      setValorEstimadoInput(numero !== null ? String(numero) : '')
+    }
+  }
 
   return (
     <Modal
@@ -117,12 +184,6 @@ export function OportunidadeDetalheModal({
                   <dd className="font-medium text-primary">{oportunidade.cliente_cnpj ?? '—'}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted">Telefone do cliente</dt>
-                  <dd className="font-medium text-primary">
-                    {oportunidade.cliente_telefone ?? '—'}
-                  </dd>
-                </div>
-                <div>
                   <dt className="text-muted">Contato do cliente</dt>
                   <dd className="font-medium text-primary">
                     {oportunidade.cliente_contato ?? '—'}
@@ -136,12 +197,6 @@ export function OportunidadeDetalheModal({
                   <dt className="text-muted">Temperatura</dt>
                   <dd className="font-medium text-primary">{oportunidade.temperatura ?? '—'}</dd>
                 </div>
-                <div>
-                  <dt className="text-muted">Valor estimado</dt>
-                  <dd className="font-medium text-primary">
-                    {formatarMoeda(oportunidade.valor_estimado)}
-                  </dd>
-                </div>
                 {oportunidade.status === 'PERDIDO' && (
                   <div className="col-span-2">
                     <dt className="text-muted">Motivo da perda</dt>
@@ -151,6 +206,127 @@ export function OportunidadeDetalheModal({
                   </div>
                 )}
               </dl>
+
+              <div className="mt-5 border-t border-white/10 pt-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  Dados do negócio
+                </h3>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div>
+                    <dt className="text-muted">Valor estimado</dt>
+                    <dd className="mt-0.5">
+                      <MoedaInput
+                        value={valorEstimadoInput}
+                        onChange={setValorEstimadoInput}
+                        onBlurSalvar={salvarValorEstimado}
+                        className="input-field w-full rounded-md px-2 py-1 font-mono text-sm"
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted">Previsão de fechamento</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="date"
+                        value={previsaoFechamentoInput}
+                        onChange={(e) => setPrevisaoFechamentoInput(e.target.value)}
+                        onBlur={() => salvarPrevisaoFechamento(previsaoFechamentoInput)}
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
+                  <div className="col-span-2">
+                    <dt className="text-muted">Produto/serviço de interesse</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="text"
+                        value={produtoServicoInput}
+                        onChange={(e) => setProdutoServicoInput(e.target.value)}
+                        onBlur={() => salvarCampoTexto('produto_servico', produtoServicoInput)}
+                        placeholder="Ex: Capacetes Classe A, Luvas de Raspa..."
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
+                  <div className="col-span-2">
+                    <dt className="text-muted">Concorrentes</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="text"
+                        value={concorrentesInput}
+                        onChange={(e) => setConcorrentesInput(e.target.value)}
+                        onBlur={() => salvarCampoTexto('concorrentes', concorrentesInput)}
+                        placeholder="Ex: Fornecedor X, Fornecedor Y"
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="mt-5 border-t border-white/10 pt-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  Contato
+                </h3>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div>
+                    <dt className="text-muted">Nome</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="text"
+                        value={contatoNomeInput}
+                        onChange={(e) => setContatoNomeInput(e.target.value)}
+                        onBlur={() => salvarCampoTexto('contato_nome', contatoNomeInput)}
+                        placeholder="Nome do contato"
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted">Cargo</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="text"
+                        value={contatoCargoInput}
+                        onChange={(e) => setContatoCargoInput(e.target.value)}
+                        onBlur={() => salvarCampoTexto('contato_cargo', contatoCargoInput)}
+                        placeholder="Ex: Comprador, Gerente de SSMA..."
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted">E-mail</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="email"
+                        value={contatoEmailInput}
+                        onChange={(e) => setContatoEmailInput(e.target.value)}
+                        onBlur={() => salvarCampoTexto('contato_email', contatoEmailInput)}
+                        placeholder="nome@empresa.com"
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted">Telefone</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="tel"
+                        value={clienteTelefoneInput}
+                        onChange={(e) =>
+                          setClienteTelefoneInput(formatarTelefoneInput(e.target.value))
+                        }
+                        onBlur={() =>
+                          salvarCampoTexto('cliente_telefone', clienteTelefoneInput)
+                        }
+                        placeholder="(11) 91234-5678"
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
+                </dl>
+              </div>
 
               <ConverterEmOrcamentoSection
                 oportunidade={oportunidade}

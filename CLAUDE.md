@@ -1193,3 +1193,20 @@ Novo helper `estaCritico` (limite 7 dias) em `src/lib/kanban/dias-parado.ts`, ao
 ### 37.4 — Responsável no card
 
 Nova linha no rodapé do card: "Responsável: {nome}", resolvido a partir de `oportunidades.criado_por` via join com `profiles` (sempre o criador original — diferente da linha "Movido por {nome}" já existente, que reflete `movido_por` e muda a cada movimentação). Mesmo padrão visual (texto pequeno, `text-muted/80`) já usado no "Movido por" do kanban de Pedidos.
+
+## Fase 38 — Oportunidades enriquecidas
+
+Novos campos em `oportunidades` (migração já rodada pelo usuário no Supabase): `previsao_fechamento` (date), `contato_nome`, `contato_cargo`, `contato_email`, `produto_servico`, `concorrentes` (text).
+
+**Modal de Oportunidade — duas novas seções:**
+
+1. **"DADOS DO NEGÓCIO"**: `valor_estimado` (já existente, confirmar visibilidade nessa seção), `previsao_fechamento` (date picker), `produto_servico` (texto livre, placeholder "Ex: Capacetes Classe A, Luvas de Raspa..."), `concorrentes` (texto livre, placeholder "Ex: Fornecedor X, Fornecedor Y")
+2. **"CONTATO"**: `contato_nome`, `contato_cargo`, `contato_email`, `cliente_telefone` (já existente — exibido aqui também, como "Telefone")
+
+**Card do kanban de Oportunidades:**
+- Badge "Fecha DD/MM" (azul) quando `previsao_fechamento` estiver preenchida
+- `produto_servico`, quando preenchido, numa linha compacta abaixo do nome do cliente, truncado em 40 caracteres
+
+**Edição:** todos os campos novos são editáveis inline, mesmo padrão dos demais campos do modal — salvam automaticamente ao perder o foco (blur) ou via botão de salvar por seção.
+
+Segue o design system em todos os elementos novos.

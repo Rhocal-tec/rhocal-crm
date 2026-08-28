@@ -355,6 +355,12 @@ export interface Database {
           omie_oportunidade_id: number | null
           omie_fase_bruta: string | null
           pedido_id: string | null
+          previsao_fechamento: string | null
+          contato_nome: string | null
+          contato_cargo: string | null
+          contato_email: string | null
+          produto_servico: string | null
+          concorrentes: string | null
           criado_por: string
           criado_em: string
           ultima_movimentacao: string
@@ -376,6 +382,12 @@ export interface Database {
           omie_oportunidade_id?: number | null
           omie_fase_bruta?: string | null
           pedido_id?: string | null
+          previsao_fechamento?: string | null
+          contato_nome?: string | null
+          contato_cargo?: string | null
+          contato_email?: string | null
+          produto_servico?: string | null
+          concorrentes?: string | null
           criado_por: string
           criado_em?: string
           ultima_movimentacao?: string
@@ -397,6 +409,12 @@ export interface Database {
           omie_oportunidade_id?: number | null
           omie_fase_bruta?: string | null
           pedido_id?: string | null
+          previsao_fechamento?: string | null
+          contato_nome?: string | null
+          contato_cargo?: string | null
+          contato_email?: string | null
+          produto_servico?: string | null
+          concorrentes?: string | null
           criado_por?: string
           criado_em?: string
           ultima_movimentacao?: string
