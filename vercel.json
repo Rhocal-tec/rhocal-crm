@@ -1,1 +1,8 @@
-{}
+{
+  "crons": [
+    {
+      "path": "/api/cron/recompra-preditiva",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}
