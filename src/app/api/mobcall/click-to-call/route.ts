@@ -89,7 +89,8 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, chamada });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err) {
+    const mensagem = err instanceof Error ? err.message : "Erro desconhecido";
+    return NextResponse.json({ error: mensagem }, { status: 500 });
   }
 }
