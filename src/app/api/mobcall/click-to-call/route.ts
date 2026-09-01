@@ -10,7 +10,7 @@ const MOBCALL_API_URL = process.env.MOBCALL_API_URL!; // ex: https://api.mobcall
 const MOBCALL_API_KEY = process.env.MOBCALL_API_KEY!; // NUNCA hardcode — só via env
 
 const supabase = createClient(
-  process.env.SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 

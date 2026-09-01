@@ -14,7 +14,7 @@ const MOBCALL_API_KEY = process.env.MOBCALL_API_KEY!;
 const CRON_SECRET = process.env.CRON_SECRET!; // protege a rota de chamadas externas
 
 const supabase = createClient(
-  process.env.SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
