@@ -13,6 +13,9 @@ export function TarefaColuna({
   responsavelPorId,
   onConcluir,
   onIniciar,
+  onCancelar,
+  onReabrir,
+  onExcluir,
 }: {
   bucket: PrazoBucket
   tarefas: Tarefa[]
@@ -20,6 +23,9 @@ export function TarefaColuna({
   responsavelPorId: Record<string, string>
   onConcluir: (tarefa: Tarefa) => void
   onIniciar: (tarefa: Tarefa) => void
+  onCancelar: (tarefa: Tarefa) => void
+  onReabrir: (tarefa: Tarefa) => void
+  onExcluir: (tarefa: Tarefa) => void
 }) {
   const stripeVar = PRAZO_STRIPE_VAR[bucket]
 
@@ -50,6 +56,9 @@ export function TarefaColuna({
             atrasada={bucket === 'ATRASADAS'}
             onConcluir={onConcluir}
             onIniciar={onIniciar}
+            onCancelar={onCancelar}
+            onReabrir={onReabrir}
+            onExcluir={onExcluir}
           />
         ))}
         {tarefas.length === 0 && (

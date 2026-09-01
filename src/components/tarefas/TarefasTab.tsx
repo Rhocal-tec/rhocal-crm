@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatarDataHoraPrevista } from '@/lib/kanban/formatacao'
-import { badgeSituacao } from '@/lib/tarefas/situacao'
-import { TAREFA_TIPO_OPCOES, TAREFA_TIPOS_CONTATO } from '@/lib/tarefas/opcoes'
+import { badgeSituacao, situacaoTerminal } from '@/lib/tarefas/situacao'
+import { NOTIFICAR_EM_OPCOES, rotuloNotificarEm, TAREFA_TIPOS_CONTATO } from '@/lib/tarefas/opcoes'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
+import { TipoTarefaSelect } from './TipoTarefaSelect'
 import type { Database } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
@@ -35,6 +36,7 @@ export function TarefasTab({
   const [responsavel, setResponsavel] = useState('')
   const [dataPrevista, setDataPrevista] = useState('')
   const [tipo, setTipo] = useState('')
+  const [notificarEm, setNotificarEm] = useState('nao_notificar')
   const [importante, setImportante] = useState(false)
   const [urgente, setUrgente] = useState(false)
   const [salvando, setSalvando] = useState(false)
@@ -45,7 +47,11 @@ export function TarefasTab({
     setCarregando(true)
 
     async function carregar() {
-      const query = supabase.from('tarefas').select('*').order('criado_em', { ascending: true })
+      const query = supabase
+        .from('tarefas')
+        .select('*')
+        .eq('excluida', false)
+        .order('criado_em', { ascending: true })
       const { data } = oportunidadeId
         ? await query.eq('oportunidade_id', oportunidadeId)
         : await query.eq('pedido_id', pedidoId as string)
@@ -98,6 +104,7 @@ export function TarefasTab({
         responsavel: responsavel || null,
         data_prevista: dataPrevista || null,
         tipo: tipo || null,
+        notificar_em: notificarEm,
         importante,
         urgente,
         criado_por: user.id,
@@ -117,36 +124,48 @@ export function TarefasTab({
     setResponsavel('')
     setDataPrevista('')
     setTipo('')
+    setNotificarEm('nao_notificar')
     setImportante(false)
     setUrgente(false)
 
     if (data.oportunidade_id) sincronizarTarefaComOmie(data.id)
   }
 
-  async function alternarConcluida(tarefa: Tarefa) {
-    const concluidaAtual = tarefa.situacao === 'Realizada'
-    const novoValor = !concluidaAtual
-    const novaSituacao = novoValor ? 'Realizada' : 'Pendente'
-
+  async function alterarSituacao(tarefa: Tarefa, novaSituacao: string) {
+    const concluida = novaSituacao === 'Realizada'
     setTarefas((atual) =>
-      atual.map((t) => (t.id === tarefa.id ? { ...t, concluida: novoValor, situacao: novaSituacao } : t)),
+      atual.map((t) => (t.id === tarefa.id ? { ...t, situacao: novaSituacao, concluida } : t)),
     )
 
     const { error } = await supabase
       .from('tarefas')
-      .update({ concluida: novoValor, situacao: novaSituacao })
+      .update({ situacao: novaSituacao, concluida })
       .eq('id', tarefa.id)
 
     if (error) {
       setTarefas((atual) =>
         atual.map((t) =>
-          t.id === tarefa.id ? { ...t, concluida: tarefa.concluida, situacao: tarefa.situacao } : t,
+          t.id === tarefa.id ? { ...t, situacao: tarefa.situacao, concluida: tarefa.concluida } : t,
         ),
       )
       return
     }
 
     if (tarefa.oportunidade_id) sincronizarTarefaComOmie(tarefa.id)
+  }
+
+  async function excluirTarefa(tarefa: Tarefa) {
+    if (!window.confirm(`Excluir a tarefa "${tarefa.descricao}"? Ela some da lista mas não é apagada do banco.`)) {
+      return
+    }
+    setTarefas((atual) => atual.filter((t) => t.id !== tarefa.id))
+
+    const { error } = await supabase
+      .from('tarefas')
+      .update({ excluida: true, excluida_em: new Date().toISOString(), excluida_por: user?.id ?? null })
+      .eq('id', tarefa.id)
+
+    if (error) setTarefas((atual) => [...atual, tarefa])
   }
 
   if (carregando) {
@@ -208,20 +227,25 @@ export function TarefasTab({
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="block text-xs text-muted">Tipo (opcional)</label>
+            <TipoTarefaSelect value={tipo} onChange={setTipo} disabled={salvando} />
+          </div>
+          <div>
+            <label className="block text-xs text-muted">Lembrete</label>
             <select
-              value={tipo}
-              onChange={(e) => setTipo(e.target.value)}
+              value={notificarEm}
+              onChange={(e) => setNotificarEm(e.target.value)}
               className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
               disabled={salvando}
             >
-              <option value="">—</option>
-              {TAREFA_TIPO_OPCOES.map((opcao) => (
-                <option key={opcao} value={opcao}>
-                  {opcao}
+              {NOTIFICAR_EM_OPCOES.map((opcao) => (
+                <option key={opcao.valor} value={opcao.valor}>
+                  {opcao.label}
                 </option>
               ))}
             </select>
           </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
           <div className="flex items-end gap-3 pb-1.5">
             <label className="flex items-center gap-1.5 text-xs text-primary/80">
               <input
@@ -261,21 +285,25 @@ export function TarefasTab({
         )}
         {tarefas.map((tarefa) => {
           const concluida = tarefa.situacao === 'Realizada'
+          const terminal = situacaoTerminal(tarefa.situacao)
+          const notifica = tarefa.notificar_em && tarefa.notificar_em !== 'nao_notificar'
           return (
             <div
               key={tarefa.id}
               className={`flex items-start gap-3 rounded-md border p-2.5 ${
-                concluida ? 'border-white/5 bg-white/[0.02] opacity-60' : 'border-white/10 bg-surface'
+                terminal ? 'border-white/5 bg-white/[0.02] opacity-60' : 'border-white/10 bg-surface'
               }`}
             >
               <input
                 type="checkbox"
                 checked={concluida}
-                onChange={() => alternarConcluida(tarefa)}
+                onChange={() =>
+                  alterarSituacao(tarefa, tarefa.situacao === 'Realizada' ? 'Pendente' : 'Realizada')
+                }
                 className="mt-0.5 h-4 w-4 shrink-0 accent-accent-success"
               />
               <div className="flex-1">
-                <p className={`text-sm text-primary ${concluida ? 'line-through' : ''}`}>{tarefa.descricao}</p>
+                <p className={`text-sm text-primary ${terminal ? 'line-through' : ''}`}>{tarefa.descricao}</p>
                 <p className="mt-0.5 text-[11px] text-muted">
                   {nomeDoResponsavel(tarefa.responsavel)}
                   {tarefa.data_prevista &&
@@ -308,6 +336,38 @@ export function TarefasTab({
                       Urgente
                     </span>
                   )}
+                  {notifica && (
+                    <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-muted">
+                      🔔 {rotuloNotificarEm(tarefa.notificar_em)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted">
+                  {!terminal && (
+                    <button
+                      type="button"
+                      onClick={() => alterarSituacao(tarefa, 'Cancelada')}
+                      className="hover:text-accent-danger"
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                  {tarefa.situacao === 'Cancelada' && (
+                    <button
+                      type="button"
+                      onClick={() => alterarSituacao(tarefa, 'Pendente')}
+                      className="hover:text-primary"
+                    >
+                      Reabrir
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => excluirTarefa(tarefa)}
+                    className="ml-auto hover:text-accent-danger"
+                  >
+                    Excluir
+                  </button>
                 </div>
               </div>
             </div>

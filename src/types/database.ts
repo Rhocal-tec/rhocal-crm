@@ -30,9 +30,10 @@ export type OportunidadeStatus =
   | 'PERDIDO'
 
 // `situacao` é text livre no banco (mesmo padrão de AuditAcao). Fase 39
-// adicionou 'Em Execução' como terceiro estado (vindo do cEmExecucao do
-// ListarTarefas) — só 'Realizada' desvia o card para a coluna Concluídas.
-export type TarefaSituacao = 'Pendente' | 'Em Execução' | 'Realizada' | string
+// adicionou 'Em Execução' (vindo do cEmExecucao do ListarTarefas); fase 40
+// adicionou 'Cancelada'. Só 'Realizada' e 'Cancelada' são terminais (saem
+// das colunas por prazo do kanban).
+export type TarefaSituacao = 'Pendente' | 'Em Execução' | 'Realizada' | 'Cancelada' | string
 
 // Motor de Recompra Preditiva. `status` é text livre no banco (mesmo padrão
 // de TarefaSituacao/AuditAcao) — os quatro valores usados pela aplicação são
@@ -439,6 +440,10 @@ export interface Database {
           omie_tarefa_id: number | null
           empresa_id: string | null
           descricao_completa_omie: string | null
+          notificar_em: string
+          excluida: boolean
+          excluida_em: string | null
+          excluida_por: string | null
           criado_por: string
           criado_em: string
         }
@@ -458,6 +463,10 @@ export interface Database {
           omie_tarefa_id?: number | null
           empresa_id?: string | null
           descricao_completa_omie?: string | null
+          notificar_em?: string
+          excluida?: boolean
+          excluida_em?: string | null
+          excluida_por?: string | null
           criado_por: string
           criado_em?: string
         }
@@ -477,7 +486,32 @@ export interface Database {
           omie_tarefa_id?: number | null
           empresa_id?: string | null
           descricao_completa_omie?: string | null
+          notificar_em?: string
+          excluida?: boolean
+          excluida_em?: string | null
+          excluida_por?: string | null
           criado_por?: string
+          criado_em?: string
+        }
+        Relationships: []
+      }
+      tipos_tarefa: {
+        Row: {
+          id: string
+          nome: string
+          criado_por: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          nome: string
+          criado_por?: string | null
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          nome?: string
+          criado_por?: string | null
           criado_em?: string
         }
         Relationships: []

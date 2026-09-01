@@ -126,7 +126,10 @@ export async function POST(request: Request) {
           : '09:00',
       cImportante: tarefa.importante ? 'S' : 'N',
       cUrgente: tarefa.urgente ? 'S' : 'N',
-      cRealizada: tarefa.situacao === 'Realizada' ? 'S' : 'N',
+      // Fase 40: 'Cancelada' também marca cRealizada:'S' — o Omie CRM não tem
+      // conceito de "cancelada", então tirar da lista de pendentes lá é o
+      // comportamento mais próximo do esperado.
+      cRealizada: tarefa.situacao === 'Realizada' || tarefa.situacao === 'Cancelada' ? 'S' : 'N',
     }
 
     if (tarefa.omie_tarefa_id) {

@@ -1,7 +1,8 @@
 'use client'
 
 import { formatarDataHoraPrevista } from '@/lib/kanban/formatacao'
-import { badgeSituacao } from '@/lib/tarefas/situacao'
+import { badgeSituacao, situacaoTerminal } from '@/lib/tarefas/situacao'
+import { rotuloNotificarEm } from '@/lib/tarefas/opcoes'
 import type { Database } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
@@ -13,6 +14,9 @@ export function TarefaCard({
   atrasada,
   onConcluir,
   onIniciar,
+  onCancelar,
+  onReabrir,
+  onExcluir,
 }: {
   tarefa: Tarefa
   clienteLabel: string | null
@@ -20,22 +24,26 @@ export function TarefaCard({
   atrasada: boolean
   onConcluir: (tarefa: Tarefa) => void
   onIniciar: (tarefa: Tarefa) => void
+  onCancelar: (tarefa: Tarefa) => void
+  onReabrir: (tarefa: Tarefa) => void
+  onExcluir: (tarefa: Tarefa) => void
 }) {
-  const concluida = tarefa.situacao === 'Realizada'
+  const terminal = situacaoTerminal(tarefa.situacao)
   const badge = badgeSituacao(tarefa.situacao)
+  const notifica = tarefa.notificar_em && tarefa.notificar_em !== 'nao_notificar'
 
   return (
     <div
       className={`rounded-lg border p-3 shadow-sm transition-colors ${
         atrasada
           ? 'border-accent-danger/60 bg-accent-danger/10'
-          : concluida
+          : terminal
             ? 'border-white/5 bg-white/[0.02] opacity-70'
             : 'border-white/10 bg-surface'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className={`text-sm text-primary ${concluida ? 'line-through' : ''}`}>
+        <p className={`text-sm text-primary ${terminal ? 'line-through' : ''}`}>
           {tarefa.descricao}
         </p>
         {tarefa.urgente && (
@@ -72,6 +80,14 @@ export function TarefaCard({
             ★ Importante
           </span>
         )}
+        {notifica && (
+          <span
+            title={`Lembrete: ${rotuloNotificarEm(tarefa.notificar_em)}`}
+            className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-medium text-muted"
+          >
+            🔔 {rotuloNotificarEm(tarefa.notificar_em)}
+          </span>
+        )}
       </div>
 
       <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted">
@@ -83,7 +99,7 @@ export function TarefaCard({
         )}
       </div>
 
-      {!concluida && (
+      {!terminal && (
         <div className="mt-2.5 flex gap-2">
           {tarefa.situacao === 'Pendente' && (
             <button
@@ -101,6 +117,22 @@ export function TarefaCard({
           </button>
         </div>
       )}
+
+      <div className="mt-2 flex items-center gap-3 text-[11px] text-muted">
+        {!terminal && (
+          <button onClick={() => onCancelar(tarefa)} className="hover:text-accent-danger">
+            Cancelar
+          </button>
+        )}
+        {tarefa.situacao === 'Cancelada' && (
+          <button onClick={() => onReabrir(tarefa)} className="hover:text-primary">
+            Reabrir
+          </button>
+        )}
+        <button onClick={() => onExcluir(tarefa)} className="ml-auto hover:text-accent-danger">
+          Excluir
+        </button>
+      </div>
     </div>
   )
 }
