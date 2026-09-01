@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/recompra-preditiva",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/mobcall/sync",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

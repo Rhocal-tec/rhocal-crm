@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
-import { TAREFA_TIPO_OPCOES } from '@/lib/tarefas/opcoes'
+import { NOTIFICAR_EM_OPCOES } from '@/lib/tarefas/opcoes'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
+import { TipoTarefaSelect } from '@/components/tarefas/TipoTarefaSelect'
 import type { ClienteInteligencia } from '@/lib/inteligencia/agregar'
 import type { Database } from '@/types/database'
 
@@ -31,6 +32,7 @@ export function CriarTarefaClienteModal({
   const [responsavel, setResponsavel] = useState('')
   const [dataPrevista, setDataPrevista] = useState('')
   const [tipo, setTipo] = useState('')
+  const [notificarEm, setNotificarEm] = useState('nao_notificar')
   const [importante, setImportante] = useState(false)
   const [urgente, setUrgente] = useState(false)
   const [salvando, setSalvando] = useState(false)
@@ -43,6 +45,7 @@ export function CriarTarefaClienteModal({
     setResponsavel('')
     setDataPrevista('')
     setTipo('')
+    setNotificarEm('nao_notificar')
     setImportante(false)
     setUrgente(false)
     setErro(null)
@@ -82,6 +85,7 @@ export function CriarTarefaClienteModal({
         responsavel: responsavel || null,
         data_prevista: dataPrevista || null,
         tipo: tipo || null,
+        notificar_em: notificarEm,
         importante,
         urgente,
         criado_por: user.id,
@@ -160,20 +164,25 @@ export function CriarTarefaClienteModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-muted">Tipo (opcional)</label>
+              <TipoTarefaSelect value={tipo} onChange={setTipo} disabled={salvando} />
+            </div>
+            <div>
+              <label className="block text-xs text-muted">Lembrete</label>
               <select
-                value={tipo}
-                onChange={(e) => setTipo(e.target.value)}
+                value={notificarEm}
+                onChange={(e) => setNotificarEm(e.target.value)}
                 className="input-field mt-1 w-full rounded-md px-2.5 py-1.5 text-sm"
                 disabled={salvando}
               >
-                <option value="">—</option>
-                {TAREFA_TIPO_OPCOES.map((opcao) => (
-                  <option key={opcao} value={opcao}>
-                    {opcao}
+                {NOTIFICAR_EM_OPCOES.map((opcao) => (
+                  <option key={opcao.valor} value={opcao.valor}>
+                    {opcao.label}
                   </option>
                 ))}
               </select>
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div className="flex items-end gap-3 pb-1.5">
               <label className="flex items-center gap-1.5 text-xs text-primary/80">
                 <input

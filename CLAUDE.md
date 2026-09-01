@@ -1234,3 +1234,34 @@ Três campos novos da tarefa, todos vindos de campos que o próprio `ListarTaref
 
 - **Importação**: salvar `nCodAtividade` (código numérico opaco de atividade do Omie) como texto no campo `tarefas.tipo` já existente (ex: `"1"`) — só quando a tarefa importada não tiver um `tipo` derivado de outra fonte
 - **Exibição**: o `tipo` já aparece como badge no card e na aba Tarefas; garantir que aparece também no detalhe da aba Tarefas do modal quando preenchido
+
+## Fase 40 — Tarefas: tipos dinâmicos, status "Cancelada", lembrete e exclusão
+
+Migração ADITIVA sobre a tabela `tarefas` já existente (`supabase/migrations/0016_tarefas_fase40.sql`, rodada manualmente no SQL Editor antes do deploy). Não recria a tabela, não cria enums — `situacao`/`tipo` continuam text livre. **Não confundir com o schema alternativo colado no chat** (que criava `tarefas`/`usuarios`/`situacao_tarefa` enum do zero e conflitava com fases 31/33/39) — só os 4 itens abaixo foram aproveitados.
+
+### 40.1 — Tipos de tarefa dinâmicos
+
+- Nova tabela `tipos_tarefa (id, nome unique, criado_por, criado_em)`, RLS liberado para autenticados (leitura + escrita), seed com `Ligação/WhatsApp/E-mail/Reunião/Outro`
+- `tarefas.tipo` continua text e guarda o **nome** do tipo (não um FK) — mantém compatível com os códigos de atividade do Omie (fase 39.3) e dados antigos
+- Componente `TipoTarefaSelect` (`src/components/tarefas/TipoTarefaSelect.tsx`): select que carrega de `tipos_tarefa` + botão "+" inline para criar um tipo novo na hora. Usado em `TarefasTab` e `CriarTarefaClienteModal`. Se o valor atual não está na lista (ex: código do Omie), ele ainda aparece como opção selecionada
+
+### 40.2 — Status "Cancelada"
+
+- `situacao` ganha o valor `'Cancelada'` (text livre, sem enum). Valores de uso: `'Pendente' | 'Em Execução' | 'Realizada' | 'Cancelada'`
+- `classificarPrazo`: `'Realizada'` **e** `'Cancelada'` são terminais → vão para a coluna **Concluídas** (o badge distingue as duas). As colunas por prazo (Atrasadas/Hoje/Futuras) só recebem Pendente/Em Execução
+- `badgeSituacao` (fase 39): Cancelada = vermelho suave (`#E5484D`)
+- Card do kanban `/tarefas`: botão "Cancelar" (Pendente/Em Execução → Cancelada) e "Reabrir" (Cancelada → Pendente). `TarefasTab` tem os mesmos controles
+- Sincronização Omie: Cancelada envia `cRealizada: 'S'` junto com Realizada (some da lista de pendentes do Omie também)
+
+### 40.3 — Lembrete (`notificar_em`)
+
+- Nova coluna `tarefas.notificar_em` (text, default `'nao_notificar'`). Opções: `nao_notificar`, `no_horario`, `15_min_antes`, `30_min_antes`, `1_hora_antes`, `1_dia_antes` (`NOTIFICAR_EM_OPCOES` em `src/lib/tarefas/opcoes.ts`)
+- Select nos formulários de criação de tarefa (`TarefasTab`, `CriarTarefaClienteModal`); indicador 🔔 no card/lista quando `!= 'nao_notificar'`
+- **A entrega da notificação em si não existe** (Telegram/WhatsApp é backlog V2) — por ora a coluna só guarda a preferência para quando esse mecanismo for construído
+
+### 40.4 — Soft-delete (`excluida`)
+
+- Novas colunas `tarefas.excluida` (boolean, default false), `excluida_em` (timestamptz), `excluida_por` (uuid → profiles). Nenhuma policy de delete físico — segue a regra de ouro
+- Toda query de leitura de `tarefas` filtra `.eq('excluida', false)`: `TarefasBoard` (+ handlers de Realtime removem da tela quando `excluida` vira true), `TarefasTab`, `InteligenciaComercial`
+- Card e `TarefasTab`: botão "Excluir" (com `confirm()`), grava `excluida = true` + `excluida_em`/`excluida_por`
+- Importação do Omie (`importar-tarefas`): a deduplicação por `omie_tarefa_id` ignora o flag `excluida` de propósito — tarefa excluída à mão **não** ressuscita num reimport

@@ -39,6 +39,7 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
       .from('tarefas')
       .select('*')
       .eq('empresa_id', empresaAtiva.id)
+      .eq('excluida', false)
       .order('data_prevista', { ascending: true })
       .then(({ data, error }) => {
         if (!ativo) return
@@ -131,6 +132,10 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
         (payload) => {
           const atualizada = payload.new
           if (atualizada.empresa_id !== empresaId) return
+          if (atualizada.excluida) {
+            setTarefas((atual) => atual.filter((t) => t.id !== atualizada.id))
+            return
+          }
           setTarefas((atual) => {
             const existe = atual.some((t) => t.id === atualizada.id)
             if (!existe) return [...atual, atualizada]
@@ -194,13 +199,13 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
     setTarefaEncadeando(atualizada)
   }
 
-  async function iniciarTarefa(tarefa: Tarefa) {
-    const atualizada = { ...tarefa, situacao: 'Em Execução' }
+  async function alterarSituacao(tarefa: Tarefa, novaSituacao: string) {
+    const atualizada = { ...tarefa, situacao: novaSituacao }
     setTarefas((atual) => atual.map((t) => (t.id === tarefa.id ? atualizada : t)))
 
     const { error } = await supabase
       .from('tarefas')
-      .update({ situacao: 'Em Execução' })
+      .update({ situacao: novaSituacao })
       .eq('id', tarefa.id)
 
     if (error) {
@@ -209,6 +214,20 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
     }
 
     sincronizarTarefaComOmie(tarefa.id)
+  }
+
+  async function excluirTarefa(tarefa: Tarefa) {
+    if (!window.confirm(`Excluir a tarefa "${tarefa.descricao}"? Ela sai do quadro mas não é apagada do banco.`)) {
+      return
+    }
+    setTarefas((atual) => atual.filter((t) => t.id !== tarefa.id))
+
+    const { error } = await supabase
+      .from('tarefas')
+      .update({ excluida: true, excluida_em: new Date().toISOString(), excluida_por: user?.id ?? null })
+      .eq('id', tarefa.id)
+
+    if (error) setTarefas((atual) => [...atual, tarefa])
   }
 
   async function importarDoOmie() {
@@ -287,7 +306,10 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
             clienteLabelPorTarefa={clienteLabelPorTarefa}
             responsavelPorId={profilesPorId}
             onConcluir={concluirTarefa}
-            onIniciar={iniciarTarefa}
+            onIniciar={(t) => alterarSituacao(t, 'Em Execução')}
+            onCancelar={(t) => alterarSituacao(t, 'Cancelada')}
+            onReabrir={(t) => alterarSituacao(t, 'Pendente')}
+            onExcluir={excluirTarefa}
           />
         ))}
       </div>

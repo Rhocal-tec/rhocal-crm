@@ -129,7 +129,9 @@ export function InteligenciaComercial() {
                 supabase
                   .from('tarefas')
                   .select('id, oportunidade_id, pedido_id, descricao, data_prevista, situacao, responsavel')
-                  .neq('situacao', 'Realizada'),
+                  .eq('excluida', false)
+                  .neq('situacao', 'Realizada')
+                  .neq('situacao', 'Cancelada'),
                 supabase
                   .from('interacoes')
                   .select('id, oportunidade_id, pedido_id, tipo, resultado, criado_em'),
