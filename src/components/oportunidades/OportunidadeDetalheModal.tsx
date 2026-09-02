@@ -131,6 +131,14 @@ export function OportunidadeDetalheModal({
       open={oportunidadeId !== null}
       onClose={onClose}
       title={oportunidade ? `Oportunidade #${oportunidade.numero}` : 'Oportunidade'}
+      titleExtra={
+        oportunidade && (
+          <BotaoLigar
+            numeroDestino={oportunidade.cliente_telefone}
+            oportunidadeId={oportunidade.id}
+          />
+        )
+      }
       widthClassName="max-w-2xl"
     >
       {carregando || !oportunidade ? (
@@ -182,15 +190,9 @@ export function OportunidadeDetalheModal({
           {aba === 'dados' && (
             <div>
               <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                <div className="col-span-2">
+                <div>
                   <dt className="text-muted">Cliente</dt>
-                  <dd className="mt-0.5 flex flex-wrap items-center gap-3 font-medium text-primary">
-                    {oportunidade.cliente_nome}
-                    <BotaoLigar
-                      numeroDestino={oportunidade.cliente_telefone}
-                      oportunidadeId={oportunidade.id}
-                    />
-                  </dd>
+                  <dd className="font-medium text-primary">{oportunidade.cliente_nome}</dd>
                 </div>
                 <div>
                   <dt className="text-muted">Status</dt>
@@ -347,15 +349,6 @@ export function OportunidadeDetalheModal({
                 </dl>
               </div>
 
-              <div className="mt-5 border-t border-white/10 pt-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
-                  Histórico de chamadas
-                </h3>
-                <div className="mt-3">
-                  <HistoricoChamadas oportunidadeId={oportunidade.id} />
-                </div>
-              </div>
-
               <ConverterEmOrcamentoSection
                 oportunidade={oportunidade}
                 onAtualizada={setOportunidade}
@@ -372,7 +365,19 @@ export function OportunidadeDetalheModal({
             <TarefasTab oportunidadeId={oportunidade.id} empresaId={oportunidade.empresa_id} />
           )}
 
-          {aba === 'historico' && <HistoricoContatoTab oportunidadeId={oportunidade.id} />}
+          {aba === 'historico' && (
+            <div>
+              <HistoricoContatoTab oportunidadeId={oportunidade.id} />
+              <div className="mt-5 border-t border-white/10 pt-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  Histórico de chamadas
+                </h3>
+                <div className="mt-3">
+                  <HistoricoChamadas oportunidadeId={oportunidade.id} />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
