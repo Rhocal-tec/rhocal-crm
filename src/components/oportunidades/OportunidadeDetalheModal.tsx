@@ -7,7 +7,10 @@ import { MoedaInput } from '@/components/ui/MoedaInput'
 import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { TarefasTab } from '@/components/tarefas/TarefasTab'
+import { TarefaModal } from '@/components/tarefas/TarefaModal'
 import { HistoricoContatoTab } from '@/components/interacoes/HistoricoContatoTab'
+import BotaoLigar from '@/components/mobcall/BotaoLigar'
+import HistoricoChamadas from '@/components/mobcall/HistoricoChamadas'
 import { ConverterEmOrcamentoSection } from './ConverterEmOrcamentoSection'
 import { MarcarOportunidadePerdidaSection } from './MarcarOportunidadePerdidaSection'
 import type { Database, SetorTipo } from '@/types/database'
@@ -37,6 +40,7 @@ export function OportunidadeDetalheModal({
   const [aba, setAba] = useState<Aba>('dados')
   const [oportunidade, setOportunidade] = useState<Oportunidade | null>(null)
   const [carregando, setCarregando] = useState(false)
+  const [tarefaModalAberto, setTarefaModalAberto] = useState(false)
 
   // Fase 38: estado local dos campos editáveis inline (mesmo padrão de
   // input controlado + salvar no blur já usado no modal de Pedido).
@@ -133,7 +137,8 @@ export function OportunidadeDetalheModal({
         <div className="py-8 text-center text-sm text-muted">Carregando…</div>
       ) : (
         <div>
-          <div className="flex gap-5 border-b border-white/10">
+          <div className="flex items-center justify-between gap-3 border-b border-white/10">
+            <div className="flex gap-5">
             <button
               onClick={() => setAba('dados')}
               className={`border-b-2 px-1 pb-2 text-sm font-medium transition-colors ${
@@ -164,14 +169,28 @@ export function OportunidadeDetalheModal({
             >
               Histórico de contato
             </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTarefaModalAberto(true)}
+              className="mb-2 shrink-0 rounded-md bg-accent-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-primary-dark"
+            >
+              + Nova Tarefa
+            </button>
           </div>
 
           {aba === 'dados' && (
             <div>
               <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                <div>
+                <div className="col-span-2">
                   <dt className="text-muted">Cliente</dt>
-                  <dd className="font-medium text-primary">{oportunidade.cliente_nome}</dd>
+                  <dd className="mt-0.5 flex flex-wrap items-center gap-3 font-medium text-primary">
+                    {oportunidade.cliente_nome}
+                    <BotaoLigar
+                      numeroDestino={oportunidade.cliente_telefone}
+                      oportunidadeId={oportunidade.id}
+                    />
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-muted">Status</dt>
@@ -328,6 +347,15 @@ export function OportunidadeDetalheModal({
                 </dl>
               </div>
 
+              <div className="mt-5 border-t border-white/10 pt-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  Histórico de chamadas
+                </h3>
+                <div className="mt-3">
+                  <HistoricoChamadas oportunidadeId={oportunidade.id} />
+                </div>
+              </div>
+
               <ConverterEmOrcamentoSection
                 oportunidade={oportunidade}
                 onAtualizada={setOportunidade}
@@ -346,6 +374,14 @@ export function OportunidadeDetalheModal({
 
           {aba === 'historico' && <HistoricoContatoTab oportunidadeId={oportunidade.id} />}
         </div>
+      )}
+
+      {tarefaModalAberto && oportunidade && (
+        <TarefaModal
+          oportunidadeId={oportunidade.id}
+          empresaId={oportunidade.empresa_id}
+          onClose={() => setTarefaModalAberto(false)}
+        />
       )}
     </Modal>
   )

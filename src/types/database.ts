@@ -100,6 +100,7 @@ export interface Database {
           nome: string
           setor: SetorTipo
           vendedor_omie_id: string | null
+          ramal_mobcall: string | null
           criado_em: string
         }
         Insert: {
@@ -107,6 +108,7 @@ export interface Database {
           nome: string
           setor: SetorTipo
           vendedor_omie_id?: string | null
+          ramal_mobcall?: string | null
           criado_em?: string
         }
         Update: {
@@ -114,6 +116,7 @@ export interface Database {
           nome?: string
           setor?: SetorTipo
           vendedor_omie_id?: string | null
+          ramal_mobcall?: string | null
           criado_em?: string
         }
         Relationships: []
@@ -491,6 +494,57 @@ export interface Database {
           excluida_em?: string | null
           excluida_por?: string | null
           criado_por?: string
+          criado_em?: string
+        }
+        Relationships: []
+      }
+      chamadas: {
+        Row: {
+          id: string
+          mobcall_call_id: string | null
+          direcao: string
+          status: string
+          numero_origem: string | null
+          numero_destino: string | null
+          duracao_segundos: number | null
+          oportunidade_id: string | null
+          usuario_id: string | null
+          empresa_id: string | null
+          iniciada_em: string | null
+          finalizada_em: string | null
+          payload_bruto: Record<string, unknown> | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          mobcall_call_id?: string | null
+          direcao: string
+          status?: string
+          numero_origem?: string | null
+          numero_destino?: string | null
+          duracao_segundos?: number | null
+          oportunidade_id?: string | null
+          usuario_id?: string | null
+          empresa_id?: string | null
+          iniciada_em?: string | null
+          finalizada_em?: string | null
+          payload_bruto?: Record<string, unknown> | null
+          criado_em?: string
+        }
+        Update: {
+          id?: string
+          mobcall_call_id?: string | null
+          direcao?: string
+          status?: string
+          numero_origem?: string | null
+          numero_destino?: string | null
+          duracao_segundos?: number | null
+          oportunidade_id?: string | null
+          usuario_id?: string | null
+          empresa_id?: string | null
+          iniciada_em?: string | null
+          finalizada_em?: string | null
+          payload_bruto?: Record<string, unknown> | null
           criado_em?: string
         }
         Relationships: []
