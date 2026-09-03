@@ -17,6 +17,9 @@ import {
   type TemperaturaAutomatica,
 } from '@/lib/inteligencia/agregar'
 import { exportarClientesCsv } from '@/lib/inteligencia/csv'
+import { proximoDia } from '@/lib/kanban/filtro-data'
+import { calcularRangePeriodo, type PeriodoPreset, type RangePeriodo } from '@/lib/kanban/periodo'
+import { FiltroPeriodo } from '@/components/painel/FiltroPeriodo'
 import { FiltrosInteligencia, filtrosVazios, type FiltrosState } from './FiltrosInteligencia'
 import { TabelaInteligencia, type OrdemScore } from './TabelaInteligencia'
 import { FichaClienteModal } from './FichaClienteModal'
@@ -69,6 +72,31 @@ export function InteligenciaComercial() {
   const [clienteParaTarefa, setClienteParaTarefa] = useState<ClienteInteligencia | null>(null)
   const [modalCampanhaAberto, setModalCampanhaAberto] = useState(false)
 
+  // Filtro de período (mesmo componente/mecanismo do Painel executivo —
+  // src/app/painel/page.tsx). Restringe só a QUERY de oportunidades (criado_em)
+  // — nunca a de pedidos: recência/frequência/score do RFM (fase 35/36)
+  // dependem do histórico completo de pedidos efetuados do cliente, então
+  // pedidos sempre carregam sem esse filtro, período nenhum. Default fica em
+  // "Personalizado" com datas vazias (= sem filtro, range nulo) em vez de
+  // "Mês atual" como no Painel — essa tela já existia sem filtro de período
+  // (fase 35), então o padrão preserva o comportamento atual (histórico
+  // completo de oportunidades) até o usuário escolher restringir.
+  const [preset, setPreset] = useState<PeriodoPreset>('personalizado')
+  const [personalizadoDe, setPersonalizadoDe] = useState('')
+  const [personalizadoAte, setPersonalizadoAte] = useState('')
+  const [range, setRange] = useState<RangePeriodo>({ inicio: null, fim: null })
+
+  function selecionarPreset(novo: PeriodoPreset) {
+    setPreset(novo)
+    if (novo !== 'personalizado') {
+      setRange(calcularRangePeriodo(novo, { inicio: null, fim: null }))
+    }
+  }
+
+  function aplicarPersonalizado() {
+    setRange({ inicio: personalizadoDe || null, fim: personalizadoAte || null })
+  }
+
   useEffect(() => {
     if (!empresaAtiva) return
     let ativo = true
@@ -85,6 +113,18 @@ export function InteligenciaComercial() {
         const pedidos = (pedidosData ?? []) as PedidoBruto[]
         const idsPedidos = pedidos.map((p) => p.id)
 
+        // Só a query de oportunidades respeita o filtro de período — pedidos
+        // (base do RFM) carregam sempre o histórico completo, ver comentário
+        // do estado `range` acima.
+        let queryOportunidades = supabase
+          .from('oportunidades')
+          .select('id, numero, cliente_nome, cliente_cnpj, status, origem, temperatura, valor_estimado, criado_em, criado_por')
+          .eq('empresa_id', empresaAtiva!.id)
+        if (range.inicio) queryOportunidades = queryOportunidades.gte('criado_em', `${range.inicio}T00:00:00`)
+        if (range.fim) {
+          queryOportunidades = queryOportunidades.lt('criado_em', `${proximoDia(range.fim)}T00:00:00`)
+        }
+
         const [itensResp, auditoriaResp, oportunidadesResp, clientesResp, profilesResp] = await Promise.all([
           idsPedidos.length > 0
             ? supabase
@@ -100,10 +140,7 @@ export function InteligenciaComercial() {
                 .in('registro_id', idsPedidos)
                 .order('data_hora', { ascending: true })
             : Promise.resolve({ data: [], error: null }),
-          supabase
-            .from('oportunidades')
-            .select('id, numero, cliente_nome, cliente_cnpj, status, origem, temperatura, valor_estimado, criado_em, criado_por')
-            .eq('empresa_id', empresaAtiva!.id),
+          queryOportunidades,
           // `clientes` não é escopada por empresa (cadastro compartilhado
           // RHOCAL/MATSEG no Omie — fase 30/34): traz todo mundo, o
           // cruzamento com pedidos/oportunidades da empresa ativa é quem
@@ -180,7 +217,7 @@ export function InteligenciaComercial() {
     return () => {
       ativo = false
     }
-  }, [supabase, empresaAtiva])
+  }, [supabase, empresaAtiva, range])
 
   const opcoes = useMemo(() => {
     const temperaturasManuais = new Set<string>()
@@ -282,6 +319,25 @@ export function InteligenciaComercial() {
         Segmentação RFM da base de clientes — combine filtros e exporte pra campanhas de marketing.
         {empresaAtiva && <span className="text-primary/70"> Empresa ativa: {empresaAtiva.nome_fantasia}.</span>}
       </p>
+
+      <div className="mt-4">
+        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
+          Período (oportunidades criadas em)
+        </p>
+        <FiltroPeriodo
+          preset={preset}
+          onPresetChange={selecionarPreset}
+          personalizadoDe={personalizadoDe}
+          onPersonalizadoDeChange={setPersonalizadoDe}
+          personalizadoAte={personalizadoAte}
+          onPersonalizadoAteChange={setPersonalizadoAte}
+          onAplicarPersonalizado={aplicarPersonalizado}
+        />
+        <p className="mt-1.5 text-xs text-muted/70">
+          Restringe só as oportunidades (etapa, origem, valor estimado). Pedidos e o histórico de
+          RFM/score continuam completos, independente do período.
+        </p>
+      </div>
 
       {erro && <p className="mt-4 text-sm text-accent-danger">{erro}</p>}
 
