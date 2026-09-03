@@ -25,6 +25,7 @@ import { TabelaInteligencia, type OrdemScore } from './TabelaInteligencia'
 import { FichaClienteModal } from './FichaClienteModal'
 import { CardsResumoInteligencia } from './CardsResumoInteligencia'
 import { AlertasChurn } from './AlertasChurn'
+import SegmentacaoCampanhas from '@/components/inteligencia/SegmentacaoCampanhas'
 import { CriarTarefaClienteModal } from './CriarTarefaClienteModal'
 import { SalvarCampanhaModal } from './SalvarCampanhaModal'
 import { CampanhasTab } from './CampanhasTab'
@@ -344,6 +345,12 @@ export function InteligenciaComercial() {
       {!carregando && (
         <div className="mt-6">
           <AlertasChurn clientes={clientes} onCriarTarefa={setClienteParaTarefa} />
+        </div>
+      )}
+
+      {!carregando && (
+        <div className="mt-6">
+          <SegmentacaoCampanhas clientes={clientes} empresaId={empresaAtiva?.id ?? null} />
         </div>
       )}
 
