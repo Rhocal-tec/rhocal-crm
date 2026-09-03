@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { createClient } from '@/lib/supabase/client'
 import { AppHeader } from '@/components/layout/AppHeader'
+import ChamadasPorFuncionario from '@/components/painel/ChamadasPorFuncionario'
 import { ErrosRecentesSection } from '@/components/painel/ErrosRecentesSection'
 import { FiltroPeriodo } from '@/components/painel/FiltroPeriodo'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
@@ -624,6 +625,10 @@ export default function PainelPage() {
         </div>
 
         {oportCarregando && <p className="mt-4 text-sm text-muted">Atualizando dados…</p>}
+
+        <div className="mt-6">
+          <ChamadasPorFuncionario range={range} />
+        </div>
 
         <ErrosRecentesSection />
       </main>
