@@ -9,7 +9,6 @@ import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { TarefasTab } from '@/components/tarefas/TarefasTab'
 import { TarefaModal } from '@/components/tarefas/TarefaModal'
 import { HistoricoContatoTab } from '@/components/interacoes/HistoricoContatoTab'
-import BotaoLigar from '@/components/mobcall/BotaoLigar'
 import HistoricoChamadas from '@/components/mobcall/HistoricoChamadas'
 import { ConverterEmOrcamentoSection } from './ConverterEmOrcamentoSection'
 import { MarcarOportunidadePerdidaSection } from './MarcarOportunidadePerdidaSection'
@@ -131,14 +130,9 @@ export function OportunidadeDetalheModal({
       open={oportunidadeId !== null}
       onClose={onClose}
       title={oportunidade ? `Oportunidade #${oportunidade.numero}` : 'Oportunidade'}
-      titleExtra={
-        oportunidade && (
-          <BotaoLigar
-            numeroDestino={oportunidade.cliente_telefone}
-            oportunidadeId={oportunidade.id}
-          />
-        )
-      }
+      // BotaoLigar (click-to-call Mobcall) desativado até a integração ser
+      // contratada — componente mantido em src/components/mobcall/BotaoLigar.tsx,
+      // é só reativar passando titleExtra de volta quando chegar a hora.
       widthClassName="max-w-2xl"
     >
       {carregando || !oportunidade ? (
