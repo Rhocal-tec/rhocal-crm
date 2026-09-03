@@ -545,6 +545,10 @@ export default function PainelPage() {
           </div>
         </div>
 
+        <div className="mt-6">
+          <ChamadasPorFuncionario range={range} />
+        </div>
+
         {carregando && <p className="mt-4 text-sm text-muted">Atualizando dados…</p>}
 
         <h2 className="mt-10 font-heading text-xl font-semibold tracking-wide text-primary">
@@ -625,10 +629,6 @@ export default function PainelPage() {
         </div>
 
         {oportCarregando && <p className="mt-4 text-sm text-muted">Atualizando dados…</p>}
-
-        <div className="mt-6">
-          <ChamadasPorFuncionario range={range} />
-        </div>
 
         <ErrosRecentesSection />
       </main>
