@@ -182,6 +182,28 @@ async function sincronizarHistorico(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[sync] erro ao processar pedido ${codigo}, pulando: ${msg}`);
+
+      // Fase 25: além do console, grava em error_log pro gestor ver no Painel.
+      // Mesmas colunas usadas em route.ts / registrar-erro.ts (rota, mensagem,
+      // pedido_id, colaborador, data_hora). pedido_id fica null: o código aqui
+      // é o do pedido no Omie, não um uuid da nossa tabela pedidos (a FK
+      // rejeitaria) — vai embutido na mensagem. Melhor esforço: se o log
+      // falhar, não mascara o erro original (o pedido já foi pulado acima).
+      try {
+        await supabase.from("error_log").insert({
+          rota: "/api/cron/recompra-preditiva",
+          mensagem: `Falha ao processar pedido Omie ${codigo}: ${msg}`,
+          pedido_id: null,
+          colaborador: null,
+          data_hora: new Date().toISOString(),
+        });
+      } catch (logErr) {
+        console.error(
+          `[sync] erro ao gravar em error_log (pedido ${codigo}): ${
+            logErr instanceof Error ? logErr.message : String(logErr)
+          }`
+        );
+      }
     }
 
     processados++;
