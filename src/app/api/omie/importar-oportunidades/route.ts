@@ -1,11 +1,20 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { registrarErro } from '@/lib/omie/registrar-erro'
-import { chamarOmie, obterCredenciaisOmiePorSlug } from '@/lib/omie/chamar-omie'
+import { chamarOmie, obterCredenciaisOmiePorSlug, type CredenciaisOmie } from '@/lib/omie/chamar-omie'
+import type { OportunidadeStatus } from '@/types/database'
 
 // Nunca expor OMIE_APP_KEY_*/OMIE_APP_SECRET_* no client — só lidas aqui, server-side.
 const OMIE_CRM_OPORTUNIDADES_URL = 'https://app.omie.com.br/api/v1/crm/oportunidades/'
 const OMIE_CRM_CONTAS_URL = 'https://app.omie.com.br/api/v1/crm/contas/'
+// Endpoints não documentados no portal do Omie — confirmados ao vivo
+// (RHOCAL, 2026-09-08): resolvem os códigos opacos de fasesStatus
+// (nCodFase/nCodStatus/nCodMotivo) para os rótulos reais configurados na
+// conta ("01 Prospect".."06 Conclusão", "Ativo"/"Perdido"/"Conquistado"/...,
+// "Preço"/"Orçamento"/...).
+const OMIE_CRM_FASES_URL = 'https://app.omie.com.br/api/v1/crm/fases/'
+const OMIE_CRM_STATUS_URL = 'https://app.omie.com.br/api/v1/crm/status/'
+const OMIE_CRM_MOTIVOS_URL = 'https://app.omie.com.br/api/v1/crm/motivos/'
 
 // Só importa oportunidades cadastradas no Omie (outrasInf.dInclusao) nos
 // últimos N dias — evita trazer anos de histórico antigo a cada clique.
@@ -19,6 +28,71 @@ function paraDataOmie(data: string | null): Date | null {
   if (!match) return null
   const [, dia, mes, ano] = match
   return new Date(Number(ano), Number(mes) - 1, Number(dia))
+}
+
+// Busca uma tabela de referência do CRM Omie (fases/status/motivos) e monta
+// um mapa nCodigo -> rótulo. Os nCodigo são opacos e específicos da conta —
+// nunca hardcodados, sempre resolvidos ao vivo a cada importação.
+async function buscarTabelaReferencia(
+  url: string,
+  call: string,
+  campoDescricao: 'cDescrPadrao' | 'cDescricao',
+  credenciais: CredenciaisOmie,
+): Promise<Map<number, string>> {
+  const resultado = await chamarOmie(url, call, { pagina: 1, registros_por_pagina: 50 }, credenciais)
+  if (!Array.isArray(resultado.cadastros)) {
+    throw new Error(`Não foi possível carregar a tabela de referência do Omie (${call}).`)
+  }
+  const mapa = new Map<number, string>()
+  for (const item of resultado.cadastros as Record<string, unknown>[]) {
+    const codigo = item.nCodigo
+    const descricao = item[campoDescricao]
+    if (typeof codigo === 'number' && typeof descricao === 'string') {
+      mapa.set(codigo, descricao)
+    }
+  }
+  return mapa
+}
+
+// Mapeia a fase real do Omie (via nCodFase, resolvido pela tabela
+// crm/fases/) e, quando a fase é "Conclusão", o status do Omie (via
+// nCodStatus, resolvido pela tabela crm/status/) para o status do nosso
+// funil. Confirmado ao vivo: nCodFase sozinho NÃO garante que a oportunidade
+// foi de fato resolvida — existe caso real com fase "Conclusão" e status
+// "Ativo" — por isso GANHO/PERDIDO só são atribuídos quando o status também
+// confirma.
+function mapearParaStatusInterno(
+  descricaoFase: string,
+  descricaoStatusOmie: string,
+  descricaoMotivoOmie: string | null,
+): { statusInterno: OportunidadeStatus; motivoPerda: string | null } {
+  const fase = descricaoFase.toLowerCase()
+
+  if (fase.includes('prospect')) return { statusInterno: 'NOVO_LEAD', motivoPerda: null }
+  if (fase.includes('qualifica')) return { statusInterno: 'QUALIFICADO', motivoPerda: null }
+  if (fase.includes('apresenta') || fase.includes('proposta')) {
+    return { statusInterno: 'PROPOSTA', motivoPerda: null }
+  }
+  if (fase.includes('negocia')) return { statusInterno: 'EM_CONTATO', motivoPerda: null }
+
+  if (fase.includes('conclus')) {
+    const status = descricaoStatusOmie.toLowerCase()
+    if (status.includes('conquist')) return { statusInterno: 'GANHO', motivoPerda: null }
+    if (status.includes('perdid')) {
+      return { statusInterno: 'PERDIDO', motivoPerda: descricaoMotivoOmie }
+    }
+    // Ativo/Cancelado/Suspenso: fase "Conclusão" sem resultado confirmado.
+    // Como é uma importação nova (sem histórico local anterior), não dá pra
+    // "manter como estava antes" de forma literal — cai no último status
+    // ativo do nosso funil (EM_CONTATO) em vez de forçar um resultado que a
+    // própria Omie não confirmou.
+    return { statusInterno: 'EM_CONTATO', motivoPerda: null }
+  }
+
+  // Fase não reconhecida (nCodFase ausente, ou tabela crm/fases/ sem esse
+  // código) — cai no início do funil, mesmo comportamento de antes desta
+  // mudança.
+  return { statusInterno: 'NOVO_LEAD', motivoPerda: null }
 }
 
 export async function POST(request: Request) {
@@ -63,6 +137,15 @@ export async function POST(request: Request) {
 
   try {
     const credenciais = obterCredenciaisOmiePorSlug(empresaSlug)
+
+    // Tabelas de fase/status/motivo — uma busca por importação (não
+    // persistidas entre chamadas), já que os nCodigo são opacos e
+    // específicos da conta.
+    const [fasesPorCodigo, statusPorCodigo, motivosPorCodigo] = await Promise.all([
+      buscarTabelaReferencia(OMIE_CRM_FASES_URL, 'ListarFases', 'cDescrPadrao', credenciais),
+      buscarTabelaReferencia(OMIE_CRM_STATUS_URL, 'ListarStatus', 'cDescricao', credenciais),
+      buscarTabelaReferencia(OMIE_CRM_MOTIVOS_URL, 'ListarMotivos', 'cDescricao', credenciais),
+    ])
 
     // Formato confirmado ao vivo: o array vem em `cadastros`, teto real de
     // 100 registros por página mesmo pedindo mais.
@@ -148,6 +231,20 @@ export async function POST(request: Request) {
         const fasesStatus = (item.fasesStatus as Record<string, unknown>) ?? {}
         const outrasInf = (item.outrasInf as Record<string, unknown>) ?? {}
 
+        const nCodFase = typeof fasesStatus.nCodFase === 'number' ? fasesStatus.nCodFase : null
+        const nCodStatusOmie = typeof fasesStatus.nCodStatus === 'number' ? fasesStatus.nCodStatus : null
+        const nCodMotivoOmie = typeof fasesStatus.nCodMotivo === 'number' ? fasesStatus.nCodMotivo : null
+
+        const descricaoFase = nCodFase !== null ? (fasesPorCodigo.get(nCodFase) ?? '') : ''
+        const descricaoStatusOmie = nCodStatusOmie !== null ? (statusPorCodigo.get(nCodStatusOmie) ?? '') : ''
+        const descricaoMotivoOmie = nCodMotivoOmie !== null ? (motivosPorCodigo.get(nCodMotivoOmie) ?? null) : null
+
+        const { statusInterno, motivoPerda } = mapearParaStatusInterno(
+          descricaoFase,
+          descricaoStatusOmie,
+          descricaoMotivoOmie,
+        )
+
         return {
           omieId: typeof identificacao.nCodOp === 'number' ? identificacao.nCodOp : null,
           // nCodConta é o código da "Conta" no CRM do Omie (entidade própria,
@@ -156,15 +253,17 @@ export async function POST(request: Request) {
           // "CLIENTE LTDA - Solução 01 (1)"), não o nome limpo do cliente.
           contaId: typeof identificacao.nCodConta === 'number' ? identificacao.nCodConta : null,
           valorEstimado: typeof ticket.nTicket === 'number' ? ticket.nTicket : null,
-          // Códigos de fase/status/motivo são específicos da conta e opacos
-          // sem uma tradução ainda não investigada (ver fase 31 do
-          // CLAUDE.md) — guardados brutos, só para referência manual futura.
+          // Códigos brutos de fase/status/motivo, guardados só para
+          // referência manual — o mapeamento real já foi resolvido acima via
+          // as tabelas crm/fases/, crm/status/ e crm/motivos/.
           faseBruta: JSON.stringify({
             nCodFase: fasesStatus.nCodFase ?? null,
             nCodStatus: fasesStatus.nCodStatus ?? null,
             nCodMotivo: fasesStatus.nCodMotivo ?? null,
           }),
           dataInclusao: typeof outrasInf.dInclusao === 'string' ? outrasInf.dInclusao : null,
+          statusInterno,
+          motivoPerda,
         }
       })
       .filter((item): item is typeof item & { omieId: number } => item.omieId !== null)
@@ -258,8 +357,8 @@ export async function POST(request: Request) {
     }
 
     const { error: erroInsercao } = await supabase.from('oportunidades').insert(
-      // status não é informado — assume o default da coluna (NOVO_LEAD),
-      // independente da etapa em que a oportunidade esteja no Omie.
+      // status e motivo_perda vêm do mapeamento fase/status do Omie
+      // resolvido acima (mapearParaStatusInterno).
       novos.map((item) => {
         const conta = item.contaId !== null ? contaPorCodigo.get(item.contaId) : undefined
         return {
@@ -270,6 +369,8 @@ export async function POST(request: Request) {
           valor_estimado: item.valorEstimado,
           omie_oportunidade_id: item.omieId,
           omie_fase_bruta: item.faseBruta,
+          status: item.statusInterno,
+          motivo_perda: item.motivoPerda,
           criado_por: user.id,
         }
       }),
