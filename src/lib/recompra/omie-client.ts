@@ -30,6 +30,8 @@
 // 18.5/20/31/33 do CLAUDE.md pra endpoints não confirmados ao vivo.
 // ===============================================
 
+import { supabase } from "@/lib/recompra/supabase-client";
+
 const OMIE_APP_KEY = process.env.OMIE_APP_KEY_RHOCAL!;
 const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET_RHOCAL!;
 const OMIE_BASE_URL = "https://app.omie.com.br/api/v1";
@@ -46,6 +48,29 @@ const cache = new Map<string, CacheEntry<unknown>>();
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Fase 25: grava uma linha em error_log — mesmo padrão de colunas já usado em
+// route.ts e sync-recompra-preditiva.ts (rota, mensagem, pedido_id null,
+// colaborador null, data_hora). pedido_id fica null porque o código aqui é o
+// do pedido no Omie, não um uuid da nossa tabela pedidos. Melhor esforço: um
+// erro ao gravar o log nunca mascara o fluxo original.
+async function registrarErroLog(mensagem: string): Promise<void> {
+  try {
+    await supabase.from("error_log").insert({
+      rota: "/api/cron/recompra-preditiva",
+      mensagem,
+      pedido_id: null,
+      colaborador: null,
+      data_hora: new Date().toISOString(),
+    });
+  } catch (logErr) {
+    console.error(
+      `[omie-client] erro ao gravar em error_log: ${
+        logErr instanceof Error ? logErr.message : String(logErr)
+      }`
+    );
+  }
 }
 
 // Timeout de rede por chamada — sem isso, uma conexão que trava (DNS, TLS,
@@ -302,18 +327,30 @@ export async function consultarPedido(
   // derrubava o job inteiro em vez de só ser pulado.
   if (!resposta.infoCadastro) {
     console.warn("[omie] pedido sem infoCadastro, pulando:", codigoPedido);
+    await registrarErroLog(`Pedido Omie ${codigoPedido} sem infoCadastro, pulado`);
     return null;
   }
 
-  if (resposta.infoCadastro.cancelado === "S") return null;
+  if (resposta.infoCadastro.cancelado === "S") {
+    console.warn("[omie] pedido cancelado, pulando:", codigoPedido);
+    await registrarErroLog(`Pedido Omie ${codigoPedido} cancelado, pulado`);
+    return null;
+  }
 
   if (!resposta.det || resposta.det.length === 0) {
     console.warn("[omie] pedido sem itens (det), pulando:", codigoPedido);
+    await registrarErroLog(`Pedido Omie ${codigoPedido} sem campo det, pulado`);
     return null;
   }
 
   if (!resposta.informacoes_adicionais) {
+    // Não é um "return null" — o pedido segue e é gravado, só sem vendedor.
+    // Ainda assim registra em error_log pra o gestor ver que o dado veio
+    // incompleto do Omie.
     console.warn("[omie] pedido sem informacoes_adicionais, vendedor ficará vazio:", codigoPedido);
+    await registrarErroLog(
+      `Pedido Omie ${codigoPedido} sem informacoes_adicionais, gravado sem vendedor`
+    );
   }
 
   return {
