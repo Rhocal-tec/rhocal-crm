@@ -7,6 +7,9 @@
 // - ListarPedidos NÃO aceita filtro de data — só pagina/registros_por_pagina/apenas_importado_api
 // - ListarPedidos NÃO traz infoCadastro nem informacoes_adicionais (data real, vendedor)
 // - Só ConsultarPedido (1 pedido por vez) traz esses dados completos
+// - ConsultarPedido embrulha TUDO num objeto `pedido_venda_produto` — cabecalho/
+//   det/infoCadastro/... ficam DENTRO dele, não no topo (confirmado ao vivo
+//   set/2026; o tipo antigo lia no topo e pulava todo pedido como "sem infoCadastro")
 // - Data real do pedido = infoCadastro.dInc (não data_previsao, que é previsão de entrega)
 // - Vendedor = informacoes_adicionais.codVend (só o código — nome vem de ListarVendedores)
 // - Cliente = cabecalho.codigo_cliente (só o código — nome/CNPJ vem de ConsultarCliente,
@@ -266,7 +269,15 @@ export async function listarPaginaDePedidos(
   return { codigos, totalPaginas: resposta.total_de_paginas };
 }
 
-interface ConsultarPedidoResponse {
+// Confirmado ao vivo (teste isolado, set/2026) contra o pedido 9898723357:
+// o ConsultarPedido devolve TUDO embrulhado num objeto `pedido_venda_produto`
+// — { "pedido_venda_produto": { cabecalho, det, infoCadastro, ... } } — e NÃO
+// no topo, ao contrário do que a versão anterior deste tipo assumia. (O
+// ListarPedidos usa a mesma chave, mas como ARRAY; aqui é objeto único.)
+// Ler `resposta.infoCadastro` direto no topo dava sempre `undefined`, então
+// todo pedido caía no ramo "sem infoCadastro" e era pulado — o error_log
+// cheio desse aviso era falso positivo, não pedido em estado incomum.
+interface PedidoVendaProduto {
   cabecalho: { codigo_cliente: number; numero_pedido: string; codigo_pedido: number };
   det: Array<{
     produto: {
@@ -280,6 +291,10 @@ interface ConsultarPedidoResponse {
   }>;
   infoCadastro?: { dInc: string; cancelado: string };
   informacoes_adicionais?: { codVend: number };
+}
+
+interface ConsultarPedidoResponse {
+  pedido_venda_produto?: PedidoVendaProduto;
 }
 
 export async function consultarPedido(
@@ -297,30 +312,39 @@ export async function consultarPedido(
     inicioJob
   );
 
-  // Confirmado ao vivo (Vercel Function Logs): alguns pedidos voltam do
-  // ConsultarPedido sem infoCadastro/informacoes_adicionais/det preenchidos
-  // (motivo exato não confirmado — provavelmente pedido em algum estado
-  // incomum no Omie). Sem essas checagens, um único pedido nesse estado
-  // derrubava o job inteiro em vez de só ser pulado.
-  if (!resposta.infoCadastro) {
+  // Desembrulha o `pedido_venda_produto` (ver comentário no tipo acima) — sem
+  // isso, todas as checagens abaixo liam `undefined` e todo pedido era pulado.
+  const pvp = resposta.pedido_venda_produto;
+  if (!pvp) {
+    console.warn("[omie] ConsultarPedido sem pedido_venda_produto, pulando:", codigoPedido);
+    await registrarErroLog(
+      `Pedido Omie ${codigoPedido}: resposta do ConsultarPedido sem pedido_venda_produto, pulado`
+    );
+    return null;
+  }
+
+  // Alguns pedidos voltam sem infoCadastro/det/informacoes_adicionais
+  // preenchidos (pedido em estado incomum no Omie). Sem essas checagens, um
+  // único pedido nesse estado derrubava o job inteiro em vez de só ser pulado.
+  if (!pvp.infoCadastro) {
     console.warn("[omie] pedido sem infoCadastro, pulando:", codigoPedido);
     await registrarErroLog(`Pedido Omie ${codigoPedido} sem infoCadastro, pulado`);
     return null;
   }
 
-  if (resposta.infoCadastro.cancelado === "S") {
+  if (pvp.infoCadastro.cancelado === "S") {
     console.warn("[omie] pedido cancelado, pulando:", codigoPedido);
     await registrarErroLog(`Pedido Omie ${codigoPedido} cancelado, pulado`);
     return null;
   }
 
-  if (!resposta.det || resposta.det.length === 0) {
+  if (!pvp.det || pvp.det.length === 0) {
     console.warn("[omie] pedido sem itens (det), pulando:", codigoPedido);
     await registrarErroLog(`Pedido Omie ${codigoPedido} sem campo det, pulado`);
     return null;
   }
 
-  if (!resposta.informacoes_adicionais) {
+  if (!pvp.informacoes_adicionais) {
     // Não é um "return null" — o pedido segue e é gravado, só sem vendedor.
     // Ainda assim registra em error_log pra o gestor ver que o dado veio
     // incompleto do Omie.
@@ -331,12 +355,12 @@ export async function consultarPedido(
   }
 
   return {
-    numero_pedido: resposta.cabecalho.numero_pedido,
-    codigo_pedido_omie: String(resposta.cabecalho.codigo_pedido),
-    data_pedido: resposta.infoCadastro.dInc,
-    codigo_cliente_omie: String(resposta.cabecalho.codigo_cliente),
-    codigo_vendedor_omie: String(resposta.informacoes_adicionais?.codVend ?? ""),
-    itens: resposta.det.map((item) => ({
+    numero_pedido: pvp.cabecalho.numero_pedido,
+    codigo_pedido_omie: String(pvp.cabecalho.codigo_pedido),
+    data_pedido: pvp.infoCadastro.dInc,
+    codigo_cliente_omie: String(pvp.cabecalho.codigo_cliente),
+    codigo_vendedor_omie: String(pvp.informacoes_adicionais?.codVend ?? ""),
+    itens: pvp.det.map((item) => ({
       codigo_produto: String(item.produto.codigo_produto),
       descricao: item.produto.descricao,
       quantidade: item.produto.quantidade,
