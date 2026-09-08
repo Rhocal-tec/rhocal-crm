@@ -30,7 +30,7 @@
 // 18.5/20/31/33 do CLAUDE.md pra endpoints não confirmados ao vivo.
 // ===============================================
 
-import { supabase } from "@/lib/recompra/supabase-client";
+import { registrarErroLog } from "@/lib/recompra/registrar-erro-log";
 
 const OMIE_APP_KEY = process.env.OMIE_APP_KEY_RHOCAL!;
 const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET_RHOCAL!;
@@ -48,29 +48,6 @@ const cache = new Map<string, CacheEntry<unknown>>();
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Fase 25: grava uma linha em error_log — mesmo padrão de colunas já usado em
-// route.ts e sync-recompra-preditiva.ts (rota, mensagem, pedido_id null,
-// colaborador null, data_hora). pedido_id fica null porque o código aqui é o
-// do pedido no Omie, não um uuid da nossa tabela pedidos. Melhor esforço: um
-// erro ao gravar o log nunca mascara o fluxo original.
-async function registrarErroLog(mensagem: string): Promise<void> {
-  try {
-    await supabase.from("error_log").insert({
-      rota: "/api/cron/recompra-preditiva",
-      mensagem,
-      pedido_id: null,
-      colaborador: null,
-      data_hora: new Date().toISOString(),
-    });
-  } catch (logErr) {
-    console.error(
-      `[omie-client] erro ao gravar em error_log: ${
-        logErr instanceof Error ? logErr.message : String(logErr)
-      }`
-    );
-  }
 }
 
 // Timeout de rede por chamada — sem isso, uma conexão que trava (DNS, TLS,

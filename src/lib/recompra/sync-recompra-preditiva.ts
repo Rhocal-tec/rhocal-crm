@@ -23,6 +23,7 @@ import {
   resolverVendedor,
 } from "@/lib/recompra/omie-client";
 import { supabase } from "@/lib/recompra/supabase-client";
+import { registrarErroLog } from "@/lib/recompra/registrar-erro-log";
 import { calcularRecorrencia, Pedido } from "@/lib/recompra/calculo-recorrencia";
 import { calcularCoOcorrencia, ItemPedido } from "@/lib/recompra/calculo-cross-sell";
 import { cotacaoVencida } from "@/lib/kanban/cotacao-vencida";
@@ -177,6 +178,7 @@ async function sincronizarHistorico(
 
         if (upsertError) {
           console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
+          await registrarErroLog(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
         }
       } // pedido === null: cancelado ou campo ausente (omie-client.ts já loga o motivo), pula
     } catch (err) {
