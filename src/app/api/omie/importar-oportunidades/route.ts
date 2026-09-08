@@ -7,6 +7,20 @@ import { chamarOmie, obterCredenciaisOmiePorSlug } from '@/lib/omie/chamar-omie'
 const OMIE_CRM_OPORTUNIDADES_URL = 'https://app.omie.com.br/api/v1/crm/oportunidades/'
 const OMIE_CRM_CONTAS_URL = 'https://app.omie.com.br/api/v1/crm/contas/'
 
+// Só importa oportunidades cadastradas no Omie (outrasInf.dInclusao) nos
+// últimos N dias — evita trazer anos de histórico antigo a cada clique.
+const DIAS_LIMITE_IMPORTACAO = 30
+
+// Converte "DD/MM/AAAA" (formato Omie) para Date. Retorna null se o formato
+// vier diferente do esperado — tratado como "fora do prazo" (não importa).
+function paraDataOmie(data: string | null): Date | null {
+  if (!data) return null
+  const match = data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  if (!match) return null
+  const [, dia, mes, ano] = match
+  return new Date(Number(ano), Number(mes) - 1, Number(dia))
+}
+
 export async function POST(request: Request) {
   const supabase = createClient()
 
@@ -84,6 +98,7 @@ export async function POST(request: Request) {
         const identificacao = (item.identificacao as Record<string, unknown>) ?? {}
         const ticket = (item.ticket as Record<string, unknown>) ?? {}
         const fasesStatus = (item.fasesStatus as Record<string, unknown>) ?? {}
+        const outrasInf = (item.outrasInf as Record<string, unknown>) ?? {}
 
         return {
           omieId: typeof identificacao.nCodOp === 'number' ? identificacao.nCodOp : null,
@@ -101,12 +116,33 @@ export async function POST(request: Request) {
             nCodStatus: fasesStatus.nCodStatus ?? null,
             nCodMotivo: fasesStatus.nCodMotivo ?? null,
           }),
+          dataInclusao: typeof outrasInf.dInclusao === 'string' ? outrasInf.dInclusao : null,
         }
       })
       .filter((item): item is typeof item & { omieId: number } => item.omieId !== null)
 
     if (itens.length === 0) {
-      return NextResponse.json({ importadas: 0, ignoradas: 0 })
+      return NextResponse.json({ importadas: 0, ignoradas: 0, ignoradasPorData: 0 })
+    }
+
+    // Só traz oportunidades recentes (dInclusao dentro dos últimos
+    // DIAS_LIMITE_IMPORTACAO dias) — dInclusao ausente ou em formato
+    // inesperado é tratado como fora do prazo (não importa por segurança,
+    // já que não dá pra confirmar que está dentro da janela).
+    const limiteData = new Date()
+    limiteData.setDate(limiteData.getDate() - DIAS_LIMITE_IMPORTACAO)
+
+    const itensDentroDoPrazo = itens.filter((item) => {
+      const data = paraDataOmie(item.dataInclusao)
+      return data !== null && data >= limiteData
+    })
+
+    if (itensDentroDoPrazo.length === 0) {
+      return NextResponse.json({
+        importadas: 0,
+        ignoradas: 0,
+        ignoradasPorData: itens.length,
+      })
     }
 
     // Evita duplicar: só importa oportunidades cujo omie_oportunidade_id
@@ -117,14 +153,18 @@ export async function POST(request: Request) {
       .eq('empresa_id', empresa.id)
       .in(
         'omie_oportunidade_id',
-        itens.map((item) => item.omieId),
+        itensDentroDoPrazo.map((item) => item.omieId),
       )
 
     const idsExistentes = new Set((existentes ?? []).map((e) => e.omie_oportunidade_id))
-    const novos = itens.filter((item) => !idsExistentes.has(item.omieId))
+    const novos = itensDentroDoPrazo.filter((item) => !idsExistentes.has(item.omieId))
 
     if (novos.length === 0) {
-      return NextResponse.json({ importadas: 0, ignoradas: itens.length })
+      return NextResponse.json({
+        importadas: 0,
+        ignoradas: itensDentroDoPrazo.length,
+        ignoradasPorData: itens.length - itensDentroDoPrazo.length,
+      })
     }
 
     // Resolve cada cliente (nCodConta) uma única vez via ConsultarConta,
@@ -197,7 +237,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       importadas: novos.length,
-      ignoradas: itens.length - novos.length,
+      ignoradas: itensDentroDoPrazo.length - novos.length,
+      ignoradasPorData: itens.length - itensDentroDoPrazo.length,
     })
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : 'Erro desconhecido ao falar com o Omie.'

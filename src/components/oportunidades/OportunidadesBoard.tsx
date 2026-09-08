@@ -219,9 +219,14 @@ export function OportunidadesBoard({ setor }: { setor: SetorTipo }) {
         return
       }
 
+      const detalhes = [
+        dados.ignoradas > 0 ? `${dados.ignoradas} já existiam` : null,
+        dados.ignoradasPorData > 0 ? `${dados.ignoradasPorData} fora dos últimos 30 dias` : null,
+      ].filter(Boolean)
+
       setMensagemImportacao(
         `${dados.importadas} nova(s) oportunidade(s) importada(s) do Omie${
-          dados.ignoradas > 0 ? ` (${dados.ignoradas} já existiam)` : ''
+          detalhes.length > 0 ? ` (${detalhes.join(', ')})` : ''
         }.`,
       )
     } catch {
