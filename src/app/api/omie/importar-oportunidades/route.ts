@@ -64,36 +64,84 @@ export async function POST(request: Request) {
   try {
     const credenciais = obterCredenciaisOmiePorSlug(empresaSlug)
 
-    // Formato confirmado ao vivo: o array vem em `cadastros`. Nota: a API
-    // devolveu no máximo 100 registros por página mesmo pedindo 200
-    // (total_de_registros chegou a 2242 num teste) — paginação completa
-    // ainda não implementada, este botão importa só a primeira página a
-    // cada clique.
-    let resultado: Record<string, unknown>
-    try {
-      resultado = await chamarOmie(
-        OMIE_CRM_OPORTUNIDADES_URL,
-        'ListarOportunidades',
-        { pagina: 1, registros_por_pagina: 200, apenas_importado_api: 'N' },
-        credenciais,
-      )
-    } catch (err) {
-      const mensagem = err instanceof Error ? err.message : ''
-      if (mensagem.toLowerCase().includes('não existem registros')) {
-        return NextResponse.json({ importadas: 0, ignoradas: 0 })
+    // Formato confirmado ao vivo: o array vem em `cadastros`, teto real de
+    // 100 registros por página mesmo pedindo mais.
+    //
+    // `ordenar_por` só aceita 'CODIGO'/'DESCRICAO' (fault ao tentar
+    // 'dInclusao') — não existe ordenação direta por data. Porém
+    // `ordem_decrescente: 'S'` é aceito e inverte a ordem padrão (que sem
+    // ele trazia os registros MAIS ANTIGOS primeiro — dez/2023 num teste —
+    // por isso a importação nunca achava nada dentro do prazo). Com ele, a
+    // primeira página passa a trazer os mais recentes primeiro.
+    //
+    // Essa ordenação não é estritamente cronológica por dInclusao — parece
+    // seguir algum código/sequência interna que só geralmente acompanha a
+    // data (confirmado ao vivo: dentro da mesma página de 100 registros a
+    // data cai de forma decrescente, mas com saltos pontuais). Por isso a
+    // paginação nunca para no primeiro item fora do prazo, só quando uma
+    // página INTEIRA vier com zero registros dentro dos últimos
+    // DIAS_LIMITE_IMPORTACAO dias, ou ao atingir o limite de segurança.
+    const MAX_PAGINAS_IMPORTACAO = 10
+    const REGISTROS_POR_PAGINA = 100
+
+    const limiteData = new Date()
+    limiteData.setDate(limiteData.getDate() - DIAS_LIMITE_IMPORTACAO)
+
+    const cadastrosBrutos: Record<string, unknown>[] = []
+    for (let pagina = 1; pagina <= MAX_PAGINAS_IMPORTACAO; pagina++) {
+      let resultadoPagina: Record<string, unknown>
+      try {
+        resultadoPagina = await chamarOmie(
+          OMIE_CRM_OPORTUNIDADES_URL,
+          'ListarOportunidades',
+          {
+            pagina,
+            registros_por_pagina: REGISTROS_POR_PAGINA,
+            apenas_importado_api: 'N',
+            ordem_decrescente: 'S',
+          },
+          credenciais,
+        )
+      } catch (err) {
+        const mensagem = err instanceof Error ? err.message : ''
+        if (mensagem.toLowerCase().includes('não existem registros')) break
+        throw err
       }
-      throw err
+
+      if (!Array.isArray(resultadoPagina.cadastros)) {
+        throw new Error(
+          'Não foi possível interpretar a resposta do Omie (formato inesperado). Confirme os nomes dos campos com um teste ao vivo antes de tentar de novo.',
+        )
+      }
+
+      const cadastrosPagina = resultadoPagina.cadastros as Record<string, unknown>[]
+      if (cadastrosPagina.length === 0) break
+
+      cadastrosBrutos.push(...cadastrosPagina)
+
+      const algumDentroDoPrazoNaPagina = cadastrosPagina.some((item) => {
+        const outrasInf = (item.outrasInf as Record<string, unknown>) ?? {}
+        const data = paraDataOmie(
+          typeof outrasInf.dInclusao === 'string' ? outrasInf.dInclusao : null,
+        )
+        return data !== null && data >= limiteData
+      })
+      if (!algumDentroDoPrazoNaPagina) break
+
+      const totalPaginas =
+        typeof resultadoPagina.total_de_paginas === 'number'
+          ? resultadoPagina.total_de_paginas
+          : null
+      if (totalPaginas !== null && pagina >= totalPaginas) break
     }
 
-    if (!Array.isArray(resultado.cadastros)) {
-      throw new Error(
-        'Não foi possível interpretar a resposta do Omie (formato inesperado). Confirme os nomes dos campos com um teste ao vivo antes de tentar de novo.',
-      )
+    if (cadastrosBrutos.length === 0) {
+      return NextResponse.json({ importadas: 0, ignoradas: 0, ignoradasPorData: 0 })
     }
 
     // Cada item vem com os dados agrupados em sub-objetos (identificacao,
     // ticket, fasesStatus, ...) — nada solto na raiz do item.
-    const itens = (resultado.cadastros as Record<string, unknown>[])
+    const itens = cadastrosBrutos
       .map((item) => {
         const identificacao = (item.identificacao as Record<string, unknown>) ?? {}
         const ticket = (item.ticket as Record<string, unknown>) ?? {}
@@ -128,10 +176,8 @@ export async function POST(request: Request) {
     // Só traz oportunidades recentes (dInclusao dentro dos últimos
     // DIAS_LIMITE_IMPORTACAO dias) — dInclusao ausente ou em formato
     // inesperado é tratado como fora do prazo (não importa por segurança,
-    // já que não dá pra confirmar que está dentro da janela).
-    const limiteData = new Date()
-    limiteData.setDate(limiteData.getDate() - DIAS_LIMITE_IMPORTACAO)
-
+    // já que não dá pra confirmar que está dentro da janela). limiteData já
+    // foi calculado acima, antes do loop de páginas.
     const itensDentroDoPrazo = itens.filter((item) => {
       const data = paraDataOmie(item.dataInclusao)
       return data !== null && data >= limiteData
