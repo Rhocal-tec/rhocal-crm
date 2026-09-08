@@ -24,6 +24,7 @@ import {
 } from "@/lib/recompra/omie-client";
 import { supabase } from "@/lib/recompra/supabase-client";
 import { registrarErroLog } from "@/lib/recompra/registrar-erro-log";
+import { carregarPedidosPulados } from "@/lib/recompra/pedidos-pulados";
 import { calcularRecorrencia, Pedido } from "@/lib/recompra/calculo-recorrencia";
 import { calcularCoOcorrencia, ItemPedido } from "@/lib/recompra/calculo-cross-sell";
 import { cotacaoVencida } from "@/lib/kanban/cotacao-vencida";
@@ -115,8 +116,14 @@ async function sincronizarHistorico(
 
   if (error) throw new Error(`[sync] erro ao ler histórico existente: ${error.message}`);
 
-  const codigosJaSincronizados = new Set((existentes ?? []).map((l) => l.pedido_omie_id));
-  const novos = codigosDaPagina.filter((c) => !codigosJaSincronizados.has(String(c)));
+  // Dedup = já gravados COM sucesso + já vistos e pulados (cancelados etc.).
+  // Sem o segundo conjunto, os pulados voltavam pra `novos` a cada volta do
+  // cursor de página e eram re-consultados no Omie eternamente.
+  const pedidosPulados = await carregarPedidosPulados();
+  const codigosJaVistos = new Set(
+    (existentes ?? []).map((l) => String(l.pedido_omie_id)).concat(pedidosPulados)
+  );
+  const novos = codigosDaPagina.filter((c) => !codigosJaVistos.has(String(c)));
 
   const lote = novos.slice(0, LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO);
   let restantes = novos.length - lote.length;
@@ -180,7 +187,8 @@ async function sincronizarHistorico(
           console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
           await registrarErroLog(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
         }
-      } // pedido === null: cancelado ou campo ausente (omie-client.ts já loga o motivo), pula
+      } // pedido === null: cancelado ou campo ausente — omie-client.ts já loga
+        // o motivo E registra em recompra_pedidos_pulados (não volta pra `novos`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[sync] erro ao processar pedido ${codigo}, pulando: ${msg}`);

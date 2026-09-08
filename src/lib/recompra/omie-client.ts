@@ -34,6 +34,7 @@
 // ===============================================
 
 import { registrarErroLog } from "@/lib/recompra/registrar-erro-log";
+import { registrarPedidoPulado } from "@/lib/recompra/pedidos-pulados";
 
 const OMIE_APP_KEY = process.env.OMIE_APP_KEY_RHOCAL!;
 const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET_RHOCAL!;
@@ -320,6 +321,7 @@ export async function consultarPedido(
     await registrarErroLog(
       `Pedido Omie ${codigoPedido}: resposta do ConsultarPedido sem pedido_venda_produto, pulado`
     );
+    await registrarPedidoPulado(codigoPedido, "resposta sem pedido_venda_produto");
     return null;
   }
 
@@ -329,18 +331,21 @@ export async function consultarPedido(
   if (!pvp.infoCadastro) {
     console.warn("[omie] pedido sem infoCadastro, pulando:", codigoPedido);
     await registrarErroLog(`Pedido Omie ${codigoPedido} sem infoCadastro, pulado`);
+    await registrarPedidoPulado(codigoPedido, "sem infoCadastro");
     return null;
   }
 
   if (pvp.infoCadastro.cancelado === "S") {
     console.warn("[omie] pedido cancelado, pulando:", codigoPedido);
     await registrarErroLog(`Pedido Omie ${codigoPedido} cancelado, pulado`);
+    await registrarPedidoPulado(codigoPedido, "cancelado");
     return null;
   }
 
   if (!pvp.det || pvp.det.length === 0) {
     console.warn("[omie] pedido sem itens (det), pulando:", codigoPedido);
     await registrarErroLog(`Pedido Omie ${codigoPedido} sem campo det, pulado`);
+    await registrarPedidoPulado(codigoPedido, "sem itens (det)");
     return null;
   }
 
