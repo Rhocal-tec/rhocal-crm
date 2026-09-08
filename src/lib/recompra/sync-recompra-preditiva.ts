@@ -97,7 +97,10 @@ async function sincronizarHistorico(
 
   const inicioListagem = Date.now();
   console.log(`[sync] listando página ${paginaAtual} de pedidos no Omie...`);
-  const { codigos: codigosDaPagina, totalPaginas } = await listarPaginaDePedidos(paginaAtual);
+  const { codigos: codigosDaPagina, totalPaginas } = await listarPaginaDePedidos(
+    paginaAtual,
+    inicioJob
+  );
   console.log(
     `[sync] página ${paginaAtual}/${totalPaginas} — ${codigosDaPagina.length} pedidos (listagem levou ${Date.now() - inicioListagem}ms)`
   );
@@ -134,41 +137,52 @@ async function sincronizarHistorico(
       break;
     }
 
-    const pedido = await consultarPedido(codigo);
-    if (pedido) {
-      const { nome: clienteNome, cnpj: clienteCnpj } = await resolverCliente(
-        pedido.codigo_cliente_omie
-      );
-      const vendedorNome = await resolverVendedor(pedido.codigo_vendedor_omie);
+    // Cada pedido é isolado: um erro aqui (timeout do Omie que sobreviveu aos
+    // retries de chamarOmie, fault da API, cliente/vendedor que não resolve,
+    // falha de upsert que lance) não pode derrubar a execução inteira do job
+    // — loga com o código do pedido e segue pro próximo. O pedido pulado
+    // volta a ser tentado quando o cursor de página der a volta.
+    try {
+      const pedido = await consultarPedido(codigo, inicioJob);
+      if (pedido) {
+        const { nome: clienteNome, cnpj: clienteCnpj } = await resolverCliente(
+          pedido.codigo_cliente_omie,
+          inicioJob
+        );
+        const vendedorNome = await resolverVendedor(pedido.codigo_vendedor_omie, inicioJob);
 
-      const [dia, mes, ano] = pedido.data_pedido.split("/");
-      const dataPedidoISO = `${ano}-${mes}-${dia}`;
+        const [dia, mes, ano] = pedido.data_pedido.split("/");
+        const dataPedidoISO = `${ano}-${mes}-${dia}`;
 
-      const linhas = pedido.itens.map((item) => ({
-        cliente_omie_codigo: pedido.codigo_cliente_omie,
-        cliente_nome: clienteNome,
-        cliente_cnpj: clienteCnpj,
-        pedido_omie_id: pedido.codigo_pedido_omie,
-        pedido_numero: pedido.numero_pedido,
-        data_pedido: dataPedidoISO,
-        item_codigo: item.codigo_produto,
-        item_nome: item.descricao,
-        categoria: item.categoria,
-        quantidade: item.quantidade,
-        valor_unitario: item.valor_unitario,
-        valor_total: item.valor_total,
-        vendedor_omie_id: pedido.codigo_vendedor_omie,
-        vendedor_nome: vendedorNome,
-      }));
+        const linhas = pedido.itens.map((item) => ({
+          cliente_omie_codigo: pedido.codigo_cliente_omie,
+          cliente_nome: clienteNome,
+          cliente_cnpj: clienteCnpj,
+          pedido_omie_id: pedido.codigo_pedido_omie,
+          pedido_numero: pedido.numero_pedido,
+          data_pedido: dataPedidoISO,
+          item_codigo: item.codigo_produto,
+          item_nome: item.descricao,
+          categoria: item.categoria,
+          quantidade: item.quantidade,
+          valor_unitario: item.valor_unitario,
+          valor_total: item.valor_total,
+          vendedor_omie_id: pedido.codigo_vendedor_omie,
+          vendedor_nome: vendedorNome,
+        }));
 
-      const { error: upsertError } = await supabase
-        .from("pedidos_itens_historico")
-        .upsert(linhas, { onConflict: "pedido_omie_id,item_codigo" });
+        const { error: upsertError } = await supabase
+          .from("pedidos_itens_historico")
+          .upsert(linhas, { onConflict: "pedido_omie_id,item_codigo" });
 
-      if (upsertError) {
-        console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
-      }
-    } // pedido === null: cancelado ou campo ausente (omie-client.ts já loga o motivo), pula
+        if (upsertError) {
+          console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
+        }
+      } // pedido === null: cancelado ou campo ausente (omie-client.ts já loga o motivo), pula
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[sync] erro ao processar pedido ${codigo}, pulando: ${msg}`);
+    }
 
     processados++;
   }

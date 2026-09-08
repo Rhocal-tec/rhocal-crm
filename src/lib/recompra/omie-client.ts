@@ -53,13 +53,61 @@ function sleep(ms: number) {
 // e o erro que sobra pro catch da rota é genérico demais pra diagnosticar.
 // Com o AbortSignal, a falha vem rápida e com um nome de erro específico
 // (ex: TimeoutError) em vez de silenciosa.
-const TIMEOUT_REQUISICAO_MS = 20_000;
+//
+// 12s (reduzido de 20s): com maxDuration=60s na rota do cron, 20s era 1/3 do
+// orçamento inteiro numa única chamada — duas ou três chamadas travadas
+// seguidas matavam a function (FUNCTION_INVOCATION_TIMEOUT) antes do teto de
+// tempo interno (LIMITE_TEMPO_MS em sync-recompra-preditiva.ts) conseguir
+// agir. 12s deixa margem pra retry (abaixo) sem estourar.
+const TIMEOUT_REQUISICAO_MS = 12_000;
+
+// Retry automático só em cima de timeout de rede: um blip no Omie costuma
+// passar numa 2ª/3ª tentativa. São até MAX_TENTATIVAS no total (1 original +
+// 2 retries), com DELAY_ENTRE_TENTATIVAS_MS entre elas. Fault da API,
+// credencial ausente ou erro de parse NÃO são retentados — não melhoram
+// tentando de novo, e só gastariam tempo do orçamento da function.
+// Pior caso teórico: 3 × 12s + 2 × 1s = 38s numa única chamada — mas o gate
+// de tempo antes de cada retry (haMargemPraRetry) corta os retries bem antes
+// disso quando a execução da rota já está perto do maxDuration=60s, e o
+// try/catch por pedido em sincronizarHistorico impede que qualquer falha aqui
+// derrube a execução inteira.
+const MAX_TENTATIVAS = 3;
+const DELAY_ENTRE_TENTATIVAS_MS = 1_000;
+
+// maxDuration da rota do cron (route.ts: `export const maxDuration = 60`).
+// Usado só como referência pro gate de tempo antes de cada retry.
+const MAX_DURATION_ROTA_MS = 60_000;
+
+// Antes de gastar mais um ciclo de timeout (até 12s) + delay (1s) num retry,
+// o gate confere quanto tempo ainda resta dentro do maxDuration=60s da
+// function, contando a partir do início da execução da rota (inicioJob,
+// passado pelo orquestrador do job). Com menos de MARGEM_MINIMA_PRA_RETRY_MS
+// de folga, desiste do retry e propaga o erro agora — melhor falhar limpo
+// (só aquele pedido é pulado, retomado no próximo run) do que arriscar o
+// FUNCTION_INVOCATION_TIMEOUT, que mata a function sem resposta nenhuma.
+// Sem inicioJob (caller fora do cron), o gate fica desligado.
+const MARGEM_MINIMA_PRA_RETRY_MS = 15_000;
+
+function haMargemPraRetry(inicioJob?: number): boolean {
+  if (inicioJob === undefined) return true;
+  const restanteMs = MAX_DURATION_ROTA_MS - (Date.now() - inicioJob);
+  return restanteMs >= MARGEM_MINIMA_PRA_RETRY_MS;
+}
+
+function ehErroDeTimeout(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: string }).name === "TimeoutError"
+  );
+}
 
 async function chamarOmie<T>(
   endpoint: string,
   call: string,
   param: Record<string, unknown>,
-  delayMs: number = DELAY_ENTRE_REQUISICOES_MS
+  delayMs: number = DELAY_ENTRE_REQUISICOES_MS,
+  inicioJob?: number
 ): Promise<T> {
   await sleep(delayMs);
 
@@ -69,35 +117,71 @@ async function chamarOmie<T>(
     );
   }
 
-  let resp: Response;
-  try {
-    resp = await fetch(`${OMIE_BASE_URL}/${endpoint}/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // POST pra uma API externa nunca deve passar pelo Data Cache do
-      // Next.js — evita o comportamento observado em dev ("Failed to set
-      // fetch cache ... items over 2MB can not be cached") e qualquer
-      // interferência equivalente em produção.
-      cache: "no-store",
-      signal: AbortSignal.timeout(TIMEOUT_REQUISICAO_MS),
-      body: JSON.stringify({
-        call,
-        app_key: OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
-        param: [param],
-      }),
-    });
-  } catch (err) {
-    // Erro de rede (DNS, TLS, TCP connect, timeout do AbortSignal acima) —
-    // nunca chega a sair uma requisição "de verdade" nesses casos, por isso
-    // não aparece em "External APIs" nos logs da Vercel. Sem este catch, o
-    // erro original (nome/causa) se perde e só sobra um "fetch failed"
-    // genérico lá na rota.
-    const causa =
-      err instanceof Error
-        ? `${err.name}: ${err.message}${err.cause ? ` (cause: ${String(err.cause)})` : ""}`
-        : String(err);
-    throw new Error(`[omie-client] falha de rede ao chamar ${endpoint}/${call}: ${causa}`);
+  let resp: Response | undefined;
+
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+    try {
+      resp = await fetch(`${OMIE_BASE_URL}/${endpoint}/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // POST pra uma API externa nunca deve passar pelo Data Cache do
+        // Next.js — evita o comportamento observado em dev ("Failed to set
+        // fetch cache ... items over 2MB can not be cached") e qualquer
+        // interferência equivalente em produção.
+        cache: "no-store",
+        signal: AbortSignal.timeout(TIMEOUT_REQUISICAO_MS),
+        body: JSON.stringify({
+          call,
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [param],
+        }),
+      });
+      break;
+    } catch (err) {
+      // Timeout do AbortSignal acima: retenta enquanto ainda há tentativa
+      // sobrando E ainda há folga de tempo dentro do maxDuration da function.
+      // Nas demais falhas (DNS, TLS, TCP connect), na última tentativa, ou sem
+      // margem de tempo, cai direto no wrap abaixo.
+      const timeoutRetentavel = ehErroDeTimeout(err) && tentativa < MAX_TENTATIVAS;
+
+      if (timeoutRetentavel && haMargemPraRetry(inicioJob)) {
+        console.warn(
+          `[omie-client] timeout em ${endpoint}/${call} (tentativa ${tentativa}/${MAX_TENTATIVAS}) — novo retry em ${DELAY_ENTRE_TENTATIVAS_MS}ms`
+        );
+        await sleep(DELAY_ENTRE_TENTATIVAS_MS);
+        continue;
+      }
+
+      if (timeoutRetentavel) {
+        console.warn(
+          `[omie-client] timeout em ${endpoint}/${call} (tentativa ${tentativa}/${MAX_TENTATIVAS}) — sem margem segura de tempo dentro do maxDuration pra novo retry, propagando o erro`
+        );
+      }
+
+      // Erro de rede (DNS, TLS, TCP connect, timeout do AbortSignal acima) —
+      // nunca chega a sair uma requisição "de verdade" nesses casos, por isso
+      // não aparece em "External APIs" nos logs da Vercel. Sem este catch, o
+      // erro original (nome/causa) se perde e só sobra um "fetch failed"
+      // genérico lá na rota.
+      const causa =
+        err instanceof Error
+          ? `${err.name}: ${err.message}${err.cause ? ` (cause: ${String(err.cause)})` : ""}`
+          : String(err);
+      throw new Error(
+        `[omie-client] falha de rede ao chamar ${endpoint}/${call}${
+          tentativa > 1 ? ` (após ${tentativa} tentativas)` : ""
+        }: ${causa}`
+      );
+    }
+  }
+
+  // Inalcançável na prática (o loop ou retorna via break com resp definido, ou
+  // lança) — só mantém o narrowing de tipo feliz sem `!`.
+  if (!resp) {
+    throw new Error(
+      `[omie-client] sem resposta de ${endpoint}/${call} após ${MAX_TENTATIVAS} tentativas.`
+    );
   }
 
   const json = await resp.json();
@@ -113,14 +197,15 @@ async function chamarOmieComCache<T>(
   chave: string,
   endpoint: string,
   call: string,
-  param: Record<string, unknown>
+  param: Record<string, unknown>,
+  inicioJob?: number
 ): Promise<T> {
   const cacheado = cache.get(chave);
   if (cacheado && cacheado.expiraEm > Date.now()) {
     return cacheado.data as T;
   }
 
-  const resultado = await chamarOmie<T>(endpoint, call, param);
+  const resultado = await chamarOmie<T>(endpoint, call, param, DELAY_ENTRE_REQUISICOES_MS, inicioJob);
   cache.set(chave, { data: resultado, expiraEm: Date.now() + CACHE_TTL_MS });
   return resultado;
 }
@@ -158,7 +243,10 @@ export interface PaginaDePedidos {
 // sozinho o tempo de execução da function na Vercel. O cursor de qual
 // página buscar a seguir vive em sync_estado (ver CHAVE_PAGINA_CURSOR_SYNC
 // em sync-recompra-preditiva.ts), não aqui.
-export async function listarPaginaDePedidos(pagina: number): Promise<PaginaDePedidos> {
+export async function listarPaginaDePedidos(
+  pagina: number,
+  inicioJob?: number
+): Promise<PaginaDePedidos> {
   const resposta = await chamarOmie<ListarPedidosResponse>(
     "produtos/pedido",
     "ListarPedidos",
@@ -166,7 +254,9 @@ export async function listarPaginaDePedidos(pagina: number): Promise<PaginaDePed
       pagina,
       registros_por_pagina: 50,
       apenas_importado_api: "N",
-    }
+    },
+    DELAY_ENTRE_REQUISICOES_MS,
+    inicioJob
   );
 
   const codigos = (resposta.pedido_venda_produto ?? []).map((p) => p.cabecalho.codigo_pedido);
@@ -190,7 +280,10 @@ interface ConsultarPedidoResponse {
   informacoes_adicionais?: { codVend: number };
 }
 
-export async function consultarPedido(codigoPedido: number): Promise<OmiePedido | null> {
+export async function consultarPedido(
+  codigoPedido: number,
+  inicioJob?: number
+): Promise<OmiePedido | null> {
   // Delay reduzido (50ms em vez do padrão 150ms) — chamada de detalhe feita
   // uma vez por pedido novo, dentro do teto já apertado de maxDuration da
   // rota de cron; dá mais margem pra processar mais pedidos por execução.
@@ -198,7 +291,8 @@ export async function consultarPedido(codigoPedido: number): Promise<OmiePedido 
     "produtos/pedido",
     "ConsultarPedido",
     { codigo_pedido: codigoPedido },
-    50
+    50,
+    inicioJob
   );
 
   // Confirmado ao vivo (Vercel Function Logs): alguns pedidos voltam do
@@ -246,13 +340,15 @@ interface ConsultarClienteResponse {
 }
 
 export async function resolverCliente(
-  codigoCliente: string
+  codigoCliente: string,
+  inicioJob?: number
 ): Promise<{ nome: string; cnpj: string }> {
   const resposta = await chamarOmieComCache<ConsultarClienteResponse>(
     `cliente:${codigoCliente}`,
     "geral/clientes",
     "ConsultarCliente",
-    { codigo_cliente_omie: Number(codigoCliente) }
+    { codigo_cliente_omie: Number(codigoCliente) },
+    inicioJob
   );
 
   return {
@@ -268,12 +364,17 @@ interface ListarVendedoresResponse {
 let mapaVendedoresCache: Map<string, string> | null = null;
 let mapaVendedoresExpiraEm = 0;
 
-export async function resolverVendedor(codigoVendedor: string): Promise<string> {
+export async function resolverVendedor(
+  codigoVendedor: string,
+  inicioJob?: number
+): Promise<string> {
   if (!mapaVendedoresCache || mapaVendedoresExpiraEm < Date.now()) {
     const resposta = await chamarOmie<ListarVendedoresResponse>(
       "geral/vendedores",
       "ListarVendedores",
-      { pagina: 1, registros_por_pagina: 200 }
+      { pagina: 1, registros_por_pagina: 200 },
+      DELAY_ENTRE_REQUISICOES_MS,
+      inicioJob
     );
 
     mapaVendedoresCache = new Map(
