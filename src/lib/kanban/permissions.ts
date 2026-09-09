@@ -3,7 +3,11 @@
 import type { PedidoStatus, SetorTipo } from '@/types/database'
 
 const DESTINOS_PERMITIDOS: Record<SetorTipo, PedidoStatus[] | 'TODAS'> = {
-  comercial: ['APROVADO_CLIENTE', 'ARQUIVADO'],
+  // Comercial move livremente entre as colunas "dele", exceto EM_COTACAO
+  // (território ativo do Compras + trava somente-leitura da fase 29 tranca o
+  // comercial fora do próprio card) e PEDIDO_EFETUADO (afirmação factual que
+  // só o Compras faz; alimenta conversão/recompra; quase-terminal).
+  comercial: ['PEDIDO', 'PEDIDO_COTADO', 'APROVADO_CLIENTE', 'ARQUIVADO'],
   compras: ['EM_COTACAO', 'PEDIDO_COTADO', 'PEDIDO_EFETUADO'],
   gestor: 'TODAS',
 }
