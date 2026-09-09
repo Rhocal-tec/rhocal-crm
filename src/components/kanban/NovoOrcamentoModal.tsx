@@ -718,7 +718,11 @@ export function NovoOrcamentoModal({
         cliente_cnpj: cnpj.trim() || null,
         // Orçamento direto pula PEDIDO e as etapas de cotação — o comercial já
         // define o preço na hora, sem depender do custo liberado por compras.
-        status: orcamentoDireto ? 'APROVADO_CLIENTE' : undefined,
+        // Nasce em PEDIDO_COTADO (não APROVADO_CLIENTE): o cliente ainda pode
+        // não aceitar o orçamento. A aprovação vira um passo manual do
+        // comercial (arrastar pra APROVADO_CLIENTE), que é o que libera o
+        // "Converter em Pedido de Venda".
+        status: orcamentoDireto ? 'PEDIDO_COTADO' : undefined,
         orcamento_direto: orcamentoDireto,
         criado_por: user.id,
         empresa_id: empresaAtiva.id,
@@ -777,8 +781,9 @@ export function NovoOrcamentoModal({
               Orçamento direto (sem cotação do Compras)
             </span>
             <span className="mt-0.5 block text-xs text-muted">
-              O pedido nasce direto em PEDIDO APROVADO, com o preço de venda definido agora por
-              item — pula ORÇAMENTO e as etapas de cotação.
+              O pedido nasce direto em ORÇAMENTO COTADO, com o preço de venda definido agora por
+              item — pula ORÇAMENTO e as etapas de cotação. A aprovação do cliente continua sendo
+              um passo manual.
             </span>
           </span>
         </label>
