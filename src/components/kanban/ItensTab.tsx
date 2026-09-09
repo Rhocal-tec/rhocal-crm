@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { MoedaInput } from '@/components/ui/MoedaInput'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
@@ -11,6 +11,17 @@ type PedidoItem = Database['public']['Tables']['pedido_itens']['Row']
 
 type CampoTexto = 'tamanho' | 'numero' | 'cor' | 'observacao'
 type StatusCodigoOmie = 'idle' | 'buscando' | 'encontrado' | 'nao_encontrado' | 'erro'
+
+// Autocomplete de descrição (busca de produto no Omie por nome) — mesmo mínimo
+// e debounce do campo Fornecedor (fase 18.1).
+const MIN_CARACTERES_BUSCA_PRODUTO = 3
+const DEBOUNCE_BUSCA_PRODUTO_MS = 400
+
+interface ProdutoOmie {
+  codigoProduto: number
+  codigo: string
+  descricao: string
+}
 
 interface SpecForm {
   descricao: string
@@ -63,6 +74,21 @@ export function ItensTab({
       ),
   )
 
+  // Autocomplete de descrição — estado por item, mesmo padrão do "Fornecedor"
+  // na aba Cotações (fase 18.1).
+  const [sugestoesProdutoPorItem, setSugestoesProdutoPorItem] = useState<
+    Record<string, ProdutoOmie[]>
+  >({})
+  const [buscandoProdutoPorItem, setBuscandoProdutoPorItem] = useState<Record<string, boolean>>({})
+  const [dropdownProdutoAbertoPorItem, setDropdownProdutoAbertoPorItem] = useState<
+    Record<string, boolean>
+  >({})
+  const debounceProdutoRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  // Marca que a descrição acabou de ser preenchida por uma seleção do dropdown
+  // — o onBlur que dispara logo em seguida não deve refazer nada (e ainda
+  // viria com o texto digitado antigo em e.target.value).
+  const selecaoProdutoRef = useRef<Record<string, boolean>>({})
+
   // Comercial e gestor veem custo final e editam o preço de venda; compras
   // não (já vê o custo real na aba Cotações). Fase 29: durante EM_COTACAO o
   // comercial fica sem acesso a nada disso também (somenteLeitura).
@@ -104,15 +130,103 @@ export function ItensTab({
   }
 
   async function salvarDescricao(item: PedidoItem, valorStr: string) {
+    // A seleção pelo dropdown já persistiu descrição + vínculo; o onBlur que
+    // dispara em seguida não deve refazer nada.
+    if (selecaoProdutoRef.current[item.id]) {
+      selecaoProdutoRef.current[item.id] = false
+      return
+    }
+
     const valor = valorStr.trim()
     if (!valor || valor === item.descricao) return
 
+    // Descrição editada à mão desvincula do produto Omie anterior — o vínculo
+    // volta só ao escolher algo do autocomplete ou digitar o código certo de
+    // novo ("último que tocou vence", fase 18.2).
+    const desvincular = item.codigo_produto_omie !== null
+
     const { error } = await supabase
       .from('pedido_itens')
-      .update({ descricao: valor })
+      .update(desvincular ? { descricao: valor, codigo_produto_omie: null } : { descricao: valor })
       .eq('id', item.id)
 
-    if (!error) onItemAtualizado({ ...item, descricao: valor })
+    if (error) return
+
+    onItemAtualizado(
+      desvincular
+        ? { ...item, descricao: valor, codigo_produto_omie: null }
+        : { ...item, descricao: valor },
+    )
+    if (desvincular) {
+      setStatusCodigoPorItem((atual) => ({ ...atual, [item.id]: 'idle' }))
+      setCodigoPorItem((atual) => ({ ...atual, [item.id]: '' }))
+    }
+  }
+
+  async function buscarProdutos(item: PedidoItem, termo: string) {
+    setBuscandoProdutoPorItem((atual) => ({ ...atual, [item.id]: true }))
+    try {
+      const resposta = await fetch('/api/omie/buscar-produtos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descricao: termo, pedidoId: item.pedido_id }),
+      })
+      const dados = await resposta.json().catch(() => null)
+      const produtos: ProdutoOmie[] =
+        resposta.ok && dados && Array.isArray(dados.produtos) ? dados.produtos : []
+      setSugestoesProdutoPorItem((atual) => ({ ...atual, [item.id]: produtos }))
+    } finally {
+      setBuscandoProdutoPorItem((atual) => ({ ...atual, [item.id]: false }))
+    }
+  }
+
+  // onChange da descrição: atualiza o texto, abre o dropdown e reagenda a busca
+  // (debounce) — não chama a API a cada tecla.
+  function atualizarDescricao(item: PedidoItem, valor: string) {
+    atualizarSpecCampo(item.id, 'descricao', valor)
+    setDropdownProdutoAbertoPorItem((atual) => ({ ...atual, [item.id]: true }))
+
+    if (debounceProdutoRef.current[item.id]) clearTimeout(debounceProdutoRef.current[item.id])
+
+    const termo = valor.trim()
+    if (termo.length < MIN_CARACTERES_BUSCA_PRODUTO) {
+      setSugestoesProdutoPorItem((atual) => ({ ...atual, [item.id]: [] }))
+      return
+    }
+
+    debounceProdutoRef.current[item.id] = setTimeout(
+      () => buscarProdutos(item, termo),
+      DEBOUNCE_BUSCA_PRODUTO_MS,
+    )
+  }
+
+  async function selecionarProduto(item: PedidoItem, produto: ProdutoOmie) {
+    selecaoProdutoRef.current[item.id] = true
+    if (debounceProdutoRef.current[item.id]) clearTimeout(debounceProdutoRef.current[item.id])
+
+    const { error } = await supabase
+      .from('pedido_itens')
+      .update({ descricao: produto.descricao, codigo_produto_omie: produto.codigoProduto })
+      .eq('id', item.id)
+
+    if (error) {
+      setStatusCodigoPorItem((atual) => ({ ...atual, [item.id]: 'erro' }))
+      return
+    }
+
+    onItemAtualizado({
+      ...item,
+      descricao: produto.descricao,
+      codigo_produto_omie: produto.codigoProduto,
+    })
+    setSpecPorItem((atual) => ({
+      ...atual,
+      [item.id]: { ...spec(item.id), descricao: produto.descricao },
+    }))
+    setCodigoPorItem((atual) => ({ ...atual, [item.id]: produto.codigo }))
+    setStatusCodigoPorItem((atual) => ({ ...atual, [item.id]: 'encontrado' }))
+    setSugestoesProdutoPorItem((atual) => ({ ...atual, [item.id]: [] }))
+    setDropdownProdutoAbertoPorItem((atual) => ({ ...atual, [item.id]: false }))
   }
 
   async function alternarEmEstoque(item: PedidoItem, valor: boolean) {
@@ -271,13 +385,54 @@ export function ItensTab({
                   {somenteLeitura ? (
                     <p className="mt-1 text-sm text-primary">{itemSpec.descricao}</p>
                   ) : (
-                    <input
-                      type="text"
-                      value={itemSpec.descricao}
-                      onChange={(e) => atualizarSpecCampo(item.id, 'descricao', e.target.value)}
-                      onBlur={(e) => salvarDescricao(item, e.target.value)}
-                      className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-                    />
+                    <div className="relative mt-1">
+                      <input
+                        type="text"
+                        value={itemSpec.descricao}
+                        onChange={(e) => atualizarDescricao(item, e.target.value)}
+                        onFocus={() =>
+                          setDropdownProdutoAbertoPorItem((atual) => ({ ...atual, [item.id]: true }))
+                        }
+                        onBlur={(e) => {
+                          salvarDescricao(item, e.target.value)
+                          setTimeout(
+                            () =>
+                              setDropdownProdutoAbertoPorItem((atual) => ({
+                                ...atual,
+                                [item.id]: false,
+                              })),
+                            150,
+                          )
+                        }}
+                        autoComplete="off"
+                        className="input-field w-full rounded-md px-2 py-1.5 pr-7 text-sm"
+                      />
+                      {buscandoProdutoPorItem[item.id] && (
+                        <span
+                          aria-hidden="true"
+                          className="absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin rounded-full border-2 border-white/20 border-t-accent-primary"
+                        />
+                      )}
+                      {dropdownProdutoAbertoPorItem[item.id] &&
+                        (sugestoesProdutoPorItem[item.id]?.length ?? 0) > 0 && (
+                          <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-white/10 bg-surface-alt py-1 shadow-lg">
+                            {sugestoesProdutoPorItem[item.id].map((produto) => (
+                              <li key={produto.codigoProduto}>
+                                <button
+                                  type="button"
+                                  onMouseDown={() => selecionarProduto(item, produto)}
+                                  className="block w-full truncate px-3 py-1.5 text-left text-sm text-primary hover:bg-white/10"
+                                >
+                                  {produto.descricao}
+                                  <span className="ml-1.5 font-mono text-xs text-muted">
+                                    ({produto.codigo})
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                    </div>
                   )}
                 </div>
               </div>

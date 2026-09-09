@@ -15,6 +15,16 @@ type StatusCodigoOmie = 'idle' | 'buscando' | 'encontrado' | 'nao_encontrado' | 
 const MIN_CARACTERES_BUSCA_CLIENTE = 3
 const DEBOUNCE_BUSCA_CLIENTE_MS = 400
 
+// Autocomplete de descrição de produto — mesmo mínimo/debounce do de cliente.
+const MIN_CARACTERES_BUSCA_PRODUTO = 3
+const DEBOUNCE_BUSCA_PRODUTO_MS = 400
+
+interface ProdutoOmieSugestao {
+  codigoProduto: number
+  codigo: string
+  descricao: string
+}
+
 interface ClienteOmieSugestao {
   codigoClienteOmie: number
   razaoSocial: string
@@ -95,6 +105,9 @@ interface ItemForm {
   observacao: string
   precoVenda: string
   emEstoque: boolean
+  sugestoesProduto: ProdutoOmieSugestao[]
+  buscandoProduto: boolean
+  dropdownProdutoAberto: boolean
 }
 
 function itemVazio(): ItemForm {
@@ -111,6 +124,9 @@ function itemVazio(): ItemForm {
     observacao: '',
     precoVenda: '',
     emEstoque: false,
+    sugestoesProduto: [],
+    buscandoProduto: false,
+    dropdownProdutoAberto: false,
   }
 }
 
@@ -134,6 +150,8 @@ export function NovoOrcamentoModal({
   const [dropdownClienteAberto, setDropdownClienteAberto] = useState(false)
   // Timer de debounce não entra no estado — não deve disparar re-render.
   const debounceClienteRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Um timer por item (chave = índice), mesmo motivo.
+  const debounceProdutoRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
   const [clienteTelefone, setClienteTelefone] = useState('')
   const [clienteContato, setClienteContato] = useState('')
   const [dadosReceita, setDadosReceita] = useState<DadosReceitaCadastro | null>(null)
@@ -164,6 +182,8 @@ export function NovoOrcamentoModal({
     setBuscandoCliente(false)
     setDropdownClienteAberto(false)
     if (debounceClienteRef.current) clearTimeout(debounceClienteRef.current)
+    Object.values(debounceProdutoRef.current).forEach(clearTimeout)
+    debounceProdutoRef.current = {}
     setClienteTelefone('')
     setClienteContato('')
     setDadosReceita(null)
@@ -466,6 +486,82 @@ export function NovoOrcamentoModal({
   function alternarEmEstoque(index: number, valor: boolean) {
     setItens((atual) =>
       atual.map((item, i) => (i === index ? { ...item, emEstoque: valor } : item)),
+    )
+  }
+
+  async function buscarProdutos(index: number, termo: string) {
+    setItens((atual) =>
+      atual.map((item, i) => (i === index ? { ...item, buscandoProduto: true } : item)),
+    )
+    try {
+      const resposta = await fetch('/api/omie/buscar-produtos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descricao: termo, empresaSlug: empresaAtiva?.slug }),
+      })
+      const dados = await resposta.json().catch(() => null)
+      const produtos: ProdutoOmieSugestao[] =
+        resposta.ok && dados && Array.isArray(dados.produtos) ? dados.produtos : []
+      setItens((atual) =>
+        atual.map((item, i) => (i === index ? { ...item, sugestoesProduto: produtos } : item)),
+      )
+    } finally {
+      setItens((atual) =>
+        atual.map((item, i) => (i === index ? { ...item, buscandoProduto: false } : item)),
+      )
+    }
+  }
+
+  // onChange da descrição: atualiza o texto, invalida o vínculo por código
+  // anterior ("último que tocou vence", fase 18.2), abre o dropdown e reagenda
+  // a busca (debounce).
+  function atualizarDescricao(index: number, valor: string) {
+    setItens((atual) =>
+      atual.map((item, i) =>
+        i === index
+          ? {
+              ...item,
+              descricao: valor,
+              codigoProdutoOmie: null,
+              statusCodigo: item.statusCodigo === 'encontrado' ? 'idle' : item.statusCodigo,
+              dropdownProdutoAberto: true,
+            }
+          : item,
+      ),
+    )
+
+    if (debounceProdutoRef.current[index]) clearTimeout(debounceProdutoRef.current[index])
+
+    const termo = valor.trim()
+    if (termo.length < MIN_CARACTERES_BUSCA_PRODUTO) {
+      setItens((atual) =>
+        atual.map((item, i) => (i === index ? { ...item, sugestoesProduto: [] } : item)),
+      )
+      return
+    }
+
+    debounceProdutoRef.current[index] = setTimeout(
+      () => buscarProdutos(index, termo),
+      DEBOUNCE_BUSCA_PRODUTO_MS,
+    )
+  }
+
+  function selecionarProduto(index: number, produto: ProdutoOmieSugestao) {
+    if (debounceProdutoRef.current[index]) clearTimeout(debounceProdutoRef.current[index])
+    setItens((atual) =>
+      atual.map((item, i) =>
+        i === index
+          ? {
+              ...item,
+              descricao: produto.descricao,
+              codigo: produto.codigo,
+              codigoProdutoOmie: produto.codigoProduto,
+              statusCodigo: 'encontrado',
+              sugestoesProduto: [],
+              dropdownProdutoAberto: false,
+            }
+          : item,
+      ),
     )
   }
 
@@ -1026,15 +1122,58 @@ export function NovoOrcamentoModal({
                     </div>
                     <div className="min-w-[220px] flex-[2]">
                       <label className="block text-xs text-muted">Descrição *</label>
-                      <input
-                        type="text"
-                        value={item.descricao}
-                        onChange={(e) =>
-                          atualizarItem(index, 'descricao', e.target.value)
-                        }
-                        className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-                        disabled={salvando}
-                      />
+                      <div className="relative mt-1">
+                        <input
+                          type="text"
+                          value={item.descricao}
+                          onChange={(e) => atualizarDescricao(index, e.target.value)}
+                          onFocus={() =>
+                            setItens((atual) =>
+                              atual.map((it, i) =>
+                                i === index ? { ...it, dropdownProdutoAberto: true } : it,
+                              ),
+                            )
+                          }
+                          onBlur={() =>
+                            setTimeout(
+                              () =>
+                                setItens((atual) =>
+                                  atual.map((it, i) =>
+                                    i === index ? { ...it, dropdownProdutoAberto: false } : it,
+                                  ),
+                                ),
+                              150,
+                            )
+                          }
+                          autoComplete="off"
+                          className="input-field w-full rounded-md px-2 py-1.5 pr-7 text-sm"
+                          disabled={salvando}
+                        />
+                        {item.buscandoProduto && (
+                          <span
+                            aria-hidden="true"
+                            className="absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin rounded-full border-2 border-white/20 border-t-accent-primary"
+                          />
+                        )}
+                        {item.dropdownProdutoAberto && item.sugestoesProduto.length > 0 && (
+                          <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-white/10 bg-surface-alt py-1 shadow-lg">
+                            {item.sugestoesProduto.map((produto) => (
+                              <li key={produto.codigoProduto}>
+                                <button
+                                  type="button"
+                                  onMouseDown={() => selecionarProduto(index, produto)}
+                                  className="block w-full truncate px-3 py-1.5 text-left text-sm text-primary hover:bg-white/10"
+                                >
+                                  {produto.descricao}
+                                  <span className="ml-1.5 font-mono text-xs text-muted">
+                                    ({produto.codigo})
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
                     </div>
                     <div className="min-w-[80px] flex-1">
                       <label className="block text-xs text-muted">Qtd. *</label>
