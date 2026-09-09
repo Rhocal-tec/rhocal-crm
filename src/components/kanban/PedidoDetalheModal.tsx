@@ -613,7 +613,6 @@ export function PedidoDetalheModal({
             <ItensTab
               itens={itens}
               setor={setor}
-              orcamentoDireto={pedido.orcamento_direto}
               somenteLeitura={somenteLeituraComercial}
               onItemAtualizado={handleItemAtualizado}
             />

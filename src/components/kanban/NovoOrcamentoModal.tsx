@@ -565,15 +565,13 @@ export function NovoOrcamentoModal({
       return
     }
 
-    // Preço de venda é preenchível na criação tanto no orçamento direto
-    // (todos os itens, obrigatório) quanto por item marcado como em estoque
-    // (opcional — o item não depende de custo vindo de cotação, ver fase 26).
+    // Preço de venda é preenchível na criação para qualquer item, a qualquer
+    // momento — obrigatório só no orçamento direto (validado abaixo). Sem
+    // depender de custo vindo de cotação nem da marcação de estoque.
     const itensValidos = itens.map((item) => {
       const precoVendaDigitado = item.precoVenda.trim() === '' ? null : Number(item.precoVenda)
       const precoVenda =
-        (orcamentoDireto || item.emEstoque) &&
-        precoVendaDigitado !== null &&
-        Number.isFinite(precoVendaDigitado)
+        precoVendaDigitado !== null && Number.isFinite(precoVendaDigitado)
           ? precoVendaDigitado
           : null
 
@@ -1062,22 +1060,20 @@ export function NovoOrcamentoModal({
                         disabled={salvando}
                       />
                     </div>
-                    {(orcamentoDireto || item.emEstoque) && (
-                      <div className="min-w-[120px] flex-1">
-                        <label className="block text-xs text-accent-compras">
-                          Preço de venda{orcamentoDireto ? ' *' : ''}
-                        </label>
-                        <input
-                          type="number"
-                          min="0.01"
-                          step="any"
-                          value={item.precoVenda}
-                          onChange={(e) => atualizarItem(index, 'precoVenda', e.target.value)}
-                          className="input-field mt-1 w-full rounded-md border-accent-compras/40 px-2 py-1.5 font-mono text-sm"
-                          disabled={salvando}
-                        />
-                      </div>
-                    )}
+                    <div className="min-w-[120px] flex-1">
+                      <label className="block text-xs text-accent-compras">
+                        Preço de venda{orcamentoDireto ? ' *' : ' (opcional)'}
+                      </label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="any"
+                        value={item.precoVenda}
+                        onChange={(e) => atualizarItem(index, 'precoVenda', e.target.value)}
+                        className="input-field mt-1 w-full rounded-md border-accent-compras/40 px-2 py-1.5 font-mono text-sm"
+                        disabled={salvando}
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-2">

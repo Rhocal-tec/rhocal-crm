@@ -33,13 +33,11 @@ function specVazio(item: PedidoItem): SpecForm {
 export function ItensTab({
   itens,
   setor,
-  orcamentoDireto,
   somenteLeitura = false,
   onItemAtualizado,
 }: {
   itens: PedidoItem[]
   setor: SetorTipo
-  orcamentoDireto: boolean
   somenteLeitura?: boolean
   onItemAtualizado: (item: PedidoItem) => void
 }) {
@@ -73,13 +71,6 @@ export function ItensTab({
   // não os enxerga em lugar nenhum do sistema, nem edita a marcação.
   const podeMarcarEmEstoque = setor !== 'compras' && !somenteLeitura
   const itensVisiveis = setor === 'compras' ? itens.filter((item) => !item.em_estoque) : itens
-
-  // Preço de venda só é preenchível sem custo_final quando o item está em
-  // estoque (não passa por cotação) ou o pedido inteiro é orçamento direto
-  // (fase 19). Fora isso, o item ainda depende do custo liberado por Compras.
-  function podeEditarPrecoVenda(item: PedidoItem): boolean {
-    return orcamentoDireto || item.em_estoque || item.custo_final !== null
-  }
 
   function precoVendaAtual(itemId: string): string {
     return precoVendaPorItem[itemId] ?? ''
@@ -383,30 +374,26 @@ export function ItensTab({
                     {formatarMoeda(item.custo_final)}
                   </span>
                 </div>
-                {podeEditarPrecoVenda(item) ? (
-                  <label className="flex items-center gap-2">
-                    <span className="text-xs text-muted">Preço de venda:</span>
-                    <MoedaInput
-                      value={precoVendaAtual(item.id)}
-                      onChange={(valor) =>
-                        setPrecoVendaPorItem((atual) => ({ ...atual, [item.id]: valor }))
-                      }
-                      onBlurSalvar={(valor) => salvarPrecoVenda(item, valor)}
-                      className="input-field w-28 rounded-md px-2 py-1 font-mono text-sm font-medium"
-                      style={estiloCorMargem(corMargem)}
+                <label className="flex items-center gap-2">
+                  <span className="text-xs text-muted">Preço de venda:</span>
+                  <MoedaInput
+                    value={precoVendaAtual(item.id)}
+                    onChange={(valor) =>
+                      setPrecoVendaPorItem((atual) => ({ ...atual, [item.id]: valor }))
+                    }
+                    onBlurSalvar={(valor) => salvarPrecoVenda(item, valor)}
+                    className="input-field w-28 rounded-md px-2 py-1 font-mono text-sm font-medium"
+                    style={estiloCorMargem(corMargem)}
+                  />
+                  {corMargem && (
+                    <span
+                      aria-hidden="true"
+                      title="Indicador de margem"
+                      className="h-3.5 w-3.5 shrink-0 rounded-full border border-white/40"
+                      style={{ backgroundColor: corMargem }}
                     />
-                    {corMargem && (
-                      <span
-                        aria-hidden="true"
-                        title="Indicador de margem"
-                        className="h-3.5 w-3.5 shrink-0 rounded-full border border-white/40"
-                        style={{ backgroundColor: corMargem }}
-                      />
-                    )}
-                  </label>
-                ) : (
-                  <span className="text-xs text-muted">Aguardando cotação</span>
-                )}
+                  )}
+                </label>
               </div>
             )}
           </div>
