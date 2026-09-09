@@ -70,10 +70,42 @@ export function PedidoDetalheModal({
     0,
   )
 
-  function handleItemAtualizado(itemAtualizado: PedidoItem) {
+  async function handleItemAtualizado(itemAtualizado: PedidoItem) {
+    // Updater funcional: preserva o acúmulo quando o onItemAtualizado é
+    // chamado várias vezes seguidas antes do re-render (ex: vínculo de
+    // produtos do Omie item a item).
     setItens((atual) =>
       atual.map((item) => (item.id === itemAtualizado.id ? itemAtualizado : item)),
     )
+
+    const itensMerged = itens.map((item) =>
+      item.id === itemAtualizado.id ? itemAtualizado : item,
+    )
+
+    // Transição automática: quando TODOS os itens de um pedido ainda em PEDIDO
+    // (Orçamento) passam a ter preço de venda, o card avança sozinho para
+    // PEDIDO_COTADO (Orçamento Cotado). Só dispara a partir de PEDIDO — nunca
+    // de EM_COTACAO (comercial é somente-leitura lá) nem de status
+    // posteriores. Sem trava de "só uma vez": se o pedido voltar para PEDIDO e
+    // for reprecificado, dispara de novo. Itens "em estoque" contam
+    // normalmente. `movido_por` fica com quem preencheu o preço (trigger
+    // fn_pedido_movimentado); o KanbanBoard reflete via Realtime.
+    if (
+      pedido &&
+      pedido.status === 'PEDIDO' &&
+      itensMerged.length > 0 &&
+      itensMerged.every((item) => Number(item.preco_venda) > 0)
+    ) {
+      const { error } = await supabase
+        .from('pedidos')
+        .update({ status: 'PEDIDO_COTADO' })
+        .eq('id', pedido.id)
+
+      if (!error) {
+        setPedido({ ...pedido, status: 'PEDIDO_COTADO' })
+        setMensagemSucesso(`Pedido movido automaticamente para ${STATUS_LABELS.PEDIDO_COTADO}`)
+      }
+    }
   }
 
   useEffect(() => {
