@@ -37,6 +37,34 @@ import { cotacaoVencida } from "@/lib/kanban/cotacao-vencida";
 // de pedidos leva algumas semanas — proposital: confiabilidade > velocidade.
 const LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO = 5;
 
+// Teto separado, mais alto, pro job da janela recente (/api/cron/recompra-recente).
+// O backfill completo lê 1 página de ~150 e o resto do orçamento de tempo é
+// gasto varrendo páginas ao longo dos dias — aqui a janela de 45 dias tem só
+// 1-2 páginas, então sobra tempo pra processar mais detalhe por execução.
+//
+// Cálculo do número seguro (maxDuration=60s, teto interno LIMITE_TEMPO_MS=45s):
+//   Custo por pedido novo:
+//     - consultarPedido:  50ms de sleep + 1 chamada Omie (p50 ~0,4s; cap 12s)
+//     - resolverCliente:  150ms de sleep + 1 chamada Omie só com cache frio
+//                         (p50 ~0,4s; cap 12s); ~0 quando quente
+//     - resolverVendedor: 1 chamada só no 1º pedido da execução (mapa fica em
+//                         cache por 12h); ~0 nos demais
+//     - upsert histórico: ~0,2-0,4s
+//     ⇒ ~1,2s típico · ~2,5s com rede lenta · ~25s patológico (tudo timeout)
+//   Custo fixo por execução (uma vez, fora do loop):
+//     - select em pedidos_itens_historico + carregarPedidosPulados: ~0,5-1s
+//     - listar 1-2 páginas do ListarPedidos com filtro de data: ~0,5-1s cada
+//     ⇒ ~2s
+//   Alvo: a sincronização terminar POR CONTAGEM (não pelo gate de 45s) deixando
+//   ~15s dentro do gate pras 3 fases de recálculo (recorrência/cross-sell/CA),
+//   que rodam depois e dividem o mesmo teto. Alvo de sync ≤ ~28s.
+//     (28s − 2s de overhead) ÷ 2,5s por pedido (rede lenta) ≈ 10
+//   Teto teórico ~12; historicamente 15 (com timeout de 20s e retry sem gate
+//   de tempo) estourava os 60s — 10 mantém margem deliberada. O gate interno
+//   de 45s + haMargemPraRetry (retry desliga sozinho quando restam <15s do
+//   orçamento) seguem sendo a rede de segurança pro caso patológico.
+const LIMITE_PEDIDOS_NOVOS_RECENTE = 10;
+
 // Teto de tempo interno, sempre abaixo do maxDuration=60s da rota (ver
 // route.ts) — checado entre iterações de qualquer loop potencialmente longo
 // deste job (detalhe de pedidos, recorrência, cruzamento de CA). Ao
@@ -50,7 +78,27 @@ function tempoEsgotado(inicioJob: number): boolean {
   return Date.now() - inicioJob > LIMITE_TEMPO_MS;
 }
 
+// dd/mm/aaaa em UTC — formato que o ListarPedidos do Omie espera em
+// filtrar_por_data_de / filtrar_por_data_ate. UTC (não hora local) pra bater
+// com o resto do módulo (calcularDataLimiteISO) e não escorregar de dia
+// conforme o fuso da região da function.
+function formatarDataBR(data: Date): string {
+  const dia = String(data.getUTCDate()).padStart(2, "0");
+  const mes = String(data.getUTCMonth() + 1).padStart(2, "0");
+  const ano = data.getUTCFullYear();
+  return `${dia}/${mes}/${ano}`;
+}
+
 const CHAVE_PAGINA_CURSOR_SYNC = "recompra_pagina_atual";
+
+// Job da janela recente (/api/cron/recompra-recente): varre só os pedidos com
+// dAlt nos últimos DIAS_JANELA_RECENTE dias. MAX_PAGINAS_RECENTE é um teto de
+// segurança — a janela costuma ter 1-2 páginas de 50. Cursor próprio
+// (informativo) em sync_estado, chave CHAVE_ULTIMA_EXECUCAO_RECENTE — não
+// interfere com CHAVE_PAGINA_CURSOR_SYNC, o cursor do backfill completo.
+const DIAS_JANELA_RECENTE = 45;
+const MAX_PAGINAS_RECENTE = 5;
+const CHAVE_ULTIMA_EXECUCAO_RECENTE = "recompra_recente_ultima_execucao";
 
 // Cursor persistido em sync_estado — qual página do ListarPedidos buscar na
 // próxima execução. Listar TODAS as páginas de uma vez (comportamento
@@ -75,41 +123,34 @@ async function lerPaginaCursorSync(): Promise<number> {
   return Number.isFinite(numero) && numero >= 1 ? numero : 1;
 }
 
-async function salvarPaginaCursorSync(pagina: number): Promise<void> {
+async function salvarEstadoSync(chave: string, valor: string): Promise<void> {
   const { error } = await supabase
     .from("sync_estado")
     .upsert(
-      { chave: CHAVE_PAGINA_CURSOR_SYNC, valor: String(pagina), atualizado_em: new Date().toISOString() },
+      { chave, valor, atualizado_em: new Date().toISOString() },
       { onConflict: "chave" }
     );
 
-  if (error) console.error(`[sync] erro ao salvar página cursor: ${error.message}`);
+  if (error) console.error(`[sync] erro ao salvar estado "${chave}": ${error.message}`);
+}
+
+async function salvarPaginaCursorSync(pagina: number): Promise<void> {
+  await salvarEstadoSync(CHAVE_PAGINA_CURSOR_SYNC, String(pagina));
 }
 
 // -----------------------------------------------------------
-// 1) Sincronização em lotes: busca só UMA página de pedidos no Omie por
-// execução (cursor de página em sync_estado) e, dentro dela, processa
-// detalhe de até LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO pedidos novos. O backfill
-// completo acontece ao longo de várias execuções (cron diário).
+// 1) Núcleo compartilhado: recebe uma lista de códigos de pedido (Omie),
+// descobre quais ainda não estão no nosso histórico (nem foram pulados) e
+// consulta o DETALHE só desses, gravando em pedidos_itens_historico. Usado
+// tanto pelo backfill completo (sincronizarHistorico) quanto pelo job da
+// janela recente (sincronizarHistoricoRecente).
 // -----------------------------------------------------------
-async function sincronizarHistorico(
-  inicioJob: number
-): Promise<{ processados: number; restantes: number; paginaAtual: number }> {
-  const paginaAtual = await lerPaginaCursorSync();
-
-  const inicioListagem = Date.now();
-  console.log(`[sync] listando página ${paginaAtual} de pedidos no Omie...`);
-  const { codigos: codigosDaPagina, totalPaginas } = await listarPaginaDePedidos(
-    paginaAtual,
-    inicioJob
-  );
-  console.log(
-    `[sync] página ${paginaAtual}/${totalPaginas} — ${codigosDaPagina.length} pedidos (listagem levou ${Date.now() - inicioListagem}ms)`
-  );
-
-  const proximaPagina = paginaAtual >= totalPaginas ? 1 : paginaAtual + 1;
-  await salvarPaginaCursorSync(proximaPagina);
-
+async function processarLoteDePedidos(
+  codigosCandidatos: number[],
+  inicioJob: number,
+  limitePedidos: number,
+  rotaLog: string
+): Promise<{ processados: number; restantes: number; novos: number }> {
   const { data: existentes, error } = await supabase
     .from("pedidos_itens_historico")
     .select("pedido_omie_id");
@@ -117,19 +158,22 @@ async function sincronizarHistorico(
   if (error) throw new Error(`[sync] erro ao ler histórico existente: ${error.message}`);
 
   // Dedup = já gravados COM sucesso + já vistos e pulados (cancelados etc.).
-  // Sem o segundo conjunto, os pulados voltavam pra `novos` a cada volta do
-  // cursor de página e eram re-consultados no Omie eternamente.
+  // Sem o segundo conjunto, os pulados voltavam pra `novos` a cada nova
+  // varredura e eram re-consultados no Omie eternamente. Consequência: um
+  // pedido já sincronizado que foi editado no Omie NÃO é re-consultado — o
+  // objetivo do job recente é pegar pedido NOVO rápido, não re-espelhar
+  // edições de pedido antigo.
   const pedidosPulados = await carregarPedidosPulados();
   const codigosJaVistos = new Set(
     (existentes ?? []).map((l) => String(l.pedido_omie_id)).concat(pedidosPulados)
   );
-  const novos = codigosDaPagina.filter((c) => !codigosJaVistos.has(String(c)));
+  const novos = codigosCandidatos.filter((c) => !codigosJaVistos.has(String(c)));
 
-  const lote = novos.slice(0, LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO);
+  const lote = novos.slice(0, limitePedidos);
   let restantes = novos.length - lote.length;
 
   console.log(
-    `[sync] página ${paginaAtual}: ${novos.length} pedidos novos, processando até ${lote.length} nesta execução (${restantes} ficam pendentes nesta página; próxima execução vai pra página ${proximaPagina})`
+    `[sync] ${codigosCandidatos.length} códigos candidatos, ${novos.length} novos — processando até ${lote.length} nesta execução (${restantes} ficam pendentes)`
   );
 
   const inicioDetalhe = Date.now();
@@ -149,7 +193,7 @@ async function sincronizarHistorico(
     // retries de chamarOmie, fault da API, cliente/vendedor que não resolve,
     // falha de upsert que lance) não pode derrubar a execução inteira do job
     // — loga com o código do pedido e segue pro próximo. O pedido pulado
-    // volta a ser tentado quando o cursor de página der a volta.
+    // volta a ser tentado na próxima varredura.
     try {
       const pedido = await consultarPedido(codigo, inicioJob);
       if (pedido) {
@@ -185,7 +229,10 @@ async function sincronizarHistorico(
 
         if (upsertError) {
           console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
-          await registrarErroLog(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
+          await registrarErroLog(
+            `[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`,
+            rotaLog
+          );
         }
       } // pedido === null: cancelado ou campo ausente — omie-client.ts já loga
         // o motivo E registra em recompra_pedidos_pulados (não volta pra `novos`)
@@ -201,7 +248,7 @@ async function sincronizarHistorico(
       // falhar, não mascara o erro original (o pedido já foi pulado acima).
       try {
         await supabase.from("error_log").insert({
-          rota: "/api/cron/recompra-preditiva",
+          rota: rotaLog,
           mensagem: `Falha ao processar pedido Omie ${codigo}: ${msg}`,
           pedido_id: null,
           colaborador: null,
@@ -223,7 +270,129 @@ async function sincronizarHistorico(
     `[sync] lote concluído em ${Date.now() - inicioDetalhe}ms — ${processados} processados, ${restantes} restantes`
   );
 
+  return { processados, restantes, novos: novos.length };
+}
+
+// -----------------------------------------------------------
+// 1a) Backfill completo em lotes: busca só UMA página de pedidos no Omie por
+// execução (cursor de página em sync_estado, chave `recompra_pagina_atual`)
+// e processa detalhe de até LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO pedidos novos.
+// O backfill completo (~150 páginas) acontece ao longo de várias execuções
+// (cron diário). Comportamento inalterado — só extraiu o loop de
+// processamento pra processarLoteDePedidos.
+// -----------------------------------------------------------
+async function sincronizarHistorico(
+  inicioJob: number
+): Promise<{ processados: number; restantes: number; paginaAtual: number }> {
+  const paginaAtual = await lerPaginaCursorSync();
+
+  const inicioListagem = Date.now();
+  console.log(`[sync] listando página ${paginaAtual} de pedidos no Omie...`);
+  const { codigos: codigosDaPagina, totalPaginas } = await listarPaginaDePedidos(
+    paginaAtual,
+    inicioJob
+  );
+  console.log(
+    `[sync] página ${paginaAtual}/${totalPaginas} — ${codigosDaPagina.length} pedidos (listagem levou ${Date.now() - inicioListagem}ms)`
+  );
+
+  const proximaPagina = paginaAtual >= totalPaginas ? 1 : paginaAtual + 1;
+  await salvarPaginaCursorSync(proximaPagina);
+
+  const { processados, restantes } = await processarLoteDePedidos(
+    codigosDaPagina,
+    inicioJob,
+    LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO,
+    "/api/cron/recompra-preditiva"
+  );
+
   return { processados, restantes, paginaAtual };
+}
+
+// -----------------------------------------------------------
+// 1b) Sincronização da janela recente: varre só os pedidos com data de
+// alteração (dAlt) nos últimos DIAS_JANELA_RECENTE dias — 1-2 páginas (vs.
+// ~150 do backfill), então dá pra ler todas numa execução. Cursor próprio em
+// sync_estado (chave `recompra_recente_ultima_execucao`), puramente
+// informativo (última execução + resumo); NÃO interfere com o cursor de
+// página do backfill completo.
+// -----------------------------------------------------------
+async function sincronizarHistoricoRecente(inicioJob: number): Promise<{
+  processados: number;
+  restantes: number;
+  janelaDe: string;
+  janelaAte: string;
+  paginasLidas: number;
+  codigosNaJanela: number;
+}> {
+  const hoje = new Date();
+  const de = new Date(hoje);
+  de.setUTCDate(de.getUTCDate() - DIAS_JANELA_RECENTE);
+  const janelaDe = formatarDataBR(de);
+  const janelaAte = formatarDataBR(hoje);
+
+  console.log(`[sync-recente] janela dAlt ${janelaDe} → ${janelaAte}`);
+
+  const codigos: number[] = [];
+  let paginasLidas = 0;
+
+  for (let pagina = 1; pagina <= MAX_PAGINAS_RECENTE; pagina++) {
+    if (tempoEsgotado(inicioJob)) {
+      console.warn(
+        `[sync-recente] tempo esgotado ao listar página ${pagina} — seguindo com o que já veio`
+      );
+      break;
+    }
+
+    const { codigos: codigosDaPagina, totalPaginas } = await listarPaginaDePedidos(
+      pagina,
+      inicioJob,
+      { de: janelaDe, ate: janelaAte }
+    );
+    codigos.push(...codigosDaPagina);
+    paginasLidas = pagina;
+
+    console.log(
+      `[sync-recente] página ${pagina}/${totalPaginas} — ${codigosDaPagina.length} pedidos na janela`
+    );
+
+    if (pagina >= totalPaginas) break;
+
+    if (pagina === MAX_PAGINAS_RECENTE && totalPaginas > MAX_PAGINAS_RECENTE) {
+      console.warn(
+        `[sync-recente] janela tem ${totalPaginas} páginas (> teto de ${MAX_PAGINAS_RECENTE}) — só as primeiras ${MAX_PAGINAS_RECENTE} foram lidas nesta execução`
+      );
+    }
+  }
+
+  const { processados, restantes, novos } = await processarLoteDePedidos(
+    codigos,
+    inicioJob,
+    LIMITE_PEDIDOS_NOVOS_RECENTE,
+    "/api/cron/recompra-recente"
+  );
+
+  await salvarEstadoSync(
+    CHAVE_ULTIMA_EXECUCAO_RECENTE,
+    JSON.stringify({
+      executado_em: new Date().toISOString(),
+      janela: { de: janelaDe, ate: janelaAte },
+      paginas_lidas: paginasLidas,
+      codigos_na_janela: codigos.length,
+      novos_encontrados: novos,
+      processados,
+      restantes,
+    })
+  );
+
+  return {
+    processados,
+    restantes,
+    janelaDe,
+    janelaAte,
+    paginasLidas,
+    codigosNaJanela: codigos.length,
+  };
 }
 
 // -----------------------------------------------------------
@@ -532,38 +701,69 @@ async function cruzarComVencimentoCA(inicioJob: number): Promise<void> {
 // -----------------------------------------------------------
 // ORQUESTRAÇÃO
 // -----------------------------------------------------------
+
+// Fases de recálculo pós-sincronização — cada uma processa a tabela inteira
+// (não só o lote recém-sincronizado), então respeitam o mesmo teto de tempo
+// interno: ao estourar, param e retornam (o que já foi persistido fica).
+// Compartilhado entre o job diário completo e o da janela recente.
+async function recalcularTudoPosSync(inicioJob: number): Promise<void> {
+  if (tempoEsgotado(inicioJob)) {
+    console.warn("[job] tempo esgotado após sincronização — pulando recorrência/cross-sell/CA nesta execução");
+    return;
+  }
+
+  await recalcularRecorrencias(inicioJob);
+
+  if (tempoEsgotado(inicioJob)) {
+    console.warn("[job] tempo esgotado após recorrência — pulando cross-sell/CA nesta execução");
+    return;
+  }
+
+  await recalcularCrossSell();
+
+  if (tempoEsgotado(inicioJob)) {
+    console.warn("[job] tempo esgotado após cross-sell — pulando cruzamento de CA nesta execução");
+    return;
+  }
+
+  await cruzarComVencimentoCA(inicioJob);
+}
+
+// Job diário completo (/api/cron/recompra-preditiva): backfill paginado do
+// histórico inteiro, um lote por execução.
 export async function rodarSincronizacaoDiaria(): Promise<{
   processados: number;
   restantes: number;
   paginaAtual: number;
 }> {
   const inicioJob = Date.now();
-  console.log("=== iniciando job de recompra preditiva ===");
+  console.log("=== iniciando job de recompra preditiva (backfill completo) ===");
 
   const resultadoSync = await sincronizarHistorico(inicioJob);
-
-  // Cada fase abaixo processa a tabela inteira (não só o lote sincronizado
-  // agora), então também respeita o mesmo teto de tempo — sem isso, o job
-  // podia estourar aqui mesmo com o lote de sync já reduzido pra 5.
-  if (tempoEsgotado(inicioJob)) {
-    console.warn("[job] tempo esgotado após sincronizarHistorico — pulando recorrência/cross-sell/CA nesta execução");
-  } else {
-    await recalcularRecorrencias(inicioJob);
-
-    if (tempoEsgotado(inicioJob)) {
-      console.warn("[job] tempo esgotado após recorrência — pulando cross-sell/CA nesta execução");
-    } else {
-      await recalcularCrossSell();
-
-      if (tempoEsgotado(inicioJob)) {
-        console.warn("[job] tempo esgotado após cross-sell — pulando cruzamento de CA nesta execução");
-      } else {
-        await cruzarComVencimentoCA(inicioJob);
-      }
-    }
-  }
+  await recalcularTudoPosSync(inicioJob);
 
   console.log(`=== job concluído em ${Date.now() - inicioJob}ms ===`);
+  return resultadoSync;
+}
+
+// Job da janela recente (/api/cron/recompra-recente): mesma lógica de
+// recálculo, mas a sincronização varre só os pedidos alterados/criados nos
+// últimos DIAS_JANELA_RECENTE dias (1-2 páginas) em vez do backfill paginado.
+export async function rodarSincronizacaoRecente(): Promise<{
+  processados: number;
+  restantes: number;
+  janelaDe: string;
+  janelaAte: string;
+  paginasLidas: number;
+  codigosNaJanela: number;
+}> {
+  const inicioJob = Date.now();
+  console.log("=== iniciando job de recompra recente (janela de 45 dias) ===");
+
+  const resultadoSync = await sincronizarHistoricoRecente(inicioJob);
+  await recalcularTudoPosSync(inicioJob);
+
+  console.log(`=== job recente concluído em ${Date.now() - inicioJob}ms ===`);
   return resultadoSync;
 }
 

@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/recompra-preditiva",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/recompra-recente",
+      "schedule": "0 12 * * *"
     }
   ]
 }

@@ -4,7 +4,14 @@
 // (validada em ambiente real em ago/2026, ver notas abaixo)
 //
 // DESCOBERTAS IMPORTANTES:
-// - ListarPedidos NÃO aceita filtro de data — só pagina/registros_por_pagina/apenas_importado_api
+// - ListarPedidos ACEITA filtrar_por_data_de / filtrar_por_data_ate (dd/mm/aaaa) —
+//   confirmado ao vivo set/2026. Eles filtram por dAlt (data da última
+//   alteração do pedido), NÃO por data de criação: pega tanto pedido novo
+//   (dAlt == dInc) quanto pedido antigo editado no período. Ordem padrão é
+//   crescente por código interno (mais antigos primeiro); NÃO há como pedir
+//   decrescente (ordem_decrescente faulta; ordem_descrescente é aceito mas só
+//   inverte dentro da página, não a paginação — inútil). Usado pelo job da
+//   janela recente (listarPaginaDePedidos com filtroData).
 // - ListarPedidos NÃO traz infoCadastro nem informacoes_adicionais (data real, vendedor)
 // - Só ConsultarPedido (1 pedido por vez) traz esses dados completos
 // - ConsultarPedido embrulha TUDO num objeto `pedido_venda_produto` — cabecalho/
@@ -244,23 +251,43 @@ export interface PaginaDePedidos {
   totalPaginas: number;
 }
 
+// Janela de data pro ListarPedidos. Formato dd/mm/aaaa. O Omie filtra por
+// dAlt (data da última alteração do pedido), não por data de criação.
+export interface FiltroDataPedidos {
+  de: string;
+  ate: string;
+}
+
 // Busca só UMA página por chamada (não pagina tudo de uma vez) — listar o
 // histórico inteiro do Omie antes de processar qualquer coisa estourava
 // sozinho o tempo de execução da function na Vercel. O cursor de qual
 // página buscar a seguir vive em sync_estado (ver CHAVE_PAGINA_CURSOR_SYNC
 // em sync-recompra-preditiva.ts), não aqui.
+//
+// filtroData (opcional): usado pelo job /api/cron/recompra-recente pra varrer
+// só os pedidos alterados/criados nos últimos ~45 dias (1-2 páginas). O job
+// diário completo (/api/cron/recompra-preditiva) chama sem filtro e pagina o
+// histórico inteiro.
 export async function listarPaginaDePedidos(
   pagina: number,
-  inicioJob?: number
+  inicioJob?: number,
+  filtroData?: FiltroDataPedidos
 ): Promise<PaginaDePedidos> {
+  const param: Record<string, unknown> = {
+    pagina,
+    registros_por_pagina: 50,
+    apenas_importado_api: "N",
+  };
+
+  if (filtroData) {
+    param.filtrar_por_data_de = filtroData.de;
+    param.filtrar_por_data_ate = filtroData.ate;
+  }
+
   const resposta = await chamarOmie<ListarPedidosResponse>(
     "produtos/pedido",
     "ListarPedidos",
-    {
-      pagina,
-      registros_por_pagina: 50,
-      apenas_importado_api: "N",
-    },
+    param,
     DELAY_ENTRE_REQUISICOES_MS,
     inicioJob
   );

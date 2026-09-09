@@ -16,10 +16,13 @@
 
 import { supabase } from "@/lib/recompra/supabase-client";
 
-export async function registrarErroLog(mensagem: string): Promise<void> {
+export async function registrarErroLog(
+  mensagem: string,
+  rota: string = "/api/cron/recompra-preditiva"
+): Promise<void> {
   try {
     await supabase.from("error_log").insert({
-      rota: "/api/cron/recompra-preditiva",
+      rota,
       mensagem,
       pedido_id: null,
       colaborador: null,
