@@ -85,6 +85,42 @@ export async function resolverCredenciaisOmie(
   return obterCredenciaisOmiePorSlug(empresaSlug)
 }
 
+// Empresa cujas credenciais são usadas como fallback nas rotas de BUSCA
+// quando a empresa alvo não tem credenciais configuradas no servidor.
+const SLUG_OMIE_FALLBACK_BUSCA = 'rhocal'
+
+// Igual a resolverCredenciaisOmie, MAS: se a empresa alvo não tiver
+// OMIE_APP_KEY_<SLUG>/OMIE_APP_SECRET_<SLUG> configuradas, cai nas
+// credenciais de SLUG_OMIE_FALLBACK_BUSCA.
+//
+// Uso EXCLUSIVO de rotas de busca/leitura (cliente por nome/CNPJ, produto
+// por código/descrição, fornecedor): clientes e produtos são compartilhados
+// entre as empresas no Omie (fase 30 — "Compartilhamento de Cadastros entre
+// Aplicativos"), então o resultado da busca é o mesmo independente de qual
+// "app" Omie faz a chamada.
+//
+// NUNCA usar em rotas de escrita (gerar orçamento, converter em pedido de
+// venda, cadastrar cliente, importar *) — essas criam/alteram registros numa
+// conta Omie específica e precisam da credencial correta da empresa.
+export async function resolverCredenciaisOmieParaBusca(
+  supabase: SupabaseServerClient,
+  body: { pedidoId?: unknown; empresaSlug?: unknown },
+): Promise<CredenciaisOmie> {
+  try {
+    return await resolverCredenciaisOmie(supabase, body)
+  } catch (err) {
+    const mensagem = err instanceof Error ? err.message : ''
+    // Só cai no fallback quando o problema é credencial ausente da empresa
+    // alvo — "empresa não informada", pedido inexistente, etc. continuam
+    // propagando.
+    if (!mensagem.includes('Credenciais do Omie não configuradas')) throw err
+    console.warn(
+      `[omie] credenciais da empresa alvo ausentes — busca caindo no fallback "${SLUG_OMIE_FALLBACK_BUSCA}" (${mensagem})`,
+    )
+    return obterCredenciaisOmiePorSlug(SLUG_OMIE_FALLBACK_BUSCA)
+  }
+}
+
 // Chama a API do Omie e normaliza os dois jeitos que ela sinaliza erro:
 // HTTP não-2xx, ou HTTP 200 com um corpo { faultstring, faultcode }.
 export async function chamarOmie(

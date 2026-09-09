@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { registrarErro } from '@/lib/omie/registrar-erro'
-import { chamarOmie, resolverCredenciaisOmie } from '@/lib/omie/chamar-omie'
+import { chamarOmie, resolverCredenciaisOmieParaBusca } from '@/lib/omie/chamar-omie'
 
 // Nunca expor OMIE_APP_KEY_*/OMIE_APP_SECRET_* no client — só lidas aqui, server-side.
 const OMIE_CLIENTES_URL = 'https://app.omie.com.br/api/v1/geral/clientes/'
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     // Pedido já existente (busca feita de dentro do pedido) usa a empresa
     // dona dele; sem pedidoId (criação de um orçamento novo) usa a empresa
     // ativa no seletor, enviada pelo client como empresaSlug.
-    const credenciais = await resolverCredenciaisOmie(supabase, body)
+    const credenciais = await resolverCredenciaisOmieParaBusca(supabase, body)
 
     let resultado: Record<string, unknown>
     try {
