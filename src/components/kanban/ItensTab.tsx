@@ -9,13 +9,20 @@ import type { Database, SetorTipo } from '@/types/database'
 
 type PedidoItem = Database['public']['Tables']['pedido_itens']['Row']
 
-type CampoTexto = 'tamanho' | 'numero' | 'cor' | 'observacao'
+type CampoTexto = 'ca' | 'tamanho' | 'numero' | 'cor' | 'observacao'
 type StatusCodigoOmie = 'idle' | 'buscando' | 'encontrado' | 'nao_encontrado' | 'erro'
 
 // Autocomplete de descrição (busca de produto no Omie por nome) — mesmo mínimo
 // e debounce do campo Fornecedor (fase 18.1).
 const MIN_CARACTERES_BUSCA_PRODUTO = 3
 const DEBOUNCE_BUSCA_PRODUTO_MS = 400
+
+// Chave local do item "novo, ainda não salvo" — nunca colide com um uuid real
+// vindo do banco. Enquanto existir, ele entra no mesmo .map() de qualquer
+// item já existente: todo o bloco (Código Omie + busca, Descrição +
+// autocomplete, Tamanho/Número/Cor/Observação, em estoque, preço de venda) é
+// o mesmo JSX, sem duplicar lógica num formulário à parte.
+const ID_RASCUNHO = '__rascunho__'
 
 interface ProdutoOmie {
   codigoProduto: number
@@ -25,6 +32,7 @@ interface ProdutoOmie {
 
 interface SpecForm {
   descricao: string
+  ca: string
   tamanho: string
   numero: string
   cor: string
@@ -34,6 +42,7 @@ interface SpecForm {
 function specVazio(item: PedidoItem): SpecForm {
   return {
     descricao: item.descricao,
+    ca: item.ca ?? '',
     tamanho: item.tamanho ?? '',
     numero: item.numero ?? '',
     cor: item.cor ?? '',
@@ -41,18 +50,25 @@ function specVazio(item: PedidoItem): SpecForm {
   }
 }
 
-interface NovoItemForm {
-  descricao: string
-  quantidade: string
-  ca: string
-  tamanho: string
-  numero: string
-  cor: string
-  observacao: string
-}
-
-function novoItemFormVazio(): NovoItemForm {
-  return { descricao: '', quantidade: '1', ca: '', tamanho: '', numero: '', cor: '', observacao: '' }
+function rascunhoVazio(pedidoId: string): PedidoItem {
+  return {
+    id: ID_RASCUNHO,
+    pedido_id: pedidoId,
+    descricao: '',
+    quantidade: 1,
+    ca: null,
+    observacao: null,
+    tamanho: null,
+    numero: null,
+    cor: null,
+    custo_final: null,
+    margem_pct: null,
+    preco_venda: null,
+    codigo_produto_omie: null,
+    em_estoque: false,
+    excluido: false,
+    criado_em: new Date().toISOString(),
+  }
 }
 
 export function ItensTab({
@@ -75,12 +91,18 @@ export function ItensTab({
   onItemRemovido: (itemId: string) => void
 }) {
   const [supabase] = useState(() => createClient())
-  // Estado local dos inputs de preço de venda, das especificações (descrição/
-  // tamanho/número/cor/observação) e do campo de busca de código Omie por
-  // item — inicializado a partir do valor já salvo, mas segue solto enquanto
-  // o usuário digita (só persiste no blur).
+  // Estado local dos inputs de preço de venda, quantidade, das especificações
+  // (descrição/CA/tamanho/número/cor/observação) e do campo de busca de
+  // código Omie por item — inicializado a partir do valor já salvo, mas segue
+  // solto enquanto o usuário digita (só persiste no blur). O item rascunho
+  // (ver ID_RASCUNHO) usa essas mesmas estruturas, só que sem entrada inicial
+  // — os helpers de leitura (spec/precoVendaAtual/quantidadeAtual) já caem no
+  // default correto quando a chave não existe ainda.
   const [precoVendaPorItem, setPrecoVendaPorItem] = useState<Record<string, string>>(() =>
     Object.fromEntries(itens.map((item) => [item.id, item.preco_venda?.toString() ?? ''])),
+  )
+  const [quantidadePorItem, setQuantidadePorItem] = useState<Record<string, string>>(() =>
+    Object.fromEntries(itens.map((item) => [item.id, item.quantidade.toString()])),
   )
   const [specPorItem, setSpecPorItem] = useState<Record<string, SpecForm>>(() =>
     Object.fromEntries(itens.map((item) => [item.id, specVazio(item)])),
@@ -120,37 +142,78 @@ export function ItensTab({
   const podeMarcarEmEstoque = setor !== 'compras' && !somenteLeitura
   const itensVisiveis = setor === 'compras' ? itens.filter((item) => !item.em_estoque) : itens
 
-  // Adicionar/remover item só é permitido enquanto o pedido nunca foi mandado
-  // pro Omie (omie_orcamento_id nulo) — depois disso o Omie tem sua própria
-  // cópia do det do pedido, e mudar itens só aqui deixaria as duas pontas
-  // dessincronizadas silenciosamente. "Remover" é soft-delete (excluido=true):
-  // não existe policy de delete físico em pedido_itens (regra de ouro).
+  // Adicionar/remover item inteiro só é permitido enquanto o pedido nunca foi
+  // mandado pro Omie (omie_orcamento_id nulo) — depois disso o Omie tem sua
+  // própria cópia do det do pedido, e mudar itens só aqui deixaria as duas
+  // pontas dessincronizadas silenciosamente. "Remover" é soft-delete
+  // (excluido=true): não existe policy de delete físico em pedido_itens
+  // (regra de ouro).
   const podeGerenciarItens = omieOrcamentoId === null && !somenteLeitura
 
-  const [mostrarNovoItem, setMostrarNovoItem] = useState(false)
-  const [novoItem, setNovoItem] = useState<NovoItemForm>(novoItemFormVazio)
-  const [salvandoNovoItem, setSalvandoNovoItem] = useState(false)
-  const [erroNovoItem, setErroNovoItem] = useState<string | null>(null)
-  const [removendoItemId, setRemovendoItemId] = useState<string | null>(null)
+  const [itemRascunho, setItemRascunho] = useState<PedidoItem | null>(null)
+  const [salvandoRascunho, setSalvandoRascunho] = useState(false)
+  const [erroRascunho, setErroRascunho] = useState<string | null>(null)
 
-  function atualizarNovoItemCampo(campo: keyof NovoItemForm, valor: string) {
-    setNovoItem((atual) => ({ ...atual, [campo]: valor }))
+  // Linha extra renderizada no mesmo .map() de baixo, só enquanto o rascunho
+  // existir — é assim que ele herda o bloco inteiro (Código Omie, Descrição
+  // com autocomplete, specs, em estoque, preço de venda) sem duplicar nada.
+  const linhas: PedidoItem[] =
+    podeGerenciarItens && itemRascunho ? [...itensVisiveis, itemRascunho] : itensVisiveis
+
+  // Ponto único de gravação de qualquer campo de item: se for o rascunho
+  // (ainda não existe no banco), só atualiza o state local; senão, persiste
+  // de verdade e propaga pro pai. Toda função de "salvar X" abaixo passa por
+  // aqui — é o que permite reaproveitar exatamente a mesma lógica pros dois
+  // casos sem espalhar `if (é rascunho)` em cada handler.
+  async function persistirItem(item: PedidoItem, patch: Partial<PedidoItem>): Promise<boolean> {
+    if (item.id === ID_RASCUNHO) {
+      setItemRascunho((atual) => (atual ? { ...atual, ...patch } : atual))
+      return true
+    }
+
+    const { error } = await supabase.from('pedido_itens').update(patch).eq('id', item.id)
+    if (error) return false
+
+    onItemAtualizado({ ...item, ...patch })
+    return true
   }
 
-  async function adicionarItem() {
-    const descricao = novoItem.descricao.trim()
+  // Limpa qualquer sobra do rascunho anterior nos states locais chaveados por
+  // ID_RASCUNHO — sem isso, um próximo rascunho nasceria com campos do
+  // anterior (cancelado ou já salvo).
+  function limparRascunhoLocal() {
+    setItemRascunho(null)
+    setErroRascunho(null)
+    const semRascunho = <T,>(mapa: Record<string, T>): Record<string, T> => {
+      if (!(ID_RASCUNHO in mapa)) return mapa
+      return Object.fromEntries(Object.entries(mapa).filter(([chave]) => chave !== ID_RASCUNHO))
+    }
+    setSpecPorItem(semRascunho)
+    setCodigoPorItem(semRascunho)
+    setStatusCodigoPorItem(semRascunho)
+    setPrecoVendaPorItem(semRascunho)
+    setQuantidadePorItem(semRascunho)
+    setSugestoesProdutoPorItem(semRascunho)
+    setBuscandoProdutoPorItem(semRascunho)
+    setDropdownProdutoAbertoPorItem(semRascunho)
+  }
+
+  async function salvarRascunho() {
+    if (!itemRascunho) return
+
+    const descricao = itemRascunho.descricao.trim()
     if (!descricao) {
-      setErroNovoItem('Informe a descrição do item.')
+      setErroRascunho('Informe a descrição do item.')
       return
     }
-    const quantidade = Number(novoItem.quantidade)
+    const quantidade = Number(itemRascunho.quantidade)
     if (!Number.isFinite(quantidade) || quantidade <= 0) {
-      setErroNovoItem('Informe uma quantidade válida.')
+      setErroRascunho('Informe uma quantidade válida.')
       return
     }
 
-    setSalvandoNovoItem(true)
-    setErroNovoItem(null)
+    setSalvandoRascunho(true)
+    setErroRascunho(null)
 
     const { data, error } = await supabase
       .from('pedido_itens')
@@ -158,37 +221,37 @@ export function ItensTab({
         pedido_id: pedidoId,
         descricao,
         quantidade,
-        ca: novoItem.ca.trim() || null,
-        tamanho: novoItem.tamanho.trim() || null,
-        numero: novoItem.numero.trim() || null,
-        cor: novoItem.cor.trim() || null,
-        observacao: novoItem.observacao.trim() || null,
+        ca: itemRascunho.ca,
+        tamanho: itemRascunho.tamanho,
+        numero: itemRascunho.numero,
+        cor: itemRascunho.cor,
+        observacao: itemRascunho.observacao,
+        codigo_produto_omie: itemRascunho.codigo_produto_omie,
+        em_estoque: itemRascunho.em_estoque,
+        preco_venda: itemRascunho.preco_venda,
       })
       .select()
       .single()
 
-    setSalvandoNovoItem(false)
+    setSalvandoRascunho(false)
 
     if (error || !data) {
-      setErroNovoItem('Não foi possível adicionar o item. Tente novamente.')
+      setErroRascunho('Não foi possível adicionar o item. Tente novamente.')
       return
     }
 
     onItemAdicionado(data)
-    setNovoItem(novoItemFormVazio())
-    setMostrarNovoItem(false)
+    limparRascunhoLocal()
   }
 
   async function removerItem(item: PedidoItem) {
     const confirmado = window.confirm(`Remover o item "${item.descricao}" deste pedido?`)
     if (!confirmado) return
 
-    setRemovendoItemId(item.id)
     const { error } = await supabase
       .from('pedido_itens')
       .update({ excluido: true })
       .eq('id', item.id)
-    setRemovendoItemId(null)
 
     if (!error) onItemRemovido(item.id)
   }
@@ -197,9 +260,20 @@ export function ItensTab({
     return precoVendaPorItem[itemId] ?? ''
   }
 
+  function quantidadeAtual(item: PedidoItem): string {
+    return quantidadePorItem[item.id] ?? item.quantidade.toString()
+  }
+
   function spec(itemId: string): SpecForm {
     return (
-      specPorItem[itemId] ?? { descricao: '', tamanho: '', numero: '', cor: '', observacao: '' }
+      specPorItem[itemId] ?? {
+        descricao: '',
+        ca: '',
+        tamanho: '',
+        numero: '',
+        cor: '',
+        observacao: '',
+      }
     )
   }
 
@@ -214,14 +288,20 @@ export function ItensTab({
     const precoVenda = valorStr.trim() === '' ? null : Number(valorStr)
     if (precoVenda !== null && !Number.isFinite(precoVenda)) return
 
-    const { error } = await supabase
-      .from('pedido_itens')
-      .update({ preco_venda: precoVenda })
-      .eq('id', item.id)
+    await persistirItem(item, { preco_venda: precoVenda })
+  }
 
-    if (!error) {
-      onItemAtualizado({ ...item, preco_venda: precoVenda })
+  async function salvarQuantidade(item: PedidoItem, valorStr: string) {
+    const quantidade = Number(valorStr)
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      // Valor inválido: reverte o input pro último valor válido em vez de
+      // deixar a digitação ruim solta na tela.
+      setQuantidadePorItem((atual) => ({ ...atual, [item.id]: item.quantidade.toString() }))
+      return
     }
+    if (quantidade === Number(item.quantidade)) return
+
+    await persistirItem(item, { quantidade })
   }
 
   async function salvarDescricao(item: PedidoItem, valorStr: string) {
@@ -240,18 +320,12 @@ export function ItensTab({
     // novo ("último que tocou vence", fase 18.2).
     const desvincular = item.codigo_produto_omie !== null
 
-    const { error } = await supabase
-      .from('pedido_itens')
-      .update(desvincular ? { descricao: valor, codigo_produto_omie: null } : { descricao: valor })
-      .eq('id', item.id)
-
-    if (error) return
-
-    onItemAtualizado(
-      desvincular
-        ? { ...item, descricao: valor, codigo_produto_omie: null }
-        : { ...item, descricao: valor },
+    const ok = await persistirItem(
+      item,
+      desvincular ? { descricao: valor, codigo_produto_omie: null } : { descricao: valor },
     )
+    if (!ok) return
+
     if (desvincular) {
       setStatusCodigoPorItem((atual) => ({ ...atual, [item.id]: 'idle' }))
       setCodigoPorItem((atual) => ({ ...atual, [item.id]: '' }))
@@ -299,21 +373,16 @@ export function ItensTab({
     selecaoProdutoRef.current[item.id] = true
     if (debounceProdutoRef.current[item.id]) clearTimeout(debounceProdutoRef.current[item.id])
 
-    const { error } = await supabase
-      .from('pedido_itens')
-      .update({ descricao: produto.descricao, codigo_produto_omie: produto.codigoProduto })
-      .eq('id', item.id)
+    const ok = await persistirItem(item, {
+      descricao: produto.descricao,
+      codigo_produto_omie: produto.codigoProduto,
+    })
 
-    if (error) {
+    if (!ok) {
       setStatusCodigoPorItem((atual) => ({ ...atual, [item.id]: 'erro' }))
       return
     }
 
-    onItemAtualizado({
-      ...item,
-      descricao: produto.descricao,
-      codigo_produto_omie: produto.codigoProduto,
-    })
     setSpecPorItem((atual) => ({
       ...atual,
       [item.id]: { ...spec(item.id), descricao: produto.descricao },
@@ -325,12 +394,7 @@ export function ItensTab({
   }
 
   async function alternarEmEstoque(item: PedidoItem, valor: boolean) {
-    const { error } = await supabase
-      .from('pedido_itens')
-      .update({ em_estoque: valor })
-      .eq('id', item.id)
-
-    if (!error) onItemAtualizado({ ...item, em_estoque: valor })
+    await persistirItem(item, { em_estoque: valor })
   }
 
   async function salvarSpecCampo(item: PedidoItem, campo: CampoTexto, valorStr: string) {
@@ -338,17 +402,17 @@ export function ItensTab({
     if (valor === (item[campo] ?? null)) return
 
     const atualizacao =
-      campo === 'tamanho'
-        ? { tamanho: valor }
-        : campo === 'numero'
-          ? { numero: valor }
-          : campo === 'cor'
-            ? { cor: valor }
-            : { observacao: valor }
+      campo === 'ca'
+        ? { ca: valor }
+        : campo === 'tamanho'
+          ? { tamanho: valor }
+          : campo === 'numero'
+            ? { numero: valor }
+            : campo === 'cor'
+              ? { cor: valor }
+              : { observacao: valor }
 
-    const { error } = await supabase.from('pedido_itens').update(atualizacao).eq('id', item.id)
-
-    if (!error) onItemAtualizado({ ...item, [campo]: valor })
+    await persistirItem(item, atualizacao)
   }
 
   function atualizarCodigoInput(itemId: string, valor: string) {
@@ -384,24 +448,16 @@ export function ItensTab({
       }
 
       if (dados.encontrado && dados.produto) {
-        const { error } = await supabase
-          .from('pedido_itens')
-          .update({
-            codigo_produto_omie: dados.produto.codigoProduto,
-            descricao: dados.produto.descricao,
-          })
-          .eq('id', item.id)
+        const ok = await persistirItem(item, {
+          codigo_produto_omie: dados.produto.codigoProduto,
+          descricao: dados.produto.descricao,
+        })
 
-        if (error) {
+        if (!ok) {
           setStatusCodigoPorItem((atual) => ({ ...atual, [item.id]: 'erro' }))
           return
         }
 
-        onItemAtualizado({
-          ...item,
-          codigo_produto_omie: dados.produto.codigoProduto,
-          descricao: dados.produto.descricao,
-        })
         setSpecPorItem((atual) => ({
           ...atual,
           [item.id]: { ...spec(item.id), descricao: dados.produto.descricao },
@@ -417,19 +473,27 @@ export function ItensTab({
 
   return (
     <div className="mt-4 flex flex-col gap-3">
-      {itensVisiveis.map((item) => {
+      {linhas.map((item) => {
+        const ehRascunho = item.id === ID_RASCUNHO
         const itemSpec = spec(item.id)
         const statusCodigo = statusCodigoPorItem[item.id] ?? 'idle'
         const corMargem = corMargemPrecoVenda(item.custo_final, Number(precoVendaAtual(item.id)))
 
         const detalhes = [
+          `Qtd. ${item.quantidade}`,
+          item.ca?.trim() ? `CA ${item.ca.trim()}` : null,
           item.tamanho?.trim() ? `Tam. ${item.tamanho.trim()}` : null,
           item.numero?.trim() ? `Nº ${item.numero.trim()}` : null,
           item.cor?.trim() ? `Cor ${item.cor.trim()}` : null,
         ].filter((detalhe): detalhe is string => detalhe !== null)
 
         return (
-          <div key={item.id} className="rounded-lg border border-white/10 bg-surface p-4">
+          <div
+            key={item.id}
+            className={`rounded-lg border bg-surface p-4 ${
+              ehRascunho ? 'border-dashed border-accent-primary/50' : 'border-white/10'
+            }`}
+          >
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="flex flex-1 flex-wrap gap-2">
                 {!somenteLeitura && (
@@ -532,21 +596,18 @@ export function ItensTab({
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-3 pt-5 font-mono text-xs text-muted">
-                <span>Qtd. {item.quantidade}</span>
-                {item.ca && <span>CA {item.ca}</span>}
                 {item.em_estoque && (
                   <span className="inline-flex items-center rounded-full border border-accent-compras/40 bg-accent-compras/15 px-2 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wide text-accent-compras">
                     Em estoque
                   </span>
                 )}
-                {podeGerenciarItens && (
+                {podeGerenciarItens && !ehRascunho && (
                   <button
                     type="button"
                     onClick={() => removerItem(item)}
-                    disabled={removendoItemId === item.id}
-                    className="font-sans text-xs font-medium text-accent-danger hover:underline disabled:opacity-50"
+                    className="font-sans text-xs font-medium text-accent-danger hover:underline"
                   >
-                    {removendoItemId === item.id ? 'Removendo…' : 'Remover'}
+                    Remover
                   </button>
                 )}
               </div>
@@ -563,8 +624,33 @@ export function ItensTab({
             )}
 
             {!somenteLeitura && (
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <div className="w-24">
+                  <label className="block text-xs text-muted">Quantidade</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={quantidadeAtual(item)}
+                    onChange={(e) =>
+                      setQuantidadePorItem((atual) => ({ ...atual, [item.id]: e.target.value }))
+                    }
+                    onBlur={(e) => salvarQuantidade(item, e.target.value)}
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <div className="w-28">
+                  <label className="block text-xs text-muted">CA</label>
+                  <input
+                    type="text"
+                    value={itemSpec.ca}
+                    onChange={(e) => atualizarSpecCampo(item.id, 'ca', e.target.value)}
+                    onBlur={(e) => salvarSpecCampo(item, 'ca', e.target.value)}
+                    placeholder="—"
+                    className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <div className="min-w-[100px] flex-1">
                   <label className="block text-xs text-muted">Tamanho</label>
                   <input
                     type="text"
@@ -575,7 +661,7 @@ export function ItensTab({
                     className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
                   />
                 </div>
-                <div>
+                <div className="min-w-[100px] flex-1">
                   <label className="block text-xs text-muted">Número</label>
                   <input
                     type="text"
@@ -586,7 +672,7 @@ export function ItensTab({
                     className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
                   />
                 </div>
-                <div>
+                <div className="min-w-[100px] flex-1">
                   <label className="block text-xs text-muted">Cor</label>
                   <input
                     type="text"
@@ -656,123 +742,46 @@ export function ItensTab({
                 </label>
               </div>
             )}
+
+            {ehRascunho && (
+              <div className="mt-3 border-t border-white/5 pt-3">
+                {erroRascunho && (
+                  <p className="mb-2 text-xs text-accent-danger">{erroRascunho}</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={salvarRascunho}
+                    disabled={salvandoRascunho}
+                    className="rounded-md bg-accent-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                  >
+                    {salvandoRascunho ? 'Salvando…' : 'Adicionar item'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={limparRascunhoLocal}
+                    className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-medium text-primary hover:bg-white/5"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )
       })}
-      {itensVisiveis.length === 0 && (
+      {itensVisiveis.length === 0 && !itemRascunho && (
         <p className="py-4 text-center text-sm text-muted">Nenhum item cadastrado.</p>
       )}
 
-      {podeGerenciarItens && !mostrarNovoItem && (
+      {podeGerenciarItens && !itemRascunho && (
         <button
           type="button"
-          onClick={() => setMostrarNovoItem(true)}
+          onClick={() => setItemRascunho(rascunhoVazio(pedidoId))}
           className="w-fit rounded-md border border-dashed border-white/20 px-3 py-1.5 text-xs font-medium text-primary hover:border-accent-primary hover:text-accent-primary"
         >
           + Adicionar item
         </button>
-      )}
-
-      {podeGerenciarItens && mostrarNovoItem && (
-        <div className="rounded-lg border border-white/10 bg-surface p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Novo item</p>
-          {erroNovoItem && <p className="mt-2 text-xs text-accent-danger">{erroNovoItem}</p>}
-          <div className="mt-2 flex flex-wrap gap-2">
-            <div className="min-w-[220px] flex-[2]">
-              <label className="block text-xs text-muted">Descrição</label>
-              <input
-                type="text"
-                value={novoItem.descricao}
-                onChange={(e) => atualizarNovoItemCampo('descricao', e.target.value)}
-                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-              />
-            </div>
-            <div className="w-24">
-              <label className="block text-xs text-muted">Quantidade</label>
-              <input
-                type="number"
-                min="0"
-                step="any"
-                value={novoItem.quantidade}
-                onChange={(e) => atualizarNovoItemCampo('quantidade', e.target.value)}
-                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-              />
-            </div>
-            <div className="w-28">
-              <label className="block text-xs text-muted">CA</label>
-              <input
-                type="text"
-                value={novoItem.ca}
-                onChange={(e) => atualizarNovoItemCampo('ca', e.target.value)}
-                placeholder="—"
-                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-              />
-            </div>
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            <div>
-              <label className="block text-xs text-muted">Tamanho</label>
-              <input
-                type="text"
-                value={novoItem.tamanho}
-                onChange={(e) => atualizarNovoItemCampo('tamanho', e.target.value)}
-                placeholder="—"
-                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-muted">Número</label>
-              <input
-                type="text"
-                value={novoItem.numero}
-                onChange={(e) => atualizarNovoItemCampo('numero', e.target.value)}
-                placeholder="—"
-                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-muted">Cor</label>
-              <input
-                type="text"
-                value={novoItem.cor}
-                onChange={(e) => atualizarNovoItemCampo('cor', e.target.value)}
-                placeholder="—"
-                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-              />
-            </div>
-          </div>
-          <div className="mt-2">
-            <label className="block text-xs text-muted">Observação</label>
-            <textarea
-              value={novoItem.observacao}
-              onChange={(e) => atualizarNovoItemCampo('observacao', e.target.value)}
-              rows={2}
-              placeholder="—"
-              className="input-field mt-1 w-full resize-none rounded-md px-2 py-1.5 text-sm"
-            />
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              onClick={adicionarItem}
-              disabled={salvandoNovoItem}
-              className="rounded-md bg-accent-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-            >
-              {salvandoNovoItem ? 'Salvando…' : 'Adicionar'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMostrarNovoItem(false)
-                setNovoItem(novoItemFormVazio())
-                setErroNovoItem(null)
-              }}
-              className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-medium text-primary hover:bg-white/5"
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
       )}
     </div>
   )
