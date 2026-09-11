@@ -218,6 +218,7 @@ export interface Database {
           preco_venda: number | null
           codigo_produto_omie: number | null
           em_estoque: boolean
+          excluido: boolean
           criado_em: string
         }
         Insert: {
@@ -235,6 +236,7 @@ export interface Database {
           preco_venda?: number | null
           codigo_produto_omie?: number | null
           em_estoque?: boolean
+          excluido?: boolean
           criado_em?: string
         }
         Update: {
@@ -252,6 +254,7 @@ export interface Database {
           preco_venda?: number | null
           codigo_produto_omie?: number | null
           em_estoque?: boolean
+          excluido?: boolean
           criado_em?: string
         }
         Relationships: []

@@ -41,16 +41,38 @@ function specVazio(item: PedidoItem): SpecForm {
   }
 }
 
+interface NovoItemForm {
+  descricao: string
+  quantidade: string
+  ca: string
+  tamanho: string
+  numero: string
+  cor: string
+  observacao: string
+}
+
+function novoItemFormVazio(): NovoItemForm {
+  return { descricao: '', quantidade: '1', ca: '', tamanho: '', numero: '', cor: '', observacao: '' }
+}
+
 export function ItensTab({
   itens,
   setor,
   somenteLeitura = false,
+  pedidoId,
+  omieOrcamentoId,
   onItemAtualizado,
+  onItemAdicionado,
+  onItemRemovido,
 }: {
   itens: PedidoItem[]
   setor: SetorTipo
   somenteLeitura?: boolean
+  pedidoId: string
+  omieOrcamentoId: number | null
   onItemAtualizado: (item: PedidoItem) => void
+  onItemAdicionado: (item: PedidoItem) => void
+  onItemRemovido: (itemId: string) => void
 }) {
   const [supabase] = useState(() => createClient())
   // Estado local dos inputs de preço de venda, das especificações (descrição/
@@ -97,6 +119,79 @@ export function ItensTab({
   // não os enxerga em lugar nenhum do sistema, nem edita a marcação.
   const podeMarcarEmEstoque = setor !== 'compras' && !somenteLeitura
   const itensVisiveis = setor === 'compras' ? itens.filter((item) => !item.em_estoque) : itens
+
+  // Adicionar/remover item só é permitido enquanto o pedido nunca foi mandado
+  // pro Omie (omie_orcamento_id nulo) — depois disso o Omie tem sua própria
+  // cópia do det do pedido, e mudar itens só aqui deixaria as duas pontas
+  // dessincronizadas silenciosamente. "Remover" é soft-delete (excluido=true):
+  // não existe policy de delete físico em pedido_itens (regra de ouro).
+  const podeGerenciarItens = omieOrcamentoId === null && !somenteLeitura
+
+  const [mostrarNovoItem, setMostrarNovoItem] = useState(false)
+  const [novoItem, setNovoItem] = useState<NovoItemForm>(novoItemFormVazio)
+  const [salvandoNovoItem, setSalvandoNovoItem] = useState(false)
+  const [erroNovoItem, setErroNovoItem] = useState<string | null>(null)
+  const [removendoItemId, setRemovendoItemId] = useState<string | null>(null)
+
+  function atualizarNovoItemCampo(campo: keyof NovoItemForm, valor: string) {
+    setNovoItem((atual) => ({ ...atual, [campo]: valor }))
+  }
+
+  async function adicionarItem() {
+    const descricao = novoItem.descricao.trim()
+    if (!descricao) {
+      setErroNovoItem('Informe a descrição do item.')
+      return
+    }
+    const quantidade = Number(novoItem.quantidade)
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      setErroNovoItem('Informe uma quantidade válida.')
+      return
+    }
+
+    setSalvandoNovoItem(true)
+    setErroNovoItem(null)
+
+    const { data, error } = await supabase
+      .from('pedido_itens')
+      .insert({
+        pedido_id: pedidoId,
+        descricao,
+        quantidade,
+        ca: novoItem.ca.trim() || null,
+        tamanho: novoItem.tamanho.trim() || null,
+        numero: novoItem.numero.trim() || null,
+        cor: novoItem.cor.trim() || null,
+        observacao: novoItem.observacao.trim() || null,
+      })
+      .select()
+      .single()
+
+    setSalvandoNovoItem(false)
+
+    if (error || !data) {
+      setErroNovoItem('Não foi possível adicionar o item. Tente novamente.')
+      return
+    }
+
+    onItemAdicionado(data)
+    setNovoItem(novoItemFormVazio())
+    setMostrarNovoItem(false)
+  }
+
+  async function removerItem(item: PedidoItem) {
+    const confirmado = window.confirm(`Remover o item "${item.descricao}" deste pedido?`)
+    if (!confirmado) return
+
+    setRemovendoItemId(item.id)
+    const { error } = await supabase
+      .from('pedido_itens')
+      .update({ excluido: true })
+      .eq('id', item.id)
+    setRemovendoItemId(null)
+
+    if (!error) onItemRemovido(item.id)
+  }
 
   function precoVendaAtual(itemId: string): string {
     return precoVendaPorItem[itemId] ?? ''
@@ -444,6 +539,16 @@ export function ItensTab({
                     Em estoque
                   </span>
                 )}
+                {podeGerenciarItens && (
+                  <button
+                    type="button"
+                    onClick={() => removerItem(item)}
+                    disabled={removendoItemId === item.id}
+                    className="font-sans text-xs font-medium text-accent-danger hover:underline disabled:opacity-50"
+                  >
+                    {removendoItemId === item.id ? 'Removendo…' : 'Remover'}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -556,6 +661,118 @@ export function ItensTab({
       })}
       {itensVisiveis.length === 0 && (
         <p className="py-4 text-center text-sm text-muted">Nenhum item cadastrado.</p>
+      )}
+
+      {podeGerenciarItens && !mostrarNovoItem && (
+        <button
+          type="button"
+          onClick={() => setMostrarNovoItem(true)}
+          className="w-fit rounded-md border border-dashed border-white/20 px-3 py-1.5 text-xs font-medium text-primary hover:border-accent-primary hover:text-accent-primary"
+        >
+          + Adicionar item
+        </button>
+      )}
+
+      {podeGerenciarItens && mostrarNovoItem && (
+        <div className="rounded-lg border border-white/10 bg-surface p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Novo item</p>
+          {erroNovoItem && <p className="mt-2 text-xs text-accent-danger">{erroNovoItem}</p>}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <div className="min-w-[220px] flex-[2]">
+              <label className="block text-xs text-muted">Descrição</label>
+              <input
+                type="text"
+                value={novoItem.descricao}
+                onChange={(e) => atualizarNovoItemCampo('descricao', e.target.value)}
+                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div className="w-24">
+              <label className="block text-xs text-muted">Quantidade</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={novoItem.quantidade}
+                onChange={(e) => atualizarNovoItemCampo('quantidade', e.target.value)}
+                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div className="w-28">
+              <label className="block text-xs text-muted">CA</label>
+              <input
+                type="text"
+                value={novoItem.ca}
+                onChange={(e) => atualizarNovoItemCampo('ca', e.target.value)}
+                placeholder="—"
+                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+              />
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <div>
+              <label className="block text-xs text-muted">Tamanho</label>
+              <input
+                type="text"
+                value={novoItem.tamanho}
+                onChange={(e) => atualizarNovoItemCampo('tamanho', e.target.value)}
+                placeholder="—"
+                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-muted">Número</label>
+              <input
+                type="text"
+                value={novoItem.numero}
+                onChange={(e) => atualizarNovoItemCampo('numero', e.target.value)}
+                placeholder="—"
+                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-muted">Cor</label>
+              <input
+                type="text"
+                value={novoItem.cor}
+                onChange={(e) => atualizarNovoItemCampo('cor', e.target.value)}
+                placeholder="—"
+                className="input-field mt-1 w-full rounded-md px-2 py-1.5 text-sm"
+              />
+            </div>
+          </div>
+          <div className="mt-2">
+            <label className="block text-xs text-muted">Observação</label>
+            <textarea
+              value={novoItem.observacao}
+              onChange={(e) => atualizarNovoItemCampo('observacao', e.target.value)}
+              rows={2}
+              placeholder="—"
+              className="input-field mt-1 w-full resize-none rounded-md px-2 py-1.5 text-sm"
+            />
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={adicionarItem}
+              disabled={salvandoNovoItem}
+              className="rounded-md bg-accent-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              {salvandoNovoItem ? 'Salvando…' : 'Adicionar'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMostrarNovoItem(false)
+                setNovoItem(novoItemFormVazio())
+                setErroNovoItem(null)
+              }}
+              className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-medium text-primary hover:bg-white/5"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

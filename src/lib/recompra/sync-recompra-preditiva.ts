@@ -410,6 +410,7 @@ async function resolverMapaCaPorItemCodigo(): Promise<Map<string, string>> {
     .select("codigo_produto_omie, ca, criado_em")
     .not("codigo_produto_omie", "is", null)
     .not("ca", "is", null)
+    .eq("excluido", false)
     .order("criado_em", { ascending: false });
 
   if (error) {

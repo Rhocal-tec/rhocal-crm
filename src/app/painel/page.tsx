@@ -166,6 +166,7 @@ export default function PainelPage() {
             .from('pedido_itens')
             .select('pedido_id, preco_venda, quantidade')
             .in('pedido_id', idsAtivos)
+            .eq('excluido', false)
           if (erroItens) throw erroItens
           // preco_venda é o preço UNITÁRIO do item — precisa multiplicar pela
           // quantidade para chegar no valor da linha.

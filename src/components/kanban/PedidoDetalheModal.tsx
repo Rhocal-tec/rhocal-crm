@@ -70,6 +70,14 @@ export function PedidoDetalheModal({
     0,
   )
 
+  function handleItemAdicionado(itemNovo: PedidoItem) {
+    setItens((atual) => [...atual, itemNovo])
+  }
+
+  function handleItemRemovido(itemId: string) {
+    setItens((atual) => atual.filter((item) => item.id !== itemId))
+  }
+
   async function handleItemAtualizado(itemAtualizado: PedidoItem) {
     // Updater funcional: preserva o acúmulo quando o onItemAtualizado é
     // chamado várias vezes seguidas antes do re-render (ex: vínculo de
@@ -128,6 +136,7 @@ export function PedidoDetalheModal({
           .from('pedido_itens')
           .select('*')
           .eq('pedido_id', pedidoId as string)
+          .eq('excluido', false)
           .order('criado_em', { ascending: true }),
       ])
 
@@ -646,7 +655,11 @@ export function PedidoDetalheModal({
               itens={itens}
               setor={setor}
               somenteLeitura={somenteLeituraComercial}
+              pedidoId={pedido.id}
+              omieOrcamentoId={pedido.omie_orcamento_id}
               onItemAtualizado={handleItemAtualizado}
+              onItemAdicionado={handleItemAdicionado}
+              onItemRemovido={handleItemRemovido}
             />
           )}
 

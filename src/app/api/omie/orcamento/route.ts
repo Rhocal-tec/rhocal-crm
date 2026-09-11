@@ -285,6 +285,7 @@ export async function POST(request: Request) {
         .from('pedido_itens')
         .select('*')
         .eq('pedido_id', pedidoId)
+        .eq('excluido', false)
 
       if (erroItens || !itens || itens.length === 0) {
         return NextResponse.json({ erro: 'O pedido não tem itens.' }, { status: 400 })

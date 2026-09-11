@@ -132,6 +132,7 @@ export function InteligenciaComercial() {
                 .from('pedido_itens')
                 .select('pedido_id, descricao, preco_venda, quantidade')
                 .in('pedido_id', idsPedidos)
+                .eq('excluido', false)
             : Promise.resolve({ data: [], error: null }),
           idsPedidos.length > 0
             ? supabase

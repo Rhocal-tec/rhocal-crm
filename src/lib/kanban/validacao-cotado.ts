@@ -15,6 +15,7 @@ export async function validarPedidoParaCotado(
     .from('pedido_itens')
     .select('id, descricao, custo_final, em_estoque')
     .eq('pedido_id', pedidoId)
+    .eq('excluido', false)
 
   if (erroItens || !todosItens) {
     return { ok: false, mensagem: 'Não foi possível validar as cotações do pedido.' }
