@@ -12,6 +12,7 @@
 
 import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useEmpresa } from '@/contexts/EmpresaContext'
 
 type Estado = 'idle' | 'ligando' | 'sucesso' | 'erro'
 
@@ -25,6 +26,7 @@ export default function BotaoLigar({
   className?: string
 }) {
   const { user } = useAuth()
+  const { empresaAtiva } = useEmpresa()
   const [estado, setEstado] = useState<Estado>('idle')
   const [mensagemErro, setMensagemErro] = useState('')
 
@@ -52,6 +54,10 @@ export default function BotaoLigar({
           numero_destino: numeroDestino,
           usuario_id: user.id,
           oportunidade_id: oportunidadeId ?? null,
+          // Fallback pra quando a chamada não tem oportunidade vinculada — a
+          // rota não tem outra forma de saber a empresa (profiles não guarda
+          // isso; ver EmpresaContext).
+          empresa_id: empresaAtiva?.id ?? null,
         }),
       })
 

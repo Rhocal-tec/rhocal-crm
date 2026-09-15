@@ -82,11 +82,36 @@ export async function GET(req: NextRequest) {
 
     if (!error && chamada) {
       sincronizadas++;
+      // Chamada sincronizada pelo cron não tem usuário logado nem contexto de
+      // browser (diferente do click-to-call) — a única forma de descobrir a
+      // empresa aqui é via oportunidade vinculada. Sem match de oportunidade,
+      // empresa_id fica null (não há como adivinhar).
       if (!chamada.oportunidade_id) {
         await supabase.rpc("vincular_chamada_oportunidade", {
           chamada_id: chamada.id,
         });
         vinculadas++;
+
+        const { data: chamadaAtualizada } = await supabase
+          .from("chamadas")
+          .select("oportunidade_id")
+          .eq("id", chamada.id)
+          .single();
+
+        if (chamadaAtualizada?.oportunidade_id) {
+          const { data: oportunidade } = await supabase
+            .from("oportunidades")
+            .select("empresa_id")
+            .eq("id", chamadaAtualizada.oportunidade_id)
+            .maybeSingle();
+
+          if (oportunidade?.empresa_id) {
+            await supabase
+              .from("chamadas")
+              .update({ empresa_id: oportunidade.empresa_id })
+              .eq("id", chamada.id);
+          }
+        }
       }
     }
   }

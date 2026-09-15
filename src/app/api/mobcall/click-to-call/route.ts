@@ -16,7 +16,7 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    const { numero_destino, oportunidade_id, usuario_id, device } =
+    const { numero_destino, oportunidade_id, usuario_id, device, empresa_id } =
       await req.json();
 
     if (!numero_destino || !usuario_id) {
@@ -38,6 +38,22 @@ export async function POST(req: NextRequest) {
         { error: "Usuário não tem ramal Mobcall configurado em profiles.ramal_mobcall" },
         { status: 400 }
       );
+    }
+
+    // 1b. Resolve a empresa da chamada: se houver oportunidade vinculada, ela
+    // manda (mesma empresa dona da oportunidade — fase 30). Sem oportunidade,
+    // não há como descobrir a empresa no servidor (profiles não tem vínculo de
+    // empresa — usuário transita livremente entre RHOCAL/MATSEG), então usa o
+    // `empresa_id` que o client já manda (vindo de `useEmpresa()`, a empresa
+    // ativa no navegador de quem clicou em "Ligar").
+    let empresaIdResolvido: string | null = empresa_id ?? null;
+    if (oportunidade_id) {
+      const { data: oportunidade } = await supabase
+        .from("oportunidades")
+        .select("empresa_id")
+        .eq("id", oportunidade_id)
+        .maybeSingle();
+      if (oportunidade?.empresa_id) empresaIdResolvido = oportunidade.empresa_id;
     }
 
     // 2. Dispara a chamada na Mobcall
@@ -78,6 +94,7 @@ export async function POST(req: NextRequest) {
         numero_destino,
         oportunidade_id: oportunidade_id ?? null,
         usuario_id,
+        empresa_id: empresaIdResolvido,
         iniciada_em: new Date().toISOString(),
         payload_bruto: mobcallData,
       })

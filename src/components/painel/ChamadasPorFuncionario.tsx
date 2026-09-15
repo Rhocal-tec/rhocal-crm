@@ -44,7 +44,13 @@ function formatarDuracao(segundos: number) {
   return `${min}m`
 }
 
-export default function ChamadasPorFuncionario({ range }: { range: RangePeriodo }) {
+export default function ChamadasPorFuncionario({
+  range,
+  empresaId,
+}: {
+  range: RangePeriodo
+  empresaId: string
+}) {
   const [supabase] = useState(() => createClient())
   const [linhas, setLinhas] = useState<LinhaResumo[]>([])
   const [carregando, setCarregando] = useState(true)
@@ -61,6 +67,7 @@ export default function ChamadasPorFuncionario({ range }: { range: RangePeriodo 
         let query = supabase
           .from('chamadas')
           .select('usuario_id, direcao, status, duracao_segundos, iniciada_em')
+          .eq('empresa_id', empresaId)
 
         if (range.inicio) {
           query = query.gte('iniciada_em', `${range.inicio}T00:00:00`)
@@ -123,7 +130,7 @@ export default function ChamadasPorFuncionario({ range }: { range: RangePeriodo 
     return () => {
       ativo = false
     }
-  }, [supabase, range.inicio, range.fim])
+  }, [supabase, range.inicio, range.fim, empresaId])
 
   const totalGeral = linhas.reduce((acc, l) => acc + l.total, 0)
 

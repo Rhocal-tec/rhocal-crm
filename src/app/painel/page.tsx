@@ -6,7 +6,9 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { createClient } from '@/lib/supabase/client'
 import { AppHeader } from '@/components/layout/AppHeader'
+import AnaliticoPorFuncionario from '@/components/painel/AnaliticoPorFuncionario'
 import ChamadasPorFuncionario from '@/components/painel/ChamadasPorFuncionario'
+import ChamadasSemEmpresa from '@/components/painel/ChamadasSemEmpresa'
 import { ErrosRecentesSection } from '@/components/painel/ErrosRecentesSection'
 import { FiltroPeriodo } from '@/components/painel/FiltroPeriodo'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
@@ -546,8 +548,14 @@ export default function PainelPage() {
           </div>
         </div>
 
+        {empresaAtiva && (
+          <div className="mt-6">
+            <ChamadasPorFuncionario range={range} empresaId={empresaAtiva.id} />
+          </div>
+        )}
+
         <div className="mt-6">
-          <ChamadasPorFuncionario range={range} />
+          <ChamadasSemEmpresa range={range} />
         </div>
 
         {carregando && <p className="mt-4 text-sm text-muted">Atualizando dados…</p>}
@@ -630,6 +638,17 @@ export default function PainelPage() {
         </div>
 
         {oportCarregando && <p className="mt-4 text-sm text-muted">Atualizando dados…</p>}
+
+        {empresaAtiva && (
+          <>
+            <h2 className="mt-10 font-heading text-xl font-semibold tracking-wide text-primary">
+              Analítico por funcionário
+            </h2>
+            <div className="mt-4">
+              <AnaliticoPorFuncionario range={range} empresaId={empresaAtiva.id} />
+            </div>
+          </>
+        )}
 
         <ErrosRecentesSection />
       </main>
