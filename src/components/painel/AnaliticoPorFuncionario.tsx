@@ -46,7 +46,7 @@ type ChamadaBruta = Pick<
   Database['public']['Tables']['chamadas']['Row'],
   'id' | 'usuario_id' | 'direcao' | 'status' | 'numero_origem' | 'numero_destino' | 'duracao_segundos' | 'iniciada_em'
 >
-type Profile = Pick<Database['public']['Tables']['profiles']['Row'], 'id' | 'nome'>
+type Profile = Pick<Database['public']['Tables']['profiles']['Row'], 'id' | 'nome' | 'ativo'>
 
 const SEM_ATRIBUICAO_ID = 'sem-atribuicao'
 const SEM_ATRIBUICAO_NOME = 'Não atribuído'
@@ -92,6 +92,7 @@ interface ChamadaLinha {
 interface AgregadoFuncionario {
   id: string
   nome: string
+  ativo: boolean
   orcamentos: { total: number; diretos: number; normais: number; valorTotal: number; lista: PedidoLinha[] }
   efetuados: { total: number; valorTotal: number; lista: PedidoLinha[] }
   tarefas: {
@@ -112,10 +113,11 @@ interface AgregadoFuncionario {
   }
 }
 
-function novoAgregado(id: string, nome: string): AgregadoFuncionario {
+function novoAgregado(id: string, nome: string, ativo = true): AgregadoFuncionario {
   return {
     id,
     nome,
+    ativo,
     orcamentos: { total: 0, diretos: 0, normais: 0, valorTotal: 0, lista: [] },
     efetuados: { total: 0, valorTotal: 0, lista: [] },
     tarefas: { total: 0, porSituacao: {}, porTipo: {}, lista: [] },
@@ -224,7 +226,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           { data: interacoesData, error: erroInteracoes },
           { data: chamadasData, error: erroChamadas },
         ] = await Promise.all([
-          supabase.from('profiles').select('id, nome'),
+          supabase.from('profiles').select('id, nome, ativo'),
           supabase
             .from('pedidos')
             .select('id, numero, cliente_nome, status, orcamento_direto, criado_por, criado_em')
@@ -293,7 +295,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
 
         const mapa = new Map<string, AgregadoFuncionario>()
         for (const p of (profilesData ?? []) as Profile[]) {
-          mapa.set(p.id, novoAgregado(p.id, p.nome))
+          mapa.set(p.id, novoAgregado(p.id, p.nome, p.ativo))
         }
 
         // 1) Orçamentos + 2) Pedidos efetuados — agrupados por criado_por
@@ -423,16 +425,25 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
   }
 
   return (
-    <section className="rounded-lg border border-white/10 bg-surface p-4">
+    <section className="print-analitico-funcionario rounded-lg border border-white/10 bg-surface p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-sm font-medium text-primary">Analítico por funcionário</h3>
-        <input
-          type="text"
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          placeholder="Buscar funcionário..."
-          className="input-field w-56 rounded-md px-3 py-1.5 text-sm"
-        />
+        <div className="no-print flex items-center gap-2">
+          <input
+            type="text"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar funcionário..."
+            className="input-field w-56 rounded-md px-3 py-1.5 text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="rounded-md border border-white/15 px-3 py-1.5 text-sm text-primary/80 transition-colors hover:bg-white/10"
+          >
+            🖨️ Imprimir
+          </button>
+        </div>
       </div>
 
       {carregando && <p className="text-sm text-muted">Carregando...</p>}
@@ -511,7 +522,10 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
                       onClick={() => alternarExpandido(l.id)}
                       className="cursor-pointer border-t border-white/5 hover:bg-white/5"
                     >
-                      <td className="px-3 py-2.5 font-medium text-primary">{l.nome}</td>
+                      <td className="px-3 py-2.5 font-medium text-primary">
+                        {l.nome}
+                        {!l.ativo && <span className="ml-1.5 font-normal text-muted">(inativo)</span>}
+                      </td>
 
                       <td className="border-l border-white/5 px-2 py-2.5 text-center text-primary">
                         {l.orcamentos.total}
@@ -646,7 +660,7 @@ function DetalhePainel({ titulo, children }: { titulo: string; children: React.R
     <div className="rounded-md border border-white/10 bg-surface p-3">
       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">{titulo}</p>
       {temConteudo ? (
-        <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">{children}</div>
+        <div className="print-scroll-livre max-h-48 space-y-1.5 overflow-y-auto pr-1">{children}</div>
       ) : (
         <p className="text-xs text-muted/70">Nenhum registro no período.</p>
       )}

@@ -101,6 +101,7 @@ export interface Database {
           setor: SetorTipo
           vendedor_omie_id: string | null
           ramal_mobcall: string | null
+          ativo: boolean
           criado_em: string
         }
         Insert: {
@@ -109,6 +110,7 @@ export interface Database {
           setor: SetorTipo
           vendedor_omie_id?: string | null
           ramal_mobcall?: string | null
+          ativo?: boolean
           criado_em?: string
         }
         Update: {
@@ -117,6 +119,7 @@ export interface Database {
           setor?: SetorTipo
           vendedor_omie_id?: string | null
           ramal_mobcall?: string | null
+          ativo?: boolean
           criado_em?: string
         }
         Relationships: []

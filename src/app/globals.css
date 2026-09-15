@@ -70,3 +70,39 @@ body {
     text-wrap: balance;
   }
 }
+
+/* Impressão do Analítico por Funcionário (Painel executivo) — isola só essa
+   seção na folha impressa (header, filtros de período e demais cards do
+   Painel somem) e força fundo claro/texto escuro: o tema padrão do sistema
+   é escuro, o que gastaria tinta à toa e ficaria ilegível no papel. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-analitico-funcionario,
+  .print-analitico-funcionario * {
+    visibility: visible;
+  }
+  .print-analitico-funcionario {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .print-analitico-funcionario,
+  .print-analitico-funcionario * {
+    background: #fff !important;
+    color: #000 !important;
+    border-color: #ccc !important;
+  }
+  .print-analitico-funcionario .no-print {
+    display: none !important;
+  }
+  /* Os blocos de detalhe (expandidos) têm scroll interno na tela — na
+     impressão isso cortaria conteúdo fora da área visível, então libera
+     a altura pra sair tudo na folha. */
+  .print-analitico-funcionario .print-scroll-livre {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

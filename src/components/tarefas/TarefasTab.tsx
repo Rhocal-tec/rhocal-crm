@@ -206,11 +206,13 @@ export function TarefasTab({
               disabled={salvando}
             >
               <option value="">—</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nome}
-                </option>
-              ))}
+              {profiles
+                .filter((p) => p.ativo)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nome}
+                  </option>
+                ))}
             </select>
           </div>
           <div>

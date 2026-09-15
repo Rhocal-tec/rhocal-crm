@@ -54,6 +54,7 @@ export function CriarTarefaClienteModal({
     supabase
       .from('profiles')
       .select('*')
+      .eq('ativo', true)
       .then(({ data }) => setProfiles(data ?? []))
   }, [cliente, supabase])
 

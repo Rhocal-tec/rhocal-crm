@@ -46,6 +46,7 @@ export function TarefaModal({
     supabase
       .from('profiles')
       .select('*')
+      .eq('ativo', true)
       .then(({ data }) => setProfiles(data ?? []))
   }, [supabase])
 
