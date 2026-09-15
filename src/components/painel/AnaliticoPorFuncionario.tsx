@@ -195,6 +195,21 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
       setErro(null)
 
       try {
+        // Período de tarefas filtra por `data_prevista` (coluna `date`, sem
+        // hora/fuso — valor cru vem como 'YYYY-MM-DD', confirmado direto no
+        // banco), não por `criado_em`: uma leva grande de tarefas foi
+        // importada do Omie de uma vez (todas com `criado_em` do dia da
+        // importação), então filtrar por criação escondia praticamente tudo
+        // do "Mês atual" — `data_prevista` reflete quando a tarefa de fato
+        // está agendada, que é o que faz sentido pro recorte de período aqui.
+        // Sendo `date`, a comparação é direta com as strings do range, sem o
+        // truque de `proximoDia`/`T00:00:00` usado nas colunas timestamptz.
+        //
+        // Tarefa sem `data_prevista` (opcional — ex: boa parte das importadas
+        // do Omie) sempre aparece, não importa o período selecionado: só as
+        // que TÊM data marcada são de fato filtradas por ela. Por isso o
+        // filtro é um `.or()` (data nula OU dentro do range), não um `.gte`/
+        // `.lte` direto, que excluiria as nulas.
         let queryTarefas = supabase
           .from('tarefas')
           .select(
@@ -202,8 +217,15 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           )
           .eq('empresa_id', empresaId)
           .eq('excluida', false)
-        if (range.inicio) queryTarefas = queryTarefas.gte('criado_em', `${range.inicio}T00:00:00`)
-        if (range.fim) queryTarefas = queryTarefas.lt('criado_em', `${proximoDia(range.fim)}T00:00:00`)
+        if (range.inicio && range.fim) {
+          queryTarefas = queryTarefas.or(
+            `data_prevista.is.null,and(data_prevista.gte.${range.inicio},data_prevista.lte.${range.fim})`,
+          )
+        } else if (range.inicio) {
+          queryTarefas = queryTarefas.or(`data_prevista.is.null,data_prevista.gte.${range.inicio}`)
+        } else if (range.fim) {
+          queryTarefas = queryTarefas.or(`data_prevista.is.null,data_prevista.lte.${range.fim}`)
+        }
 
         let queryInteracoes = supabase
           .from('interacoes')
