@@ -1,21 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core'
+import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { PRAZO_COLUNAS, classificarPrazo } from '@/lib/tarefas/prazo'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
 import { useConclusaoTarefa } from '@/lib/tarefas/useConclusaoTarefa'
-import { OPORTUNIDADE_KANBAN_COLUMNS, OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
-import { podeMoverOportunidade } from '@/lib/oportunidades/permissions'
 import { TarefaColuna } from './TarefaColuna'
 import { EncadearTarefaModal } from './EncadearTarefaModal'
 import { TarefaModal } from './TarefaModal'
@@ -24,17 +15,20 @@ import { OportunidadeColumn } from '@/components/oportunidades/OportunidadeColum
 import { NovaOportunidadeModal } from '@/components/oportunidades/NovaOportunidadeModal'
 import { CadastroRelampagoModal } from '@/components/oportunidades/CadastroRelampagoModal'
 import { OportunidadeDetalheModal } from '@/components/oportunidades/OportunidadeDetalheModal'
-import type { Database, OportunidadeStatus, SetorTipo } from '@/types/database'
+import type { Database, SetorTipo } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
 type Oportunidade = Database['public']['Tables']['oportunidades']['Row']
 
-// Kanban único e contínuo: as 4 colunas de Tarefas (por prazo) seguidas das 4
-// colunas de Oportunidades (por etapa do funil), rolando horizontalmente como
-// uma coisa só. Substitui as antigas TarefasBoard/OportunidadesBoard (que
-// tinham cada uma seu próprio container de scroll) — a fusão é necessária
-// porque as 8 colunas precisam ser irmãs no mesmo container DOM pra rolar
-// juntas; não dá pra simular isso com dois componentes independentes.
+// Kanban único e contínuo: as 4 colunas de Tarefas (por prazo) seguidas de
+// UMA coluna "Oportunidades" (todos os leads ativos juntos, sem separar por
+// etapa do funil — a etapa é editável dentro do modal de detalhe), rolando
+// horizontalmente como uma coisa só. Substitui as antigas
+// TarefasBoard/OportunidadesBoard (que tinham cada uma seu próprio container
+// de scroll) — a fusão é necessária porque as colunas precisam ser irmãs no
+// mesmo container DOM pra rolar juntas; não dá pra simular isso com dois
+// componentes independentes. Sem drag-and-drop: com uma coluna só de
+// Oportunidades não há mais "outra coluna" pra soltar o card em cima.
 export function FunilBoard({ setor }: { setor: SetorTipo }) {
   const { user } = useAuth()
   const { empresaAtiva } = useEmpresa()
@@ -58,7 +52,6 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
   // ===== Oportunidades =====
   const [oportunidades, setOportunidades] = useState<Oportunidade[]>([])
   const [loadingOportunidades, setLoadingOportunidades] = useState(true)
-  const [avisoOportunidade, setAvisoOportunidade] = useState<string | null>(null)
   const [novoLeadAberto, setNovoLeadAberto] = useState(false)
   const [cadastroRelampagoAberto, setCadastroRelampagoAberto] = useState(false)
   const [nomesPorId, setNomesPorId] = useState<Record<string, string>>({})
@@ -71,8 +64,6 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
   // clicar num card de oportunidade quanto pelo fluxo "Virou oportunidade"
   // da conclusão de tarefa — uma única instância/estado serve aos dois.
   const [oportunidadeAbertaId, setOportunidadeAbertaId] = useState<string | null>(null)
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
   const {
     tarefaConcluindo,
@@ -310,7 +301,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     }
   }
 
-  // --- Oportunidades: carregamento, Realtime, drag-and-drop ---
+  // --- Oportunidades: carregamento, Realtime ---
 
   useEffect(() => {
     if (!empresaAtiva) return
@@ -396,64 +387,10 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
   }, [supabase, empresaAtiva])
 
   useEffect(() => {
-    if (!avisoOportunidade) return
-    const timeout = setTimeout(() => setAvisoOportunidade(null), 4000)
-    return () => clearTimeout(timeout)
-  }, [avisoOportunidade])
-
-  useEffect(() => {
     if (!mensagemImportacaoOportunidades) return
     const timeout = setTimeout(() => setMensagemImportacaoOportunidades(null), 8000)
     return () => clearTimeout(timeout)
   }, [mensagemImportacaoOportunidades])
-
-  const handleDragEnd = useCallback(
-    async (event: DragEndEvent) => {
-      const { active, over } = event
-      if (!over) return
-
-      const oportunidadeId = active.id as string
-      const destino = over.id as OportunidadeStatus
-      const origem = active.data.current?.status as OportunidadeStatus | undefined
-
-      // `over.id` só existe pra colunas que chamaram useDroppable — as 4
-      // colunas de Oportunidade. Colunas de Tarefa nunca se registram como
-      // droppable, então soltar um card ali nunca chega até aqui com um
-      // `destino` fora de OPORTUNIDADE_KANBAN_COLUMNS. Checagem redundante
-      // com o comportamento do dnd-kit, mantida só pra deixar a intenção
-      // explícita no código.
-      if (!origem || origem === destino || !OPORTUNIDADE_KANBAN_COLUMNS.includes(destino)) return
-
-      if (!podeMoverOportunidade(setor)) {
-        setAvisoOportunidade(
-          `Seu perfil não pode mover oportunidades para "${OPORTUNIDADE_STATUS_LABELS[destino]}".`,
-        )
-        return
-      }
-
-      const anterior = oportunidades.find((o) => o.id === oportunidadeId)
-
-      setOportunidades((atual) =>
-        atual.map((o) =>
-          o.id === oportunidadeId ? { ...o, status: destino, movido_por: user?.id ?? null } : o,
-        ),
-      )
-
-      const { error } = await supabase
-        .from('oportunidades')
-        .update({ status: destino })
-        .eq('id', oportunidadeId)
-
-      if (error) {
-        console.error('Erro ao mover oportunidade:', error.message)
-        setAvisoOportunidade('Não foi possível mover a oportunidade. Tente novamente.')
-        if (anterior) {
-          setOportunidades((atual) => atual.map((o) => (o.id === oportunidadeId ? anterior : o)))
-        }
-      }
-    },
-    [oportunidades, setor, supabase, user],
-  )
 
   async function importarOportunidadesDoOmie() {
     if (!empresaAtiva) return
@@ -561,51 +498,31 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
           {mensagemImportacaoOportunidades}
         </div>
       )}
-      {avisoOportunidade && (
-        <div className="mx-6 mt-4 rounded-md border border-accent-alert/40 bg-accent-alert/10 px-4 py-2 text-sm text-accent-alert">
-          {avisoOportunidade}
-        </div>
-      )}
 
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        <div className="flex flex-1 gap-4 overflow-x-auto p-6">
-          {PRAZO_COLUNAS.map((bucket) => (
-            <TarefaColuna
-              key={bucket}
-              bucket={bucket}
-              tarefas={tarefasVisiveis.filter((t) => classificarPrazo(t) === bucket)}
-              clienteLabelPorTarefa={clienteLabelPorTarefa}
-              responsavelPorId={profilesPorId}
-              onConcluir={abrirConcluir}
-              onIniciar={(t) => alterarSituacao(t, 'Em Execução')}
-              onCancelar={(t) => alterarSituacao(t, 'Cancelada')}
-              onReabrir={(t) => alterarSituacao(t, 'Pendente')}
-              onExcluir={excluirTarefa}
-            />
-          ))}
+      <div className="flex flex-1 gap-4 overflow-x-auto p-6">
+        {PRAZO_COLUNAS.map((bucket) => (
+          <TarefaColuna
+            key={bucket}
+            bucket={bucket}
+            tarefas={tarefasVisiveis.filter((t) => classificarPrazo(t) === bucket)}
+            clienteLabelPorTarefa={clienteLabelPorTarefa}
+            responsavelPorId={profilesPorId}
+            onConcluir={abrirConcluir}
+            onIniciar={(t) => alterarSituacao(t, 'Em Execução')}
+            onCancelar={(t) => alterarSituacao(t, 'Cancelada')}
+            onReabrir={(t) => alterarSituacao(t, 'Pendente')}
+            onExcluir={excluirTarefa}
+          />
+        ))}
 
-          {/* Divisória visual entre Tarefas e Oportunidades — só uma pista de
-              que tem mais coluna pra rolar, sem nenhum efeito funcional. */}
-          <div aria-hidden className="flex w-8 shrink-0 items-center justify-center border-l border-white/10 pl-2">
-            <span
-              className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-widest text-muted/60"
-              style={{ writingMode: 'vertical-rl' }}
-            >
-              Oportunidades
-            </span>
-          </div>
-
-          {OPORTUNIDADE_KANBAN_COLUMNS.map((status) => (
-            <OportunidadeColumn
-              key={status}
-              status={status}
-              oportunidades={oportunidades.filter((o) => o.status === status)}
-              onAbrir={setOportunidadeAbertaId}
-              nomesPorId={nomesPorId}
-            />
-          ))}
-        </div>
-      </DndContext>
+        <OportunidadeColumn
+          titulo="Oportunidades"
+          corVar="--accent-primary"
+          oportunidades={oportunidades}
+          onAbrir={setOportunidadeAbertaId}
+          nomesPorId={nomesPorId}
+        />
+      </div>
 
       <EncadearTarefaModal
         tarefaConcluida={tarefaEncadeando}

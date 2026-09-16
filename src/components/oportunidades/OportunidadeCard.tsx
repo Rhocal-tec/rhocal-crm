@@ -1,7 +1,5 @@
 'use client'
 
-import { useDraggable } from '@dnd-kit/core'
-import { CSS } from '@dnd-kit/utilities'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { diasSemMovimentacao, estaCritico, estaParado } from '@/lib/kanban/dias-parado'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
@@ -19,11 +17,6 @@ export function OportunidadeCard({
   onAbrir: (id: string) => void
   nomesPorId: Record<string, string>
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: oportunidade.id,
-    data: { status: oportunidade.status },
-  })
-
   // Fase 37.3: crítico (7+ dias) tem precedência sobre o alerta âmbar padrão
   // (3+ dias) — mesmo padrão de precedência já usado no card de Pedidos
   // entre "cotação atrasada" e o alerta âmbar de 3 dias.
@@ -46,19 +39,10 @@ export function OportunidadeCard({
       ? `${oportunidade.produto_servico.slice(0, 40)}…`
       : oportunidade.produto_servico
 
-  const style = {
-    transform: CSS.Translate.toString(transform),
-    opacity: isDragging ? 0.5 : 1,
-  }
-
   return (
     <div
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      {...attributes}
       onClick={() => onAbrir(oportunidade.id)}
-      className={`cursor-grab touch-none rounded-lg border p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing ${
+      className={`cursor-pointer rounded-lg border p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${
         critico
           ? 'border-accent-danger/60 bg-accent-danger/10'
           : parado

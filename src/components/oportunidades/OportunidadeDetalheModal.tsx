@@ -5,14 +5,15 @@ import { createClient } from '@/lib/supabase/client'
 import { Modal } from '@/components/ui/Modal'
 import { MoedaInput } from '@/components/ui/MoedaInput'
 import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
-import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
+import { OPORTUNIDADE_KANBAN_COLUMNS, OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
+import { podeMoverOportunidade } from '@/lib/oportunidades/permissions'
 import { TarefasTab } from '@/components/tarefas/TarefasTab'
 import { TarefaModal } from '@/components/tarefas/TarefaModal'
 import { HistoricoContatoTab } from '@/components/interacoes/HistoricoContatoTab'
 import HistoricoChamadas from '@/components/mobcall/HistoricoChamadas'
 import { ConverterEmOrcamentoSection } from './ConverterEmOrcamentoSection'
 import { MarcarOportunidadePerdidaSection } from './MarcarOportunidadePerdidaSection'
-import type { Database, SetorTipo } from '@/types/database'
+import type { Database, OportunidadeStatus, SetorTipo } from '@/types/database'
 
 type Oportunidade = Database['public']['Tables']['oportunidades']['Row']
 
@@ -89,6 +90,20 @@ export function OportunidadeDetalheModal({
       ativo = false
     }
   }, [oportunidadeId, supabase])
+
+  // Fase de colapso das colunas por etapa em uma única coluna "Oportunidades"
+  // (kanban só tem mais Atrasadas/Hoje/Futuras/Concluídas/Oportunidades) —
+  // sem drag-and-drop entre etapas, a troca de etapa passa a ser feita aqui.
+  // GANHO/PERDIDO continuam fora deste seletor: têm fluxo próprio
+  // (ConverterEmOrcamentoSection/MarcarOportunidadePerdidaSection).
+  async function salvarStatus(novoStatus: OportunidadeStatus) {
+    if (!oportunidade || novoStatus === oportunidade.status) return
+    const { error } = await supabase
+      .from('oportunidades')
+      .update({ status: novoStatus })
+      .eq('id', oportunidade.id)
+    if (!error) setOportunidade({ ...oportunidade, status: novoStatus })
+  }
 
   async function salvarCampoTexto(campo: CampoTexto, valor: string) {
     if (!oportunidade) return
@@ -189,9 +204,26 @@ export function OportunidadeDetalheModal({
                   <dd className="font-medium text-primary">{oportunidade.cliente_nome}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted">Status</dt>
-                  <dd className="font-medium text-primary">
-                    {OPORTUNIDADE_STATUS_LABELS[oportunidade.status]}
+                  <dt className="text-muted">Etapa</dt>
+                  <dd className="mt-0.5">
+                    {OPORTUNIDADE_KANBAN_COLUMNS.includes(oportunidade.status) &&
+                    podeMoverOportunidade(setor) ? (
+                      <select
+                        value={oportunidade.status}
+                        onChange={(e) => salvarStatus(e.target.value as OportunidadeStatus)}
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      >
+                        {OPORTUNIDADE_KANBAN_COLUMNS.map((status) => (
+                          <option key={status} value={status}>
+                            {OPORTUNIDADE_STATUS_LABELS[status]}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="font-medium text-primary">
+                        {OPORTUNIDADE_STATUS_LABELS[oportunidade.status]}
+                      </span>
+                    )}
                   </dd>
                 </div>
                 <div>
