@@ -63,9 +63,16 @@ export function useConclusaoTarefa({
 
   async function confirmarVirouOportunidade(tarefa: Tarefa) {
     if (tarefa.oportunidade_id) {
+      setErro(null)
       setSalvando(true)
-      await marcarRealizada(tarefa)
+      const { error } = await marcarRealizada(tarefa)
       setSalvando(false)
+
+      if (error) {
+        setErro('Não foi possível concluir a tarefa. Tente novamente.')
+        return
+      }
+
       setTarefaConcluindo(null)
       onAbrirOportunidade?.(tarefa.oportunidade_id)
       return
@@ -130,9 +137,23 @@ export function useConclusaoTarefa({
       return
     }
 
-    await marcarRealizada(tarefa, { oportunidade_id: novaOportunidade.id })
+    const { error: erroVinculo } = await marcarRealizada(tarefa, { oportunidade_id: novaOportunidade.id })
 
     setSalvando(false)
+
+    if (erroVinculo) {
+      // A oportunidade já foi criada nesse ponto — só o vínculo/conclusão da
+      // tarefa falhou. Mantém o modal aberto (não fecha como se tivesse dado
+      // tudo certo) pra não perder o vínculo em silêncio. Atualiza a tarefa
+      // em edição com o oportunidade_id que já existe, pra um novo clique em
+      // "Criar Oportunidade" cair no branch de tarefa-já-vinculada (só
+      // retenta marcar Realizada) em vez de criar uma segunda oportunidade
+      // duplicada.
+      setTarefaConcluindo({ ...tarefa, oportunidade_id: novaOportunidade.id })
+      setErro('Oportunidade criada, mas não foi possível concluir a tarefa. Tente novamente.')
+      return
+    }
+
     setTarefaConcluindo(null)
     onOportunidadeCriada?.()
   }
