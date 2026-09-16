@@ -60,7 +60,7 @@ export function ConcluirTarefaModal({
             onClick={() => onVirouOportunidade(tarefa)}
             className="flex flex-col items-start gap-0.5 rounded-md border border-accent-success/40 bg-accent-success/10 px-4 py-3 text-left transition-colors hover:bg-accent-success/20 disabled:opacity-50"
           >
-            <span className="text-sm font-medium text-accent-success">Virou oportunidade</span>
+            <span className="text-sm font-medium text-accent-success">Criar Oportunidade</span>
             <span className="text-xs text-muted">
               {jaTemOportunidade
                 ? 'Abre a oportunidade já vinculada a esta tarefa.'
