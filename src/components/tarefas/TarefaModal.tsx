@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { NOTIFICAR_EM_OPCOES } from '@/lib/tarefas/opcoes'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
 import { TipoTarefaSelect } from '@/components/tarefas/TipoTarefaSelect'
@@ -42,6 +43,16 @@ export function TarefaModal({
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
+  // Dados de contato (opcional) — só fazem sentido pra tarefa "solta", sem
+  // oportunidade/pedido pai (o contato já vive lá quando há um dos dois).
+  const [clienteNome, setClienteNome] = useState('')
+  const [clienteTelefone, setClienteTelefone] = useState('')
+  const [clienteCnpj, setClienteCnpj] = useState('')
+  const [contatoNome, setContatoNome] = useState('')
+  const [contatoCargo, setContatoCargo] = useState('')
+  const [contatoEmail, setContatoEmail] = useState('')
+  const semVinculo = !oportunidadeId && !pedidoId
+
   useEffect(() => {
     supabase
       .from('profiles')
@@ -75,6 +86,12 @@ export function TarefaModal({
         notificar_em: notificarEm,
         importante,
         urgente,
+        cliente_nome: clienteNome.trim() || null,
+        cliente_telefone: clienteTelefone.trim() || null,
+        cliente_cnpj: clienteCnpj.trim() || null,
+        contato_nome: contatoNome.trim() || null,
+        contato_cargo: contatoCargo.trim() || null,
+        contato_email: contatoEmail.trim() || null,
         criado_por: user.id,
       })
       .select()
@@ -180,6 +197,86 @@ export function TarefaModal({
             </label>
           </div>
         </div>
+
+        {semVinculo && (
+          <div className="flex flex-col gap-2 rounded-md border border-white/10 bg-surface-alt p-3">
+            <p className="text-xs font-medium text-primary/80">Dados de contato (opcional)</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-muted">Nome do cliente</label>
+                <input
+                  type="text"
+                  value={clienteNome}
+                  onChange={(e) => setClienteNome(e.target.value)}
+                  className="input-field mt-1 w-full rounded-md px-2.5 py-1.5 text-sm"
+                  placeholder="Ex: Cliente Teste LTDA"
+                  disabled={salvando}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted">Telefone</label>
+                <input
+                  type="tel"
+                  value={clienteTelefone}
+                  onChange={(e) => setClienteTelefone(formatarTelefoneInput(e.target.value))}
+                  className="input-field mt-1 w-full rounded-md px-2.5 py-1.5 text-sm"
+                  placeholder="(11) 91234-5678"
+                  disabled={salvando}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-muted">CNPJ</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={clienteCnpj}
+                  onChange={(e) => setClienteCnpj(e.target.value)}
+                  className="input-field mt-1 w-full rounded-md px-2.5 py-1.5 font-mono text-sm"
+                  placeholder="00.000.000/0000-00"
+                  disabled={salvando}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted">Nome do contato</label>
+                <input
+                  type="text"
+                  value={contatoNome}
+                  onChange={(e) => setContatoNome(e.target.value)}
+                  className="input-field mt-1 w-full rounded-md px-2.5 py-1.5 text-sm"
+                  placeholder="Ex: Maria Compras"
+                  disabled={salvando}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-muted">Cargo do contato</label>
+                <input
+                  type="text"
+                  value={contatoCargo}
+                  onChange={(e) => setContatoCargo(e.target.value)}
+                  className="input-field mt-1 w-full rounded-md px-2.5 py-1.5 text-sm"
+                  placeholder="Ex: Comprador"
+                  disabled={salvando}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted">E-mail do contato</label>
+                <input
+                  type="email"
+                  value={contatoEmail}
+                  onChange={(e) => setContatoEmail(e.target.value)}
+                  className="input-field mt-1 w-full rounded-md px-2.5 py-1.5 text-sm"
+                  placeholder="nome@empresa.com"
+                  disabled={salvando}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {erro && <p className="text-xs text-accent-danger">{erro}</p>}
         <div className="mt-1 flex justify-end gap-2">
           <button

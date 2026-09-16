@@ -6,13 +6,24 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { PRAZO_COLUNAS, classificarPrazo } from '@/lib/tarefas/prazo'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
+import { useConclusaoTarefa } from '@/lib/tarefas/useConclusaoTarefa'
 import { TarefaColuna } from './TarefaColuna'
 import { EncadearTarefaModal } from './EncadearTarefaModal'
+import { TarefaModal } from './TarefaModal'
+import { ConcluirTarefaModal } from './ConcluirTarefaModal'
+import { NovaOportunidadeModal } from '@/components/oportunidades/NovaOportunidadeModal'
+import { OportunidadeDetalheModal } from '@/components/oportunidades/OportunidadeDetalheModal'
 import type { Database, SetorTipo } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
 
-export function TarefasBoard({ setor }: { setor: SetorTipo }) {
+export function TarefasBoard({
+  setor,
+  onAbrirEmOportunidades,
+}: {
+  setor: SetorTipo
+  onAbrirEmOportunidades?: () => void
+}) {
   const { user } = useAuth()
   const { empresaAtiva } = useEmpresa()
   const [supabase] = useState(() => createClient())
@@ -26,9 +37,34 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
   const [pedidosPorId, setPedidosPorId] = useState<Record<string, { numero: number; cliente_nome: string }>>(
     {},
   )
-  const [tarefaEncadeando, setTarefaEncadeando] = useState<Tarefa | null>(null)
   const [importando, setImportando] = useState(false)
   const [mensagemImportacao, setMensagemImportacao] = useState<string | null>(null)
+  const [novaTarefaAberta, setNovaTarefaAberta] = useState(false)
+  const [oportunidadeAbertaId, setOportunidadeAbertaId] = useState<string | null>(null)
+
+  const {
+    tarefaConcluindo,
+    tarefaEncadeando,
+    novaOportunidadeAberta,
+    prefillNovaOportunidade,
+    salvando: salvandoConclusao,
+    abrirConcluir,
+    fecharConcluir,
+    fecharEncadear,
+    fecharNovaOportunidade,
+    confirmarVirouOportunidade,
+    confirmarAgendar,
+    confirmarSemInteresse,
+    aoOportunidadeCriada,
+  } = useConclusaoTarefa({
+    supabase,
+    onTarefaAtualizada: (atualizada) =>
+      setTarefas((atual) => atual.map((t) => (t.id === atualizada.id ? atualizada : t))),
+    onAbrirOportunidade: (id) => {
+      setOportunidadeAbertaId(id)
+      onAbrirEmOportunidades?.()
+    },
+  })
 
   useEffect(() => {
     if (!empresaAtiva) return
@@ -181,24 +217,6 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
     return mapa
   }, [tarefasVisiveis, oportunidadesPorId, pedidosPorId])
 
-  async function concluirTarefa(tarefa: Tarefa) {
-    const atualizada = { ...tarefa, situacao: 'Realizada', concluida: true }
-    setTarefas((atual) => atual.map((t) => (t.id === tarefa.id ? atualizada : t)))
-
-    const { error } = await supabase
-      .from('tarefas')
-      .update({ situacao: 'Realizada', concluida: true })
-      .eq('id', tarefa.id)
-
-    if (error) {
-      setTarefas((atual) => atual.map((t) => (t.id === tarefa.id ? tarefa : t)))
-      return
-    }
-
-    sincronizarTarefaComOmie(tarefa.id)
-    setTarefaEncadeando(atualizada)
-  }
-
   async function alterarSituacao(tarefa: Tarefa, novaSituacao: string) {
     const atualizada = { ...tarefa, situacao: novaSituacao }
     setTarefas((atual) => atual.map((t) => (t.id === tarefa.id ? atualizada : t)))
@@ -280,15 +298,23 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
           {minhaFila ? '✓ Minha fila' : 'Minha fila'}
         </button>
 
-        {setor === 'gestor' && (
+        <div className="ml-auto flex items-center gap-2">
+          {setor === 'gestor' && (
+            <button
+              onClick={importarDoOmie}
+              disabled={importando || !empresaAtiva}
+              className="rounded-md border border-accent-compras/40 bg-accent-compras/10 px-4 py-2 text-sm font-medium text-accent-compras transition-colors hover:bg-accent-compras/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {importando ? 'Importando…' : 'Importar tarefas do Omie'}
+            </button>
+          )}
           <button
-            onClick={importarDoOmie}
-            disabled={importando || !empresaAtiva}
-            className="rounded-md border border-accent-compras/40 bg-accent-compras/10 px-4 py-2 text-sm font-medium text-accent-compras transition-colors hover:bg-accent-compras/20 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setNovaTarefaAberta(true)}
+            className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-dark"
           >
-            {importando ? 'Importando…' : 'Importar tarefas do Omie'}
+            + Nova Tarefa
           </button>
-        )}
+        </div>
       </div>
 
       {mensagemImportacao && (
@@ -305,7 +331,7 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
             tarefas={tarefasVisiveis.filter((t) => classificarPrazo(t) === bucket)}
             clienteLabelPorTarefa={clienteLabelPorTarefa}
             responsavelPorId={profilesPorId}
-            onConcluir={concluirTarefa}
+            onConcluir={abrirConcluir}
             onIniciar={(t) => alterarSituacao(t, 'Em Execução')}
             onCancelar={(t) => alterarSituacao(t, 'Cancelada')}
             onReabrir={(t) => alterarSituacao(t, 'Pendente')}
@@ -316,8 +342,39 @@ export function TarefasBoard({ setor }: { setor: SetorTipo }) {
 
       <EncadearTarefaModal
         tarefaConcluida={tarefaEncadeando}
-        onClose={() => setTarefaEncadeando(null)}
+        onClose={fecharEncadear}
         onCriada={(nova) => setTarefas((atual) => [...atual, nova])}
+      />
+
+      {novaTarefaAberta && (
+        <TarefaModal
+          empresaId={empresaAtiva?.id ?? null}
+          onClose={() => setNovaTarefaAberta(false)}
+          onCriada={(nova) => setTarefas((atual) => (atual.some((t) => t.id === nova.id) ? atual : [...atual, nova]))}
+        />
+      )}
+
+      <ConcluirTarefaModal
+        tarefa={tarefaConcluindo}
+        onClose={fecharConcluir}
+        onVirouOportunidade={confirmarVirouOportunidade}
+        onAgendarNovoContato={confirmarAgendar}
+        onSemInteresse={confirmarSemInteresse}
+        salvando={salvandoConclusao}
+      />
+
+      <NovaOportunidadeModal
+        open={novaOportunidadeAberta}
+        onClose={fecharNovaOportunidade}
+        prefill={prefillNovaOportunidade}
+        onCreated={aoOportunidadeCriada}
+        empresaId={empresaAtiva?.id}
+      />
+
+      <OportunidadeDetalheModal
+        oportunidadeId={oportunidadeAbertaId}
+        onClose={() => setOportunidadeAbertaId(null)}
+        setor={setor}
       />
     </div>
   )

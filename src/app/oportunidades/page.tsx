@@ -1,31 +1,21 @@
 'use client'
 
-import { useAuth } from '@/contexts/AuthContext'
-import { AppHeader } from '@/components/layout/AppHeader'
-import { OportunidadesBoard } from '@/components/oportunidades/OportunidadesBoard'
-import { podeAcessarOportunidades } from '@/lib/oportunidades/permissions'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
+// Oportunidades virou uma aba dentro de /tarefas (Parte 3 do fluxo
+// Tarefas → Oportunidades). Mantém esta rota funcionando pra links/
+// favoritos salvos, só redirecionando pra lá.
 export default function OportunidadesPage() {
-  const { profile, loading } = useAuth()
+  const router = useRouter()
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-base text-muted">
-        Carregando…
-      </div>
-    )
-  }
+  useEffect(() => {
+    router.replace('/tarefas?aba=oportunidades')
+  }, [router])
 
   return (
-    <div className="flex min-h-screen flex-col bg-base">
-      <AppHeader />
-      {profile && podeAcessarOportunidades(profile.setor) ? (
-        <OportunidadesBoard setor={profile.setor} />
-      ) : (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted">
-          Este módulo é exclusivo dos perfis Comercial e Gestor.
-        </div>
-      )}
+    <div className="flex min-h-screen items-center justify-center bg-base text-muted">
+      Redirecionando…
     </div>
   )
 }

@@ -7,7 +7,11 @@ import { formatarDataHoraPrevista } from '@/lib/kanban/formatacao'
 import { badgeSituacao, situacaoTerminal } from '@/lib/tarefas/situacao'
 import { NOTIFICAR_EM_OPCOES, rotuloNotificarEm, TAREFA_TIPOS_CONTATO } from '@/lib/tarefas/opcoes'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
+import { useConclusaoTarefa } from '@/lib/tarefas/useConclusaoTarefa'
 import { TipoTarefaSelect } from './TipoTarefaSelect'
+import { ConcluirTarefaModal } from './ConcluirTarefaModal'
+import { EncadearTarefaModal } from './EncadearTarefaModal'
+import { NovaOportunidadeModal } from '@/components/oportunidades/NovaOportunidadeModal'
 import type { Database } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
@@ -41,6 +45,31 @@ export function TarefasTab({
   const [urgente, setUrgente] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+
+  const {
+    tarefaConcluindo,
+    tarefaEncadeando,
+    novaOportunidadeAberta,
+    prefillNovaOportunidade,
+    salvando: salvandoConclusao,
+    abrirConcluir,
+    fecharConcluir,
+    fecharEncadear,
+    fecharNovaOportunidade,
+    confirmarVirouOportunidade,
+    confirmarAgendar,
+    confirmarSemInteresse,
+    aoOportunidadeCriada,
+  } = useConclusaoTarefa({
+    supabase,
+    onTarefaAtualizada: (atualizada) =>
+      setTarefas((atual) => atual.map((t) => (t.id === atualizada.id ? atualizada : t))),
+    // Sem onAbrirOportunidade: quando a tarefa já pertence a uma oportunidade
+    // (contexto do OportunidadeDetalheModal), "abrir" seria a própria tela já
+    // visível — não há pra onde navegar. Quando a tarefa pertence a um
+    // pedido, ela nunca tem oportunidade_id pré-existente (sempre cai no
+    // branch de criar oportunidade nova), então este callback nunca dispara.
+  })
 
   useEffect(() => {
     let ativo = true
@@ -300,7 +329,9 @@ export function TarefasTab({
                 type="checkbox"
                 checked={concluida}
                 onChange={() =>
-                  alterarSituacao(tarefa, tarefa.situacao === 'Realizada' ? 'Pendente' : 'Realizada')
+                  tarefa.situacao === 'Realizada'
+                    ? alterarSituacao(tarefa, 'Pendente')
+                    : abrirConcluir(tarefa)
                 }
                 className="mt-0.5 h-4 w-4 shrink-0 accent-accent-success"
               />
@@ -376,6 +407,29 @@ export function TarefasTab({
           )
         })}
       </div>
+
+      <ConcluirTarefaModal
+        tarefa={tarefaConcluindo}
+        onClose={fecharConcluir}
+        onVirouOportunidade={confirmarVirouOportunidade}
+        onAgendarNovoContato={confirmarAgendar}
+        onSemInteresse={confirmarSemInteresse}
+        salvando={salvandoConclusao}
+      />
+
+      <EncadearTarefaModal
+        tarefaConcluida={tarefaEncadeando}
+        onClose={fecharEncadear}
+        onCriada={(nova) => setTarefas((atual) => [...atual, nova])}
+      />
+
+      <NovaOportunidadeModal
+        open={novaOportunidadeAberta}
+        onClose={fecharNovaOportunidade}
+        prefill={prefillNovaOportunidade}
+        onCreated={aoOportunidadeCriada}
+        empresaId={empresaId}
+      />
     </div>
   )
 }

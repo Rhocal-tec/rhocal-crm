@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
-import { podeAcessarOportunidades } from '@/lib/oportunidades/permissions'
 import { podeAcessarTarefas } from '@/lib/tarefas/permissions'
 import { podeAcessarRecompra } from '@/lib/recompra/permissions'
 import type { SetorTipo } from '@/types/database'
@@ -24,12 +23,12 @@ const SETOR_BADGE_CLASSES: Record<SetorTipo, string> = {
   gestor: 'bg-accent-primary/15 text-accent-primary',
 }
 
-// Ordem de exibição fixa no header: Kanban, Oportunidades, Tarefas,
+// Ordem de exibição fixa no header: Kanban, Tarefas (que agora também
+// hospeda o kanban de Oportunidades como aba interna — ver /tarefas),
 // Hora de Recomprar, Clientes, Busca, Arquivados, Painel, Inteligência.
 // `check` restringe a visibilidade por perfil; ausência de `check` = visível a todos.
 const NAV_ITEMS: { href: string; label: string; check?: (setor: SetorTipo) => boolean }[] = [
   { href: '/dashboard', label: 'Kanban' },
-  { href: '/oportunidades', label: 'Oportunidades', check: podeAcessarOportunidades },
   { href: '/tarefas', label: 'Tarefas', check: podeAcessarTarefas },
   { href: '/recompra', label: 'Hora de Recomprar', check: podeAcessarRecompra },
   { href: '/clientes', label: 'Clientes' },

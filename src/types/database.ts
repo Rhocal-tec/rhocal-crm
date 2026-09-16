@@ -453,6 +453,13 @@ export interface Database {
           excluida: boolean
           excluida_em: string | null
           excluida_por: string | null
+          cliente_nome: string | null
+          cliente_telefone: string | null
+          cliente_cnpj: string | null
+          contato_nome: string | null
+          contato_cargo: string | null
+          contato_email: string | null
+          motivo_conclusao: string | null
           criado_por: string
           criado_em: string
         }
@@ -476,6 +483,13 @@ export interface Database {
           excluida?: boolean
           excluida_em?: string | null
           excluida_por?: string | null
+          cliente_nome?: string | null
+          cliente_telefone?: string | null
+          cliente_cnpj?: string | null
+          contato_nome?: string | null
+          contato_cargo?: string | null
+          contato_email?: string | null
+          motivo_conclusao?: string | null
           criado_por: string
           criado_em?: string
         }
@@ -499,6 +513,13 @@ export interface Database {
           excluida?: boolean
           excluida_em?: string | null
           excluida_por?: string | null
+          cliente_nome?: string | null
+          cliente_telefone?: string | null
+          cliente_cnpj?: string | null
+          contato_nome?: string | null
+          contato_cargo?: string | null
+          contato_email?: string | null
+          motivo_conclusao?: string | null
           criado_por?: string
           criado_em?: string
         }
