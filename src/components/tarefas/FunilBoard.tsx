@@ -65,28 +65,39 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
   // da conclusão de tarefa — uma única instância/estado serve aos dois.
   const [oportunidadeAbertaId, setOportunidadeAbertaId] = useState<string | null>(null)
 
+  // Toast simples pra "Oportunidade criada com sucesso" (fluxo direto de
+  // "Virou oportunidade") — mesmo padrão de banner autodesaparecendo já
+  // usado nas mensagens de importação, só com o tom de sucesso.
+  const [mensagemSucesso, setMensagemSucesso] = useState<string | null>(null)
+
   const {
     tarefaConcluindo,
     tarefaEncadeando,
-    novaOportunidadeAberta,
-    prefillNovaOportunidade,
     salvando: salvandoConclusao,
+    erro: erroConclusao,
     abrirConcluir,
     fecharConcluir,
     fecharEncadear,
-    fecharNovaOportunidade,
     confirmarVirouOportunidade,
     confirmarAgendar,
     confirmarSemInteresse,
-    aoOportunidadeCriada,
   } = useConclusaoTarefa({
     supabase,
+    userId: user?.id,
+    empresaId: empresaAtiva?.id,
     onTarefaAtualizada: (atualizada) =>
       setTarefas((atual) => atual.map((t) => (t.id === atualizada.id ? atualizada : t))),
     // Tudo já fica visível na mesma tela — só precisa abrir o modal de
     // detalhe, sem nenhuma troca de aba/navegação.
     onAbrirOportunidade: (id) => setOportunidadeAbertaId(id),
+    onOportunidadeCriada: () => setMensagemSucesso('Oportunidade criada com sucesso.'),
   })
+
+  useEffect(() => {
+    if (!mensagemSucesso) return
+    const timeout = setTimeout(() => setMensagemSucesso(null), 4000)
+    return () => clearTimeout(timeout)
+  }, [mensagemSucesso])
 
   // --- Tarefas: carregamento, perfis, labels de cliente, Realtime ---
 
@@ -498,6 +509,11 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
           {mensagemImportacaoOportunidades}
         </div>
       )}
+      {mensagemSucesso && (
+        <div className="mx-6 mt-4 rounded-md border border-accent-success/40 bg-accent-success/10 px-4 py-2 text-sm text-accent-success">
+          {mensagemSucesso}
+        </div>
+      )}
 
       <div className="flex flex-1 gap-4 overflow-x-auto p-6">
         {PRAZO_COLUNAS.map((bucket) => (
@@ -545,14 +561,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         onAgendarNovoContato={confirmarAgendar}
         onSemInteresse={confirmarSemInteresse}
         salvando={salvandoConclusao}
-      />
-
-      <NovaOportunidadeModal
-        open={novaOportunidadeAberta}
-        onClose={fecharNovaOportunidade}
-        prefill={prefillNovaOportunidade}
-        onCreated={aoOportunidadeCriada}
-        empresaId={empresaAtiva?.id}
+        erro={erroConclusao}
       />
 
       <NovaOportunidadeModal open={novoLeadAberto} onClose={() => setNovoLeadAberto(false)} />

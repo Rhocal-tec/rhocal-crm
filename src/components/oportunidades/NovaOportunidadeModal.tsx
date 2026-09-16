@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
@@ -8,52 +8,23 @@ import { Modal } from '@/components/ui/Modal'
 import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { ORIGEM_OPCOES } from '@/lib/oportunidades/status'
 import { buscarClientesLocalPorNome, type ClienteSugestao } from '@/lib/clientes/buscar'
-import type { Database } from '@/types/database'
-
-type Oportunidade = Database['public']['Tables']['oportunidades']['Row']
 
 // Mesmo mínimo/debounce usados na busca por nome de Novo Orçamento (fase 18.2).
 const MIN_CARACTERES_BUSCA_CLIENTE = 3
 const DEBOUNCE_BUSCA_CLIENTE_MS = 400
 
-// Usado pelo fluxo "Virou oportunidade" da conclusão de tarefa (ver
-// useConclusaoTarefa) — vem dos campos de contato da tarefa de origem.
-// contatoNome/Cargo/Email não têm input visível neste formulário (só existem
-// em `oportunidades` desde a fase 38, sem tela de criação própria), mas vão
-// junto no insert quando vierem preenchidos — editáveis depois na aba
-// "Contato" do OportunidadeDetalheModal.
-export type NovaOportunidadePrefill = {
-  clienteNome?: string
-  clienteCnpj?: string
-  clienteTelefone?: string
-  clienteContato?: string
-  contatoNome?: string
-  contatoCargo?: string
-  contatoEmail?: string
-}
-
+// "Novo Lead" manual — o fluxo "Virou oportunidade" da conclusão de tarefa
+// (ver useConclusaoTarefa) não passa mais por aqui: cria a oportunidade
+// direto, sem formulário.
 export function NovaOportunidadeModal({
   open,
   onClose,
-  prefill,
-  onCreated,
-  empresaId,
 }: {
   open: boolean
   onClose: () => void
-  prefill?: NovaOportunidadePrefill
-  onCreated?: (oportunidade: Oportunidade) => void
-  // Sobrescreve a empresa ativa do EmpresaContext — necessário quando o
-  // formulário é aberto a partir de um registro (tarefa de um pedido/
-  // oportunidade específico) que pode pertencer a uma empresa diferente da
-  // que está selecionada no seletor do header no momento (mesmo cuidado já
-  // documentado em TarefasTab). Sem isso, o default (empresaAtiva.id) segue
-  // valendo — comportamento igual ao uso já existente em OportunidadesBoard.
-  empresaId?: string | null
 }) {
   const { user } = useAuth()
   const { empresaAtiva } = useEmpresa()
-  const empresaAlvoId = empresaId ?? empresaAtiva?.id ?? null
   const [supabase] = useState(() => createClient())
   const [clienteNome, setClienteNome] = useState('')
   const [clienteCnpj, setClienteCnpj] = useState('')
@@ -64,28 +35,6 @@ export function NovaOportunidadeModal({
   const [valorEstimado, setValorEstimado] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
-
-  // Contato (fase 38) sem input visível aqui — só carregado do prefill pra
-  // ir junto no insert quando a oportunidade nasce a partir de uma tarefa.
-  const contatoPrefillRef = useRef<{ nome: string; cargo: string; email: string }>({
-    nome: '',
-    cargo: '',
-    email: '',
-  })
-
-  useEffect(() => {
-    if (!open || !prefill) return
-    setClienteNome(prefill.clienteNome ?? '')
-    setClienteCnpj(prefill.clienteCnpj ?? '')
-    setClienteTelefone(prefill.clienteTelefone ?? '')
-    setClienteContato(prefill.clienteContato ?? '')
-    contatoPrefillRef.current = {
-      nome: prefill.contatoNome ?? '',
-      cargo: prefill.contatoCargo ?? '',
-      email: prefill.contatoEmail ?? '',
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
 
   // Fase 34: autocomplete contra a tabela `clientes` local — mais rápido que
   // consultar o Omie a cada lead novo, e já traz telefone/contato junto.
@@ -131,7 +80,6 @@ export function NovaOportunidadeModal({
     setDropdownClienteAberto(false)
     if (debounceClienteRef.current) clearTimeout(debounceClienteRef.current)
     setErro(null)
-    contatoPrefillRef.current = { nome: '', cargo: '', email: '' }
   }
 
   function fechar() {
@@ -145,7 +93,7 @@ export function NovaOportunidadeModal({
     setErro(null)
 
     if (!user) return
-    if (!empresaAlvoId) {
+    if (!empresaAtiva) {
       setErro('Não foi possível identificar a empresa ativa. Recarregue a página.')
       return
     }
@@ -162,33 +110,25 @@ export function NovaOportunidadeModal({
 
     setSalvando(true)
 
-    const { data, error } = await supabase
-      .from('oportunidades')
-      .insert({
-        cliente_nome: clienteNome.trim(),
-        cliente_cnpj: clienteCnpj.trim() || null,
-        cliente_telefone: clienteTelefone.trim() || null,
-        cliente_contato: clienteContato.trim() || null,
-        contato_nome: contatoPrefillRef.current.nome.trim() || null,
-        contato_cargo: contatoPrefillRef.current.cargo.trim() || null,
-        contato_email: contatoPrefillRef.current.email.trim() || null,
-        origem: origem.trim() || null,
-        temperatura: temperatura.trim() || null,
-        valor_estimado: valorEstimadoNumero,
-        criado_por: user.id,
-        empresa_id: empresaAlvoId,
-      })
-      .select()
-      .single()
+    const { error } = await supabase.from('oportunidades').insert({
+      cliente_nome: clienteNome.trim(),
+      cliente_cnpj: clienteCnpj.trim() || null,
+      cliente_telefone: clienteTelefone.trim() || null,
+      cliente_contato: clienteContato.trim() || null,
+      origem: origem.trim() || null,
+      temperatura: temperatura.trim() || null,
+      valor_estimado: valorEstimadoNumero,
+      criado_por: user.id,
+      empresa_id: empresaAtiva.id,
+    })
 
     setSalvando(false)
 
-    if (error || !data) {
+    if (error) {
       setErro('Não foi possível criar a oportunidade. Tente novamente.')
       return
     }
 
-    onCreated?.(data)
     resetar()
     onClose()
   }
@@ -336,7 +276,7 @@ export function NovaOportunidadeModal({
           </button>
           <button
             type="submit"
-            disabled={salvando || !empresaAlvoId}
+            disabled={salvando || !empresaAtiva}
             className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-dark disabled:opacity-50"
           >
             {salvando ? 'Criando…' : 'Criar Lead'}

@@ -18,6 +18,7 @@ export function ConcluirTarefaModal({
   onAgendarNovoContato,
   onSemInteresse,
   salvando,
+  erro,
 }: {
   tarefa: Tarefa | null
   onClose: () => void
@@ -25,6 +26,7 @@ export function ConcluirTarefaModal({
   onAgendarNovoContato: (tarefa: Tarefa) => void
   onSemInteresse: (tarefa: Tarefa, motivo: string | null) => void
   salvando?: boolean
+  erro?: string | null
 }) {
   const [modoSemInteresse, setModoSemInteresse] = useState(false)
   const [motivo, setMotivo] = useState('')
@@ -44,6 +46,12 @@ export function ConcluirTarefaModal({
     <Modal open onClose={onClose} title="Concluir tarefa" widthClassName="max-w-md">
       <p className="mb-4 text-sm text-muted">{tarefa.descricao}</p>
 
+      {erro && (
+        <div className="mb-4 rounded-md border border-accent-danger/30 bg-accent-danger/10 px-3 py-2 text-sm text-accent-danger">
+          {erro}
+        </div>
+      )}
+
       {!modoSemInteresse ? (
         <div className="flex flex-col gap-2.5">
           <button
@@ -56,7 +64,7 @@ export function ConcluirTarefaModal({
             <span className="text-xs text-muted">
               {jaTemOportunidade
                 ? 'Abre a oportunidade já vinculada a esta tarefa.'
-                : 'Cria uma nova oportunidade com os dados de contato desta tarefa.'}
+                : 'Cria uma nova oportunidade direto, com os dados de contato desta tarefa.'}
             </span>
           </button>
 

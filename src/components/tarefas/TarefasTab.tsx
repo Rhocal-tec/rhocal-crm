@@ -11,7 +11,6 @@ import { useConclusaoTarefa } from '@/lib/tarefas/useConclusaoTarefa'
 import { TipoTarefaSelect } from './TipoTarefaSelect'
 import { ConcluirTarefaModal } from './ConcluirTarefaModal'
 import { EncadearTarefaModal } from './EncadearTarefaModal'
-import { NovaOportunidadeModal } from '@/components/oportunidades/NovaOportunidadeModal'
 import type { Database } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
@@ -46,22 +45,26 @@ export function TarefasTab({
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
+  // Toast simples pra "Oportunidade criada com sucesso" (fluxo direto de
+  // "Virou oportunidade") — mesmo padrão de banner autodesaparecendo já
+  // usado no restante do app, só com o tom de sucesso.
+  const [mensagemSucesso, setMensagemSucesso] = useState<string | null>(null)
+
   const {
     tarefaConcluindo,
     tarefaEncadeando,
-    novaOportunidadeAberta,
-    prefillNovaOportunidade,
     salvando: salvandoConclusao,
+    erro: erroConclusao,
     abrirConcluir,
     fecharConcluir,
     fecharEncadear,
-    fecharNovaOportunidade,
     confirmarVirouOportunidade,
     confirmarAgendar,
     confirmarSemInteresse,
-    aoOportunidadeCriada,
   } = useConclusaoTarefa({
     supabase,
+    userId: user?.id,
+    empresaId,
     onTarefaAtualizada: (atualizada) =>
       setTarefas((atual) => atual.map((t) => (t.id === atualizada.id ? atualizada : t))),
     // Sem onAbrirOportunidade: quando a tarefa já pertence a uma oportunidade
@@ -69,7 +72,14 @@ export function TarefasTab({
     // visível — não há pra onde navegar. Quando a tarefa pertence a um
     // pedido, ela nunca tem oportunidade_id pré-existente (sempre cai no
     // branch de criar oportunidade nova), então este callback nunca dispara.
+    onOportunidadeCriada: () => setMensagemSucesso('Oportunidade criada com sucesso.'),
   })
+
+  useEffect(() => {
+    if (!mensagemSucesso) return
+    const timeout = setTimeout(() => setMensagemSucesso(null), 4000)
+    return () => clearTimeout(timeout)
+  }, [mensagemSucesso])
 
   useEffect(() => {
     let ativo = true
@@ -203,6 +213,12 @@ export function TarefasTab({
 
   return (
     <div className="mt-4 flex flex-col gap-4">
+      {mensagemSucesso && (
+        <div className="rounded-md border border-accent-success/40 bg-accent-success/10 px-3 py-2 text-sm text-accent-success">
+          {mensagemSucesso}
+        </div>
+      )}
+
       {oportunidadeId && tarefas.length > 0 && (
         <p className="text-xs text-muted">
           <span className="font-medium text-primary/80">{tentativasConcluidas}</span> tentativa(s) de
@@ -415,20 +431,13 @@ export function TarefasTab({
         onAgendarNovoContato={confirmarAgendar}
         onSemInteresse={confirmarSemInteresse}
         salvando={salvandoConclusao}
+        erro={erroConclusao}
       />
 
       <EncadearTarefaModal
         tarefaConcluida={tarefaEncadeando}
         onClose={fecharEncadear}
         onCriada={(nova) => setTarefas((atual) => [...atual, nova])}
-      />
-
-      <NovaOportunidadeModal
-        open={novaOportunidadeAberta}
-        onClose={fecharNovaOportunidade}
-        prefill={prefillNovaOportunidade}
-        onCreated={aoOportunidadeCriada}
-        empresaId={empresaId}
       />
     </div>
   )
