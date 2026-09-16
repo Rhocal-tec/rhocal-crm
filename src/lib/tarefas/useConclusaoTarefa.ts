@@ -12,10 +12,10 @@ type SupabaseClient = ReturnType<typeof createClient>
 
 // Lógica compartilhada do fluxo de conclusão de tarefa com 3 opções (virou
 // oportunidade / agendar novo contato / sem interesse) — usada tanto pelo
-// kanban /tarefas (TarefasBoard) quanto pela aba Tarefas embutida em
+// kanban único /tarefas (FunilBoard) quanto pela aba Tarefas embutida em
 // oportunidade/pedido (TarefasTab), pra não duplicar os 3 branches nos dois
 // lugares. `onAbrirOportunidade` é opcional: só faz sentido em contextos que
-// conseguem navegar/abrir o modal de oportunidade (ver comentários nos
+// conseguem abrir o modal de detalhe da oportunidade (ver comentários nos
 // pontos de uso).
 export function useConclusaoTarefa({
   supabase,
