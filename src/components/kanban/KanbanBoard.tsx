@@ -48,25 +48,18 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
   // Carrega os pedidos visíveis no kanban (tudo exceto os status terminais:
   // ARQUIVADO, PERDIDO, ENTREGUE), escopados pela empresa ativa. Refaz a
   // busca sempre que a empresa ativa muda (troca no seletor do header).
-  // Compras não enxerga orçamento direto (fase 19 — pedido que nasceu
-  // aprovado, sem passar pela cotação): não tem nada pra Compras fazer nele
-  // em nenhuma coluna, então fica de fora só pra esse setor.
   useEffect(() => {
     if (!empresaAtiva) return
     let ativo = true
     setLoading(true)
 
     async function carregar() {
-      let query = supabase
+      const { data, error } = await supabase
         .from('pedidos')
         .select('*')
         .eq('empresa_id', empresaAtiva!.id)
         .not('status', 'in', `(${STATUS_TERMINAIS.join(',')})`)
         .order('criado_em', { ascending: true })
-
-      if (setor === 'compras') query = query.eq('orcamento_direto', false)
-
-      const { data, error } = await query
 
       if (!ativo) return
       if (error) {
@@ -82,7 +75,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
     return () => {
       ativo = false
     }
-  }, [supabase, empresaAtiva, setor])
+  }, [supabase, empresaAtiva])
 
   // Nomes de todos os colaboradores, para resolver "Movido por X" nos cards.
   useEffect(() => {
@@ -119,7 +112,6 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
           const novo = payload.new
           if (novo.empresa_id !== empresaId) return
           if (ehStatusTerminal(novo.status)) return
-          if (setor === 'compras' && novo.orcamento_direto) return
           setPedidos((atual) => {
             if (atual.some((p) => p.id === novo.id)) return atual
             return [...atual, novo]
@@ -133,7 +125,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
           const atualizado = payload.new
           if (atualizado.empresa_id !== empresaId) return
           setPedidos((atual) => {
-            if (ehStatusTerminal(atualizado.status) || (setor === 'compras' && atualizado.orcamento_direto)) {
+            if (ehStatusTerminal(atualizado.status)) {
               return atual.filter((p) => p.id !== atualizado.id)
             }
             const existe = atual.some((p) => p.id === atualizado.id)
@@ -159,7 +151,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, empresaAtiva, setor])
+  }, [supabase, empresaAtiva])
 
   // Some avisos de bloqueio automaticamente após alguns segundos.
   useEffect(() => {
