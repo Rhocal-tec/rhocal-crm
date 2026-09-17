@@ -1,9 +1,10 @@
 'use client'
 
 // Seção do Painel Gestor: analítico por funcionário — cruza orçamentos,
-// pedidos efetuados, tarefas, interações e chamadas, tudo agrupado por quem
-// criou/registrou/atendeu cada um. Reaproveita o mesmo `range` de período do
-// resto do Painel (src/app/painel/page.tsx) e a `empresaId` ativa.
+// pedidos efetuados, leads/oportunidades, tarefas, interações e chamadas,
+// tudo agrupado por quem criou/registrou/atendeu cada um. Reaproveita o mesmo
+// `range` de período do resto do Painel (src/app/painel/page.tsx) e a
+// `empresaId` ativa.
 //
 // Estratégia de queries (combinada com o usuário antes de implementar):
 // busca os registros CRUS de cada tabela, uma vez cada (nunca por
@@ -24,6 +25,7 @@ import type { RangePeriodo } from '@/lib/kanban/periodo'
 import { proximoDia } from '@/lib/kanban/filtro-data'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
 import { STATUS_LABELS } from '@/lib/kanban/status'
+import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { TAREFA_SITUACAO_OPCOES } from '@/lib/tarefas/opcoes'
 import { RESULTADO_INTERACAO_OPCOES } from '@/lib/interacoes/opcoes'
 import type { Database } from '@/types/database'
@@ -33,7 +35,10 @@ type PedidoBruto = Pick<
   'id' | 'numero' | 'cliente_nome' | 'status' | 'orcamento_direto' | 'criado_por' | 'criado_em'
 >
 type ItemBruto = Pick<Database['public']['Tables']['pedido_itens']['Row'], 'pedido_id' | 'preco_venda' | 'quantidade'>
-type OportunidadeIdBruta = Pick<Database['public']['Tables']['oportunidades']['Row'], 'id' | 'numero'>
+type OportunidadeBruta = Pick<
+  Database['public']['Tables']['oportunidades']['Row'],
+  'id' | 'numero' | 'cliente_nome' | 'cliente_telefone' | 'status' | 'criado_por' | 'criado_em'
+>
 type TarefaBruta = Pick<
   Database['public']['Tables']['tarefas']['Row'],
   'id' | 'descricao' | 'responsavel' | 'situacao' | 'tipo' | 'data_prevista' | 'criado_em' | 'pedido_id' | 'oportunidade_id'
@@ -44,7 +49,15 @@ type InteracaoBruta = Pick<
 >
 type ChamadaBruta = Pick<
   Database['public']['Tables']['chamadas']['Row'],
-  'id' | 'usuario_id' | 'direcao' | 'status' | 'numero_origem' | 'numero_destino' | 'duracao_segundos' | 'iniciada_em'
+  | 'id'
+  | 'usuario_id'
+  | 'direcao'
+  | 'status'
+  | 'numero_origem'
+  | 'numero_destino'
+  | 'duracao_segundos'
+  | 'iniciada_em'
+  | 'oportunidade_id'
 >
 type Profile = Pick<Database['public']['Tables']['profiles']['Row'], 'id' | 'nome' | 'ativo'>
 
@@ -85,8 +98,18 @@ interface ChamadaLinha {
   direcao: string
   status: string
   numero: string | null
+  clienteNome: string | null
   duracaoSegundos: number | null
   iniciadaEm: string | null
+}
+
+interface OportunidadeLinha {
+  id: string
+  numero: number
+  clienteNome: string
+  clienteTelefone: string | null
+  status: string
+  criadoEm: string
 }
 
 interface AgregadoFuncionario {
@@ -95,6 +118,7 @@ interface AgregadoFuncionario {
   ativo: boolean
   orcamentos: { total: number; diretos: number; normais: number; valorTotal: number; lista: PedidoLinha[] }
   efetuados: { total: number; valorTotal: number; lista: PedidoLinha[] }
+  oportunidades: { total: number; lista: OportunidadeLinha[] }
   tarefas: {
     total: number
     porSituacao: Record<string, number>
@@ -120,6 +144,7 @@ function novoAgregado(id: string, nome: string, ativo = true): AgregadoFuncionar
     ativo,
     orcamentos: { total: 0, diretos: 0, normais: 0, valorTotal: 0, lista: [] },
     efetuados: { total: 0, valorTotal: 0, lista: [] },
+    oportunidades: { total: 0, lista: [] },
     tarefas: { total: 0, porSituacao: {}, porTipo: {}, lista: [] },
     interacoes: { total: 0, porResultado: {}, lista: [] },
     chamadas: {
@@ -164,6 +189,18 @@ function formatarDuracao(segundos: number): string {
 function formatarData(iso: string | null): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('pt-BR')
+}
+
+// Mesmo padrão de ChamadasSemEmpresa.tsx/HistoricoChamadas.tsx — chamada
+// precisa de hora, não só data, pra ser útil (várias no mesmo dia).
+function formatarDataHoraChamada(iso: string | null): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 function chamadaStatusLabel(status: string): string {
@@ -235,7 +272,9 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
 
         let queryChamadas = supabase
           .from('chamadas')
-          .select('id, usuario_id, direcao, status, numero_origem, numero_destino, duracao_segundos, iniciada_em')
+          .select(
+            'id, usuario_id, direcao, status, numero_origem, numero_destino, duracao_segundos, iniciada_em, oportunidade_id',
+          )
           .eq('empresa_id', empresaId)
         if (range.inicio) queryChamadas = queryChamadas.gte('iniciada_em', `${range.inicio}T00:00:00`)
         if (range.fim) queryChamadas = queryChamadas.lt('iniciada_em', `${proximoDia(range.fim)}T00:00:00`)
@@ -253,7 +292,10 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
             .from('pedidos')
             .select('id, numero, cliente_nome, status, orcamento_direto, criado_por, criado_em')
             .eq('empresa_id', empresaId),
-          supabase.from('oportunidades').select('id, numero').eq('empresa_id', empresaId),
+          supabase
+            .from('oportunidades')
+            .select('id, numero, cliente_nome, cliente_telefone, status, criado_por, criado_em')
+            .eq('empresa_id', empresaId),
           queryTarefas,
           queryInteracoes,
           queryChamadas,
@@ -271,14 +313,23 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
         const idsPedidosTodos = new Set(pedidosTodos.map((p) => p.id))
         const numeroPorPedidoId = new Map(pedidosTodos.map((p) => [p.id, p.numero]))
 
-        const oportunidades = (oportData ?? []) as OportunidadeIdBruta[]
-        const idsOportunidadesTodos = new Set(oportunidades.map((o) => o.id))
-        const numeroPorOportunidadeId = new Map(oportunidades.map((o) => [o.id, o.numero]))
+        const oportunidadesTodas = (oportData ?? []) as OportunidadeBruta[]
+        const idsOportunidadesTodos = new Set(oportunidadesTodas.map((o) => o.id))
+        const numeroPorOportunidadeId = new Map(oportunidadesTodas.map((o) => [o.id, o.numero]))
+        const nomePorOportunidadeId = new Map(oportunidadesTodas.map((o) => [o.id, o.cliente_nome]))
 
         // Recorte de período de pedidos, feito em JS — ver comentário no topo
         // do arquivo sobre por que `pedidos` é buscado sem filtro server-side.
         const pedidosNoPeriodo = pedidosTodos.filter((p) => dentroDoPeriodo(p.criado_em, range.inicio, range.fim))
         const idsPedidosNoPeriodo = pedidosNoPeriodo.map((p) => p.id)
+
+        // Mesma lógica: oportunidades buscadas sem filtro server-side (o
+        // conjunto completo já serve pra resolver refLabel de tarefas/
+        // interações e o nome do cliente nas chamadas, fora do período), o
+        // recorte pro agregado por funcionário é feito aqui em JS.
+        const oportunidadesNoPeriodo = oportunidadesTodas.filter((o) =>
+          dentroDoPeriodo(o.criado_em, range.inicio, range.fim),
+        )
 
         const { data: itensData, error: erroItens } =
           idsPedidosNoPeriodo.length > 0
@@ -348,7 +399,22 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           }
         }
 
-        // 3) Tarefas — agrupadas por responsavel (nulo vira "Não atribuído",
+        // 3) Leads/Oportunidades — agrupadas por criado_por (nunca nulo em
+        // `oportunidades`).
+        for (const oportunidade of oportunidadesNoPeriodo) {
+          const agregado = obterOuCriar(mapa, oportunidade.criado_por, 'Perfil removido')
+          agregado.oportunidades.total += 1
+          agregado.oportunidades.lista.push({
+            id: oportunidade.id,
+            numero: oportunidade.numero,
+            clienteNome: oportunidade.cliente_nome,
+            clienteTelefone: oportunidade.cliente_telefone,
+            status: oportunidade.status,
+            criadoEm: oportunidade.criado_em,
+          })
+        }
+
+        // 4) Tarefas — agrupadas por responsavel (nulo vira "Não atribuído",
         // caso comum em tarefa importada do Omie).
         for (const tarefa of (tarefasData ?? []) as TarefaBruta[]) {
           const chave = tarefa.responsavel ?? SEM_ATRIBUICAO_ID
@@ -368,7 +434,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           })
         }
 
-        // 4) Interações — agrupadas por registrado_por (nunca nulo).
+        // 5) Interações — agrupadas por registrado_por (nunca nulo).
         for (const interacao of interacoesDaEmpresa) {
           const agregado = obterOuCriar(mapa, interacao.registrado_por, 'Perfil removido')
           agregado.interacoes.total += 1
@@ -383,7 +449,11 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           })
         }
 
-        // 5) Chamadas — agrupadas por usuario_id (nulo vira "Não atribuído").
+        // 6) Chamadas — agrupadas por usuario_id (nulo vira "Não atribuído").
+        // Nome do cliente resolvido via oportunidade_id (quando preenchido),
+        // usando o mapa já montado a partir de `oportunidadesTodas` — chamada
+        // pode ter sido feita fora do período de criação da oportunidade,
+        // então o mapa não pode ficar restrito a `oportunidadesNoPeriodo`.
         for (const chamada of (chamadasData ?? []) as ChamadaBruta[]) {
           const chave = chamada.usuario_id ?? SEM_ATRIBUICAO_ID
           const agregado = obterOuCriar(mapa, chave, chave === SEM_ATRIBUICAO_ID ? SEM_ATRIBUICAO_NOME : 'Perfil removido')
@@ -400,6 +470,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
             direcao: chamada.direcao,
             status: chamada.status,
             numero: chamada.direcao === 'saida' ? chamada.numero_destino : chamada.numero_origem,
+            clienteNome: chamada.oportunidade_id ? nomePorOportunidadeId.get(chamada.oportunidade_id) ?? null : null,
             duracaoSegundos: chamada.duracao_segundos,
             iniciadaEm: chamada.iniciada_em,
           })
@@ -409,7 +480,13 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           .filter((a) => {
             if (a.id !== SEM_ATRIBUICAO_ID) return true
             // "Não atribuído" só aparece se tiver alguma atividade de fato.
-            return a.tarefas.total > 0 || a.chamadas.total > 0 || a.interacoes.total > 0 || a.orcamentos.total > 0
+            return (
+              a.tarefas.total > 0 ||
+              a.chamadas.total > 0 ||
+              a.interacoes.total > 0 ||
+              a.orcamentos.total > 0 ||
+              a.oportunidades.total > 0
+            )
           })
           .sort((x, y) => {
             if (x.id === SEM_ATRIBUICAO_ID) return 1
@@ -493,6 +570,9 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
                 <th colSpan={2} className="border-l border-white/10 px-3 py-1 text-center font-medium">
                   Pedidos efetuados
                 </th>
+                <th rowSpan={2} className="border-l border-white/10 px-2 py-2 align-bottom text-center font-medium">
+                  Leads
+                </th>
                 <th colSpan={5} className="border-l border-white/10 px-3 py-1 text-center font-medium">
                   Tarefas
                 </th>
@@ -566,6 +646,10 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
                       </td>
 
                       <td className="border-l border-white/5 px-2 py-2.5 text-center text-primary">
+                        {l.oportunidades.total}
+                      </td>
+
+                      <td className="border-l border-white/5 px-2 py-2.5 text-center text-primary">
                         {l.tarefas.total}
                       </td>
                       {TAREFA_SITUACAO_OPCOES.map((s) => (
@@ -607,8 +691,8 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
 
                     {aberto && (
                       <tr className="border-t border-white/5 bg-surface-alt/40">
-                        <td colSpan={25} className="px-4 py-4">
-                          <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+                        <td colSpan={26} className="px-4 py-4">
+                          <div className="grid grid-cols-1 gap-4 lg:grid-cols-6">
                             <DetalhePainel titulo={`Orçamentos (${l.orcamentos.total})`}>
                               {l.orcamentos.lista.map((p) => (
                                 <div key={p.id} className="text-xs text-primary/80">
@@ -625,6 +709,18 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
                                 <div key={p.id} className="text-xs text-primary/80">
                                   <span className="font-mono">#{p.numero}</span> — {p.clienteNome} ·{' '}
                                   {formatarMoeda(p.valor)} · {formatarData(p.criadoEm)}
+                                </div>
+                              ))}
+                            </DetalhePainel>
+
+                            <DetalhePainel titulo={`Leads/Oportunidades (${l.oportunidades.total})`}>
+                              {l.oportunidades.lista.map((o) => (
+                                <div key={o.id} className="text-xs text-primary/80">
+                                  <span className="font-mono">#{o.numero}</span> — {o.clienteNome}
+                                  {o.clienteTelefone && <span className="font-mono"> · {o.clienteTelefone}</span>} ·{' '}
+                                  {OPORTUNIDADE_STATUS_LABELS[o.status as keyof typeof OPORTUNIDADE_STATUS_LABELS] ??
+                                    o.status}{' '}
+                                  · {formatarData(o.criadoEm)}
                                 </div>
                               ))}
                             </DetalhePainel>
@@ -654,10 +750,10 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
                             <DetalhePainel titulo={`Chamadas (${l.chamadas.total})`}>
                               {l.chamadas.lista.map((c) => (
                                 <div key={c.id} className="text-xs text-primary/80">
-                                  {c.direcao === 'saida' ? '📤' : '📥'} {c.numero ?? '—'} ·{' '}
-                                  {chamadaStatusLabel(c.status)} ·{' '}
+                                  {c.direcao === 'saida' ? '📤' : '📥'} {c.numero ?? '—'}
+                                  {c.clienteNome && ` — ${c.clienteNome}`} · {chamadaStatusLabel(c.status)} ·{' '}
                                   {c.duracaoSegundos ? formatarDuracao(c.duracaoSegundos) : '—'} ·{' '}
-                                  {formatarData(c.iniciadaEm)}
+                                  {formatarDataHoraChamada(c.iniciadaEm)}
                                 </div>
                               ))}
                             </DetalhePainel>

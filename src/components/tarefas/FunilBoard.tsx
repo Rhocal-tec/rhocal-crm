@@ -45,8 +45,6 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
   const [pedidosPorId, setPedidosPorId] = useState<Record<string, { numero: number; cliente_nome: string }>>(
     {},
   )
-  const [importandoTarefas, setImportandoTarefas] = useState(false)
-  const [mensagemImportacaoTarefas, setMensagemImportacaoTarefas] = useState<string | null>(null)
   const [novaTarefaAberta, setNovaTarefaAberta] = useState(false)
 
   // ===== Oportunidades =====
@@ -55,10 +53,6 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
   const [novoLeadAberto, setNovoLeadAberto] = useState(false)
   const [cadastroRelampagoAberto, setCadastroRelampagoAberto] = useState(false)
   const [nomesPorId, setNomesPorId] = useState<Record<string, string>>({})
-  const [importandoOportunidades, setImportandoOportunidades] = useState(false)
-  const [mensagemImportacaoOportunidades, setMensagemImportacaoOportunidades] = useState<string | null>(
-    null,
-  )
 
   // Compartilhado: o modal de detalhe da oportunidade é aberto tanto ao
   // clicar num card de oportunidade quanto pelo fluxo "Virou oportunidade"
@@ -226,12 +220,6 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     }
   }, [supabase, empresaAtiva])
 
-  useEffect(() => {
-    if (!mensagemImportacaoTarefas) return
-    const timeout = setTimeout(() => setMensagemImportacaoTarefas(null), 8000)
-    return () => clearTimeout(timeout)
-  }, [mensagemImportacaoTarefas])
-
   const tarefasVisiveis = useMemo(
     () => (minhaFila ? tarefas.filter((t) => t.responsavel === user?.id) : tarefas),
     [tarefas, minhaFila, user],
@@ -279,37 +267,6 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
       .eq('id', tarefa.id)
 
     if (error) setTarefas((atual) => [...atual, tarefa])
-  }
-
-  async function importarTarefasDoOmie() {
-    if (!empresaAtiva) return
-    setImportandoTarefas(true)
-    setMensagemImportacaoTarefas(null)
-
-    try {
-      const resposta = await fetch('/api/omie/importar-tarefas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ empresaSlug: empresaAtiva.slug }),
-      })
-      const dados = await resposta.json().catch(() => null)
-
-      if (!resposta.ok || !dados || dados.erro) {
-        setMensagemImportacaoTarefas(dados?.erro ?? 'Não foi possível importar tarefas do Omie agora.')
-        return
-      }
-
-      const partes = [`${dados.importadas} nova(s) tarefa(s) pendente(s) importada(s) do Omie`]
-      if (dados.ignoradas > 0) partes.push(`${dados.ignoradas} já existiam`)
-      if (dados.semOportunidadeVinculada > 0) {
-        partes.push(`${dados.semOportunidadeVinculada} sem oportunidade correspondente importada ainda`)
-      }
-      setMensagemImportacaoTarefas(`${partes.join(' · ')}.`)
-    } catch {
-      setMensagemImportacaoTarefas('Não foi possível importar tarefas do Omie agora.')
-    } finally {
-      setImportandoTarefas(false)
-    }
   }
 
   // --- Oportunidades: carregamento, Realtime ---
@@ -397,49 +354,6 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     }
   }, [supabase, empresaAtiva])
 
-  useEffect(() => {
-    if (!mensagemImportacaoOportunidades) return
-    const timeout = setTimeout(() => setMensagemImportacaoOportunidades(null), 8000)
-    return () => clearTimeout(timeout)
-  }, [mensagemImportacaoOportunidades])
-
-  async function importarOportunidadesDoOmie() {
-    if (!empresaAtiva) return
-    setImportandoOportunidades(true)
-    setMensagemImportacaoOportunidades(null)
-
-    try {
-      const resposta = await fetch('/api/omie/importar-oportunidades', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ empresaSlug: empresaAtiva.slug }),
-      })
-      const dados = await resposta.json().catch(() => null)
-
-      if (!resposta.ok || !dados || dados.erro) {
-        setMensagemImportacaoOportunidades(
-          dados?.erro ?? 'Não foi possível importar oportunidades do Omie agora.',
-        )
-        return
-      }
-
-      const detalhes = [
-        dados.ignoradas > 0 ? `${dados.ignoradas} já existiam` : null,
-        dados.ignoradasPorData > 0 ? `${dados.ignoradasPorData} fora dos últimos 30 dias` : null,
-      ].filter(Boolean)
-
-      setMensagemImportacaoOportunidades(
-        `${dados.importadas} nova(s) oportunidade(s) importada(s) do Omie${
-          detalhes.length > 0 ? ` (${detalhes.join(', ')})` : ''
-        }.`,
-      )
-    } catch {
-      setMensagemImportacaoOportunidades('Não foi possível importar oportunidades do Omie agora.')
-    } finally {
-      setImportandoOportunidades(false)
-    }
-  }
-
   if (loadingTarefas || loadingOportunidades) {
     return <div className="flex flex-1 items-center justify-center text-muted">Carregando…</div>
   }
@@ -460,24 +374,6 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         </button>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {setor === 'gestor' && (
-            <>
-              <button
-                onClick={importarTarefasDoOmie}
-                disabled={importandoTarefas || !empresaAtiva}
-                className="rounded-md border border-accent-compras/40 bg-accent-compras/10 px-4 py-2 text-sm font-medium text-accent-compras transition-colors hover:bg-accent-compras/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {importandoTarefas ? 'Importando…' : 'Importar tarefas do Omie'}
-              </button>
-              <button
-                onClick={importarOportunidadesDoOmie}
-                disabled={importandoOportunidades || !empresaAtiva}
-                className="rounded-md border border-accent-compras/40 bg-accent-compras/10 px-4 py-2 text-sm font-medium text-accent-compras transition-colors hover:bg-accent-compras/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {importandoOportunidades ? 'Importando…' : 'Importar oportunidades do Omie'}
-              </button>
-            </>
-          )}
           <button
             onClick={() => setCadastroRelampagoAberto(true)}
             className="rounded-md border border-white/15 px-4 py-2 text-sm font-medium text-primary/80 transition-colors hover:bg-white/5"
@@ -499,16 +395,6 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         </div>
       </div>
 
-      {mensagemImportacaoTarefas && (
-        <div className="mx-6 mt-4 rounded-md border border-accent-compras/40 bg-accent-compras/10 px-4 py-2 text-sm text-accent-compras">
-          {mensagemImportacaoTarefas}
-        </div>
-      )}
-      {mensagemImportacaoOportunidades && (
-        <div className="mx-6 mt-4 rounded-md border border-accent-compras/40 bg-accent-compras/10 px-4 py-2 text-sm text-accent-compras">
-          {mensagemImportacaoOportunidades}
-        </div>
-      )}
       {mensagemSucesso && (
         <div className="mx-6 mt-4 rounded-md border border-accent-success/40 bg-accent-success/10 px-4 py-2 text-sm text-accent-success">
           {mensagemSucesso}
