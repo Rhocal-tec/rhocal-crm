@@ -11,6 +11,7 @@ export type PedidoStatus =
   | 'PEDIDO_EFETUADO'
   | 'ARQUIVADO'
   | 'PERDIDO'
+  | 'ENTREGUE'
 
 export type ArquivoMotivo = 'manual' | 'inatividade'
 
@@ -139,6 +140,7 @@ export interface Database {
           previsao_chegada: string | null
           data_entrega_cliente: string | null
           data_entrega_real: string | null
+          entregue_em: string | null
           dados_compra: string | null
           omie_orcamento_id: number | null
           arquivado_motivo: ArquivoMotivo | null
@@ -165,6 +167,7 @@ export interface Database {
           previsao_chegada?: string | null
           data_entrega_cliente?: string | null
           data_entrega_real?: string | null
+          entregue_em?: string | null
           dados_compra?: string | null
           omie_orcamento_id?: number | null
           arquivado_motivo?: ArquivoMotivo | null
@@ -191,6 +194,7 @@ export interface Database {
           previsao_chegada?: string | null
           data_entrega_cliente?: string | null
           data_entrega_real?: string | null
+          entregue_em?: string | null
           dados_compra?: string | null
           omie_orcamento_id?: number | null
           arquivado_motivo?: ArquivoMotivo | null

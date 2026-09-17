@@ -14,12 +14,16 @@ export function PedidoCard({
   onAbrir,
   podeArquivar,
   onArquivar,
+  podeMarcarEntregue,
+  onEntregar,
   nomesPorId,
 }: {
   pedido: Pedido
   onAbrir: (id: string) => void
   podeArquivar: boolean
   onArquivar: (id: string) => void
+  podeMarcarEntregue: boolean
+  onEntregar: (id: string) => void
   nomesPorId: Record<string, string>
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -91,17 +95,33 @@ export function PedidoCard({
           Movido por {nomeUltimoResponsavel}
         </p>
       )}
-      {podeArquivar && pedido.status === 'PEDIDO_EFETUADO' && (
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            onArquivar(pedido.id)
-          }}
-          className="mt-2 w-full rounded-md border border-white/15 py-1 text-xs font-medium text-primary/70 hover:bg-white/5"
-        >
-          Arquivar
-        </button>
+      {pedido.status === 'PEDIDO_EFETUADO' && (podeArquivar || podeMarcarEntregue) && (
+        <div className="mt-2 flex gap-1.5">
+          {podeMarcarEntregue && (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                onEntregar(pedido.id)
+              }}
+              className="flex-1 rounded-md border border-accent-success/40 py-1 text-xs font-medium text-accent-success hover:bg-accent-success/10"
+            >
+              Marcar como Entregue
+            </button>
+          )}
+          {podeArquivar && (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                onArquivar(pedido.id)
+              }}
+              className="rounded-md border border-white/15 px-2 py-1 text-xs font-medium text-primary/70 hover:bg-white/5"
+            >
+              Arquivar
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

@@ -6,9 +6,11 @@ const DESTINOS_PERMITIDOS: Record<SetorTipo, PedidoStatus[] | 'TODAS'> = {
   // Comercial move livremente entre as colunas "dele", exceto EM_COTACAO
   // (território ativo do Compras + trava somente-leitura da fase 29 tranca o
   // comercial fora do próprio card) e PEDIDO_EFETUADO (afirmação factual que
-  // só o Compras faz; alimenta conversão/recompra; quase-terminal).
-  comercial: ['PEDIDO', 'PEDIDO_COTADO', 'APROVADO_CLIENTE', 'ARQUIVADO'],
-  compras: ['EM_COTACAO', 'PEDIDO_COTADO', 'PEDIDO_EFETUADO'],
+  // só o Compras faz; alimenta conversão/recompra; quase-terminal). ARQUIVADO
+  // e ENTREGUE são ações terminais explícitas (botões, não colunas do kanban
+  // ativo — ver KANBAN_COLUMNS), liberadas pros três setores.
+  comercial: ['PEDIDO', 'PEDIDO_COTADO', 'APROVADO_CLIENTE', 'ARQUIVADO', 'ENTREGUE'],
+  compras: ['EM_COTACAO', 'PEDIDO_COTADO', 'PEDIDO_EFETUADO', 'ARQUIVADO', 'ENTREGUE'],
   gestor: 'TODAS',
 }
 

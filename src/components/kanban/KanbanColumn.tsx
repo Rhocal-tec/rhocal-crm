@@ -13,6 +13,8 @@ export function KanbanColumn({
   onAbrir,
   podeArquivar,
   onArquivar,
+  podeMarcarEntregue,
+  onEntregar,
   nomesPorId,
 }: {
   status: PedidoStatus
@@ -20,6 +22,8 @@ export function KanbanColumn({
   onAbrir: (id: string) => void
   podeArquivar: boolean
   onArquivar: (id: string) => void
+  podeMarcarEntregue: boolean
+  onEntregar: (id: string) => void
   nomesPorId: Record<string, string>
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status })
@@ -56,6 +60,8 @@ export function KanbanColumn({
             onAbrir={onAbrir}
             podeArquivar={podeArquivar}
             onArquivar={onArquivar}
+            podeMarcarEntregue={podeMarcarEntregue}
+            onEntregar={onEntregar}
             nomesPorId={nomesPorId}
           />
         ))}

@@ -13,6 +13,7 @@ import { ErrosRecentesSection } from '@/components/painel/ErrosRecentesSection'
 import { FiltroPeriodo } from '@/components/painel/FiltroPeriodo'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
 import { KANBAN_COLUMNS, STATUS_LABELS, STATUS_STRIPE_VAR } from '@/lib/kanban/status'
+import { ehStatusTerminal } from '@/lib/kanban/status-terminais'
 import { estaParado } from '@/lib/kanban/dias-parado'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
 import { proximoDia } from '@/lib/kanban/filtro-data'
@@ -157,10 +158,9 @@ export default function PainelPage() {
           }))
 
         // Valor total em negociação: soma de preco_venda dos itens dos pedidos
-        // ainda ativos (fora ARQUIVADO e PERDIDO).
-        const idsAtivos = listaPedidos
-          .filter((p) => p.status !== 'ARQUIVADO' && p.status !== 'PERDIDO')
-          .map((p) => p.id)
+        // ainda ativos (fora dos status terminais ARQUIVADO/PERDIDO/ENTREGUE —
+        // um pedido já entregue não está mais "em negociação").
+        const idsAtivos = listaPedidos.filter((p) => !ehStatusTerminal(p.status)).map((p) => p.id)
 
         let valorNegociacaoCalc = 0
         if (idsAtivos.length > 0) {

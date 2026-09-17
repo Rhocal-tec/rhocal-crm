@@ -13,6 +13,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { KANBAN_COLUMNS, STATUS_LABELS } from '@/lib/kanban/status'
 import { podeMoverPara } from '@/lib/kanban/permissions'
+import { ehStatusTerminal, STATUS_TERMINAIS } from '@/lib/kanban/status-terminais'
 import { validarPedidoParaCotado } from '@/lib/kanban/validacao-cotado'
 import { KanbanColumn } from './KanbanColumn'
 import { NovoOrcamentoModal } from './NovoOrcamentoModal'
@@ -37,15 +38,16 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
   const [nomesPorId, setNomesPorId] = useState<Record<string, string>>({})
 
   const podeCriarOrcamento = setor === 'comercial' || setor === 'gestor'
-  const podeArquivar = setor === 'comercial' || setor === 'gestor'
+  const podeArquivar = podeMoverPara(setor, 'ARQUIVADO')
+  const podeMarcarEntregue = podeMoverPara(setor, 'ENTREGUE')
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   )
 
-  // Carrega os pedidos visíveis no kanban (tudo exceto ARQUIVADO e PERDIDO),
-  // escopados pela empresa ativa. Refaz a busca sempre que a empresa ativa
-  // muda (troca no seletor do header).
+  // Carrega os pedidos visíveis no kanban (tudo exceto os status terminais:
+  // ARQUIVADO, PERDIDO, ENTREGUE), escopados pela empresa ativa. Refaz a
+  // busca sempre que a empresa ativa muda (troca no seletor do header).
   useEffect(() => {
     if (!empresaAtiva) return
     let ativo = true
@@ -56,7 +58,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
         .from('pedidos')
         .select('*')
         .eq('empresa_id', empresaAtiva!.id)
-        .not('status', 'in', '(ARQUIVADO,PERDIDO)')
+        .not('status', 'in', `(${STATUS_TERMINAIS.join(',')})`)
         .order('criado_em', { ascending: true })
 
       if (!ativo) return
@@ -109,7 +111,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
         (payload) => {
           const novo = payload.new
           if (novo.empresa_id !== empresaId) return
-          if (novo.status === 'ARQUIVADO' || novo.status === 'PERDIDO') return
+          if (ehStatusTerminal(novo.status)) return
           setPedidos((atual) => {
             if (atual.some((p) => p.id === novo.id)) return atual
             return [...atual, novo]
@@ -123,7 +125,7 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
           const atualizado = payload.new
           if (atualizado.empresa_id !== empresaId) return
           setPedidos((atual) => {
-            if (atualizado.status === 'ARQUIVADO' || atualizado.status === 'PERDIDO') {
+            if (ehStatusTerminal(atualizado.status)) {
               return atual.filter((p) => p.id !== atualizado.id)
             }
             const existe = atual.some((p) => p.id === atualizado.id)
@@ -242,6 +244,37 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
     [pedidos, supabase, user],
   )
 
+  const handleEntregar = useCallback(
+    async (pedidoId: string) => {
+      const pedidoAnterior = pedidos.find((p) => p.id === pedidoId)
+      if (!pedidoAnterior) return
+
+      const agora = new Date().toISOString()
+
+      // Atualização otimista.
+      setPedidos((atual) =>
+        atual.map((p) =>
+          p.id === pedidoId
+            ? { ...p, status: 'ENTREGUE', entregue_em: agora, movido_por: user?.id ?? null }
+            : p,
+        ),
+      )
+
+      const { error } = await supabase
+        .from('pedidos')
+        .update({ status: 'ENTREGUE', entregue_em: agora })
+        .eq('id', pedidoId)
+
+      if (error) {
+        console.error('Erro ao marcar pedido como entregue:', error.message)
+        setAviso('Não foi possível marcar o pedido como entregue. Tente novamente.')
+        // Reverte a atualização otimista.
+        setPedidos((atual) => atual.map((p) => (p.id === pedidoId ? pedidoAnterior : p)))
+      }
+    },
+    [pedidos, supabase, user],
+  )
+
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted">
@@ -278,6 +311,8 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
               onAbrir={setPedidoAbertoId}
               podeArquivar={podeArquivar}
               onArquivar={handleArquivar}
+              podeMarcarEntregue={podeMarcarEntregue}
+              onEntregar={handleEntregar}
               nomesPorId={nomesPorId}
             />
           ))}

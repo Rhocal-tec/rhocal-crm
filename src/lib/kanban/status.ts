@@ -10,6 +10,7 @@ export const STATUS_LABELS: Record<PedidoStatus, string> = {
   PEDIDO_EFETUADO: 'PEDIDO EFETUADO',
   ARQUIVADO: 'ARQUIVADO',
   PERDIDO: 'PERDIDO',
+  ENTREGUE: 'ENTREGUE',
 }
 
 // Status a partir dos quais um pedido pode ser marcado como perdido (comercial/gestor).

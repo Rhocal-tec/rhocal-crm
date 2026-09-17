@@ -21,12 +21,13 @@ interface PedidoArquivadoResumo {
   motivo_perda: string | null
 }
 
-type FiltroSituacao = 'todos' | 'arquivados' | 'perdidos'
+type FiltroSituacao = 'todos' | 'arquivados' | 'perdidos' | 'entregues'
 
 const FILTRO_SITUACAO_OPCOES: { valor: FiltroSituacao; label: string }[] = [
   { valor: 'todos', label: 'Todos' },
   { valor: 'arquivados', label: 'Arquivados' },
   { valor: 'perdidos', label: 'Perdidos' },
+  { valor: 'entregues', label: 'Entregues' },
 ]
 
 export default function ArquivadosPage() {
@@ -61,8 +62,10 @@ export default function ArquivadosPage() {
       query = query.eq('status', 'ARQUIVADO')
     } else if (situacao === 'perdidos') {
       query = query.eq('status', 'PERDIDO')
+    } else if (situacao === 'entregues') {
+      query = query.eq('status', 'ENTREGUE')
     } else {
-      query = query.in('status', ['ARQUIVADO', 'PERDIDO'])
+      query = query.in('status', ['ARQUIVADO', 'PERDIDO', 'ENTREGUE'])
     }
 
     const termo = numeroInput.trim()
@@ -220,6 +223,10 @@ export default function ArquivadosPage() {
                       <span className="inline-flex rounded-full bg-accent-danger/15 px-2 py-0.5 text-xs font-medium text-accent-danger">
                         PERDIDO
                       </span>
+                    ) : p.status === 'ENTREGUE' ? (
+                      <span className="inline-flex rounded-full bg-accent-success/15 px-2 py-0.5 text-xs font-medium text-accent-success">
+                        ENTREGUE
+                      </span>
                     ) : (
                       <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-muted">
                         ARQUIVADO
@@ -229,9 +236,11 @@ export default function ArquivadosPage() {
                   <td className="px-3 py-2 text-primary">
                     {p.status === 'PERDIDO'
                       ? p.motivo_perda ?? '—'
-                      : p.arquivado_motivo
-                        ? MOTIVO_ARQUIVAMENTO_LABELS[p.arquivado_motivo]
-                        : '—'}
+                      : p.status === 'ENTREGUE'
+                        ? 'Entregue ao cliente'
+                        : p.arquivado_motivo
+                          ? MOTIVO_ARQUIVAMENTO_LABELS[p.arquivado_motivo]
+                          : '—'}
                   </td>
                 </tr>
               ))}

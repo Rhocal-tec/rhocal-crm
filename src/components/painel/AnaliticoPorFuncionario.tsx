@@ -1,10 +1,10 @@
 'use client'
 
 // Seção do Painel Gestor: analítico por funcionário — cruza orçamentos,
-// pedidos efetuados, leads/oportunidades, tarefas, interações e chamadas,
-// tudo agrupado por quem criou/registrou/atendeu cada um. Reaproveita o mesmo
-// `range` de período do resto do Painel (src/app/painel/page.tsx) e a
-// `empresaId` ativa.
+// pedidos efetuados, entregas, leads/oportunidades, tarefas, interações e
+// chamadas, tudo agrupado por quem criou/registrou/atendeu/entregou cada um.
+// Reaproveita o mesmo `range` de período do resto do Painel
+// (src/app/painel/page.tsx) e a `empresaId` ativa.
 //
 // Estratégia de queries (combinada com o usuário antes de implementar):
 // busca os registros CRUS de cada tabela, uma vez cada (nunca por
@@ -15,6 +15,14 @@
 // serve pra escopar `interacoes` por empresa (a tabela não tem empresa_id
 // própria — fica só amarrada por pedido_id/oportunidade_id). O recorte de
 // período de pedidos é aplicado depois em JS, sobre `criado_em`.
+//
+// Apresentação: 7 tabelas compactas empilhadas (`BlocoAnalitico`), uma por
+// categoria, em vez de uma tabela única com todas as colunas lado a lado —
+// evita o scroll horizontal gigante. Os dados continuam vindo de um único
+// carregamento/agregação (`AgregadoFuncionario` por funcionário); cada bloco
+// só recorta as colunas e a lista de detalhe da sua própria categoria, com
+// seu próprio estado de expandido. A busca por nome fica no componente pai e
+// filtra `linhasFiltradas`, repassada igual a todos os blocos.
 //
 // Client Supabase compartilhado do app (mesma cautela do resto do Painel:
 // nunca um createClient avulso de @supabase/supabase-js).
@@ -32,7 +40,15 @@ import type { Database } from '@/types/database'
 
 type PedidoBruto = Pick<
   Database['public']['Tables']['pedidos']['Row'],
-  'id' | 'numero' | 'cliente_nome' | 'status' | 'orcamento_direto' | 'criado_por' | 'criado_em'
+  | 'id'
+  | 'numero'
+  | 'cliente_nome'
+  | 'status'
+  | 'orcamento_direto'
+  | 'criado_por'
+  | 'criado_em'
+  | 'movido_por'
+  | 'entregue_em'
 >
 type ItemBruto = Pick<Database['public']['Tables']['pedido_itens']['Row'], 'pedido_id' | 'preco_venda' | 'quantidade'>
 type OportunidadeBruta = Pick<
@@ -112,12 +128,21 @@ interface OportunidadeLinha {
   criadoEm: string
 }
 
+interface EntregaLinha {
+  id: string
+  numero: number
+  clienteNome: string
+  valor: number
+  entregueEm: string | null
+}
+
 interface AgregadoFuncionario {
   id: string
   nome: string
   ativo: boolean
   orcamentos: { total: number; diretos: number; normais: number; valorTotal: number; lista: PedidoLinha[] }
   efetuados: { total: number; valorTotal: number; lista: PedidoLinha[] }
+  entregas: { total: number; valorTotal: number; lista: EntregaLinha[] }
   oportunidades: { total: number; lista: OportunidadeLinha[] }
   tarefas: {
     total: number
@@ -144,6 +169,7 @@ function novoAgregado(id: string, nome: string, ativo = true): AgregadoFuncionar
     ativo,
     orcamentos: { total: 0, diretos: 0, normais: 0, valorTotal: 0, lista: [] },
     efetuados: { total: 0, valorTotal: 0, lista: [] },
+    entregas: { total: 0, valorTotal: 0, lista: [] },
     oportunidades: { total: 0, lista: [] },
     tarefas: { total: 0, porSituacao: {}, porTipo: {}, lista: [] },
     interacoes: { total: 0, porResultado: {}, lista: [] },
@@ -222,7 +248,6 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [busca, setBusca] = useState('')
-  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     let ativo = true
@@ -290,7 +315,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           supabase.from('profiles').select('id, nome, ativo'),
           supabase
             .from('pedidos')
-            .select('id, numero, cliente_nome, status, orcamento_direto, criado_por, criado_em')
+            .select('id, numero, cliente_nome, status, orcamento_direto, criado_por, criado_em, movido_por, entregue_em')
             .eq('empresa_id', empresaId),
           supabase
             .from('oportunidades')
@@ -323,6 +348,15 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
         const pedidosNoPeriodo = pedidosTodos.filter((p) => dentroDoPeriodo(p.criado_em, range.inicio, range.fim))
         const idsPedidosNoPeriodo = pedidosNoPeriodo.map((p) => p.id)
 
+        // Entregas: recorte por período aplicado sobre `entregue_em` (quando a
+        // entrega aconteceu), não `criado_em` (quando o orçamento nasceu) — um
+        // pedido pode ter sido criado num mês e entregue só num período
+        // seguinte, mesmo raciocínio já usado pra tarefas (data_prevista).
+        const pedidosEntreguesNoPeriodo = pedidosTodos.filter(
+          (p) => p.status === 'ENTREGUE' && p.entregue_em && dentroDoPeriodo(p.entregue_em, range.inicio, range.fim),
+        )
+        const idsPedidosEntreguesNoPeriodo = pedidosEntreguesNoPeriodo.map((p) => p.id)
+
         // Mesma lógica: oportunidades buscadas sem filtro server-side (o
         // conjunto completo já serve pra resolver refLabel de tarefas/
         // interações e o nome do cliente nas chamadas, fora do período), o
@@ -331,12 +365,17 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           dentroDoPeriodo(o.criado_em, range.inicio, range.fim),
         )
 
+        // União dos pedidos que precisam de valor de itens: orçamentos/
+        // efetuados no período de criação + entregas no período de entrega
+        // (podem não se sobrepor, já que usam campos de data diferentes).
+        const idsParaItens = Array.from(new Set([...idsPedidosNoPeriodo, ...idsPedidosEntreguesNoPeriodo]))
+
         const { data: itensData, error: erroItens } =
-          idsPedidosNoPeriodo.length > 0
+          idsParaItens.length > 0
             ? await supabase
                 .from('pedido_itens')
                 .select('pedido_id, preco_venda, quantidade')
-                .in('pedido_id', idsPedidosNoPeriodo)
+                .in('pedido_id', idsParaItens)
                 .eq('excluido', false)
             : { data: [] as ItemBruto[], error: null }
         if (erroItens) throw erroItens
@@ -399,7 +438,29 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           }
         }
 
-        // 3) Leads/Oportunidades — agrupadas por criado_por (nunca nulo em
+        // 3) Entregas — agrupadas por movido_por (quem de fato clicou em
+        // "Marcar como Entregue"), não por criado_por: quem confirma a
+        // entrega costuma ser alguém diferente de quem criou o orçamento.
+        // `movido_por` é gravado pela trigger fn_pedido_movimentado a cada
+        // mudança de status, então sempre reflete o autor da última
+        // movimentação — nesse caso, exatamente quem marcou como entregue.
+        for (const pedido of pedidosEntreguesNoPeriodo) {
+          const chave = pedido.movido_por ?? SEM_ATRIBUICAO_ID
+          const agregado = obterOuCriar(mapa, chave, chave === SEM_ATRIBUICAO_ID ? SEM_ATRIBUICAO_NOME : 'Perfil removido')
+          const valor = valorPorPedido.get(pedido.id) ?? 0
+
+          agregado.entregas.total += 1
+          agregado.entregas.valorTotal += valor
+          agregado.entregas.lista.push({
+            id: pedido.id,
+            numero: pedido.numero,
+            clienteNome: pedido.cliente_nome,
+            valor,
+            entregueEm: pedido.entregue_em,
+          })
+        }
+
+        // 4) Leads/Oportunidades — agrupadas por criado_por (nunca nulo em
         // `oportunidades`).
         for (const oportunidade of oportunidadesNoPeriodo) {
           const agregado = obterOuCriar(mapa, oportunidade.criado_por, 'Perfil removido')
@@ -414,7 +475,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           })
         }
 
-        // 4) Tarefas — agrupadas por responsavel (nulo vira "Não atribuído",
+        // 5) Tarefas — agrupadas por responsavel (nulo vira "Não atribuído",
         // caso comum em tarefa importada do Omie).
         for (const tarefa of (tarefasData ?? []) as TarefaBruta[]) {
           const chave = tarefa.responsavel ?? SEM_ATRIBUICAO_ID
@@ -434,7 +495,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           })
         }
 
-        // 5) Interações — agrupadas por registrado_por (nunca nulo).
+        // 6) Interações — agrupadas por registrado_por (nunca nulo).
         for (const interacao of interacoesDaEmpresa) {
           const agregado = obterOuCriar(mapa, interacao.registrado_por, 'Perfil removido')
           agregado.interacoes.total += 1
@@ -449,7 +510,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           })
         }
 
-        // 6) Chamadas — agrupadas por usuario_id (nulo vira "Não atribuído").
+        // 7) Chamadas — agrupadas por usuario_id (nulo vira "Não atribuído").
         // Nome do cliente resolvido via oportunidade_id (quando preenchido),
         // usando o mapa já montado a partir de `oportunidadesTodas` — chamada
         // pode ter sido feita fora do período de criação da oportunidade,
@@ -485,7 +546,8 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
               a.chamadas.total > 0 ||
               a.interacoes.total > 0 ||
               a.orcamentos.total > 0 ||
-              a.oportunidades.total > 0
+              a.oportunidades.total > 0 ||
+              a.entregas.total > 0
             )
           })
           .sort((x, y) => {
@@ -513,15 +575,6 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
     if (!termo) return linhas
     return linhas.filter((l) => l.nome.toLowerCase().includes(termo))
   }, [linhas, busca])
-
-  function alternarExpandido(id: string) {
-    setExpandidos((atual) => {
-      const novo = new Set(atual)
-      if (novo.has(id)) novo.delete(id)
-      else novo.add(id)
-      return novo
-    })
-  }
 
   return (
     <section className="print-analitico-funcionario rounded-lg border border-white/10 bg-surface p-4">
@@ -557,231 +610,370 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
       )}
 
       {!carregando && !erro && linhasFiltradas.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border border-white/10">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-surface-alt text-xs uppercase tracking-wide text-muted">
-              <tr>
-                <th rowSpan={2} className="px-3 py-2 align-bottom font-medium">
-                  Funcionário
-                </th>
-                <th colSpan={4} className="border-l border-white/10 px-3 py-1 text-center font-medium">
-                  Orçamentos
-                </th>
-                <th colSpan={2} className="border-l border-white/10 px-3 py-1 text-center font-medium">
-                  Pedidos efetuados
-                </th>
-                <th rowSpan={2} className="border-l border-white/10 px-2 py-2 align-bottom text-center font-medium">
-                  Leads
-                </th>
-                <th colSpan={5} className="border-l border-white/10 px-3 py-1 text-center font-medium">
-                  Tarefas
-                </th>
-                <th colSpan={6} className="border-l border-white/10 px-3 py-1 text-center font-medium">
-                  Interações
-                </th>
-                <th colSpan={6} className="border-l border-white/10 px-3 py-1 text-center font-medium">
-                  Chamadas
-                </th>
-                <th rowSpan={2} className="px-2 py-2" />
-              </tr>
-              <tr>
-                <th className="border-l border-white/10 px-2 py-1.5 text-center font-medium">Total</th>
-                <th className="px-2 py-1.5 text-center font-medium">Diretos</th>
-                <th className="px-2 py-1.5 text-center font-medium">Normais</th>
-                <th className="px-2 py-1.5 text-center font-medium">Valor</th>
-
-                <th className="border-l border-white/10 px-2 py-1.5 text-center font-medium">Qtd.</th>
-                <th className="px-2 py-1.5 text-center font-medium">Valor</th>
-
-                <th className="border-l border-white/10 px-2 py-1.5 text-center font-medium">Total</th>
-                {TAREFA_SITUACAO_OPCOES.map((s) => (
-                  <th key={s} className="px-2 py-1.5 text-center font-medium">
-                    {s}
-                  </th>
+        <div className="space-y-4">
+          <BlocoAnalitico
+            titulo={`Orçamentos (${somarCampo(linhasFiltradas, (l) => l.orcamentos.total)})`}
+            linhas={linhasFiltradas}
+            colunas={[
+              {
+                key: 'total',
+                header: 'Total',
+                headerClassName: 'border-l border-white/10 text-center',
+                cellClassName: 'border-l border-white/5 text-center text-primary',
+                render: (l) => l.orcamentos.total,
+              },
+              {
+                key: 'diretos',
+                header: 'Diretos',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center text-primary/80',
+                render: (l) => l.orcamentos.diretos,
+              },
+              {
+                key: 'normais',
+                header: 'Normais',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center text-primary/80',
+                render: (l) => l.orcamentos.normais,
+              },
+              {
+                key: 'valor',
+                header: 'Valor',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center font-mono text-primary',
+                render: (l) => formatarMoeda(l.orcamentos.valorTotal),
+              },
+            ]}
+            renderDetalhe={(l) => (
+              <ListaDetalhe
+                itens={l.orcamentos.lista.map((p) => (
+                  <div key={p.id} className="text-xs text-primary/80">
+                    <span className="font-mono">#{p.numero}</span> — {p.clienteNome} ·{' '}
+                    {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
+                    {p.orcamentoDireto && <span className="text-accent-compras"> · DIRETO</span>} ·{' '}
+                    {formatarMoeda(p.valor)} · {formatarData(p.criadoEm)}
+                  </div>
                 ))}
+              />
+            )}
+          />
 
-                <th className="border-l border-white/10 px-2 py-1.5 text-center font-medium">Total</th>
-                {RESULTADO_INTERACAO_OPCOES.map((r) => (
-                  <th key={r} className="px-2 py-1.5 text-center font-medium">
-                    {r}
-                  </th>
+          <BlocoAnalitico
+            titulo={`Pedidos efetuados (${somarCampo(linhasFiltradas, (l) => l.efetuados.total)})`}
+            linhas={linhasFiltradas}
+            colunas={[
+              {
+                key: 'qtd',
+                header: 'Qtd.',
+                headerClassName: 'border-l border-white/10 text-center',
+                cellClassName: 'border-l border-white/5 text-center text-primary',
+                render: (l) => l.efetuados.total,
+              },
+              {
+                key: 'valor',
+                header: 'Valor',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center font-mono text-primary',
+                render: (l) => formatarMoeda(l.efetuados.valorTotal),
+              },
+            ]}
+            renderDetalhe={(l) => (
+              <ListaDetalhe
+                itens={l.efetuados.lista.map((p) => (
+                  <div key={p.id} className="text-xs text-primary/80">
+                    <span className="font-mono">#{p.numero}</span> — {p.clienteNome} ·{' '}
+                    {formatarMoeda(p.valor)} · {formatarData(p.criadoEm)}
+                  </div>
                 ))}
+              />
+            )}
+          />
 
-                <th className="border-l border-white/10 px-2 py-1.5 text-center font-medium">Total</th>
-                <th className="px-2 py-1.5 text-center font-medium">Atend.</th>
-                <th className="px-2 py-1.5 text-center font-medium">Não atend.</th>
-                <th className="px-2 py-1.5 text-center font-medium">Andamento</th>
-                <th className="px-2 py-1.5 text-center font-medium">Falhas</th>
-                <th className="px-2 py-1.5 text-center font-medium">Duração</th>
-              </tr>
-            </thead>
-            <tbody>
-              {linhasFiltradas.map((l) => {
-                const aberto = expandidos.has(l.id)
-                return (
-                  <Fragment key={l.id}>
-                    <tr
-                      onClick={() => alternarExpandido(l.id)}
-                      className="cursor-pointer border-t border-white/5 hover:bg-white/5"
-                    >
-                      <td className="px-3 py-2.5 font-medium text-primary">
-                        {l.nome}
-                        {!l.ativo && <span className="ml-1.5 font-normal text-muted">(inativo)</span>}
-                      </td>
+          <BlocoAnalitico
+            titulo={`Entregues (${somarCampo(linhasFiltradas, (l) => l.entregas.total)})`}
+            linhas={linhasFiltradas}
+            colunas={[
+              {
+                key: 'qtd',
+                header: 'Qtd.',
+                headerClassName: 'border-l border-white/10 text-center',
+                cellClassName: 'border-l border-white/5 text-center text-primary',
+                render: (l) => l.entregas.total,
+              },
+              {
+                key: 'valor',
+                header: 'Valor',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center font-mono text-primary',
+                render: (l) => formatarMoeda(l.entregas.valorTotal),
+              },
+            ]}
+            renderDetalhe={(l) => (
+              <ListaDetalhe
+                itens={l.entregas.lista.map((e) => (
+                  <div key={e.id} className="text-xs text-primary/80">
+                    <span className="font-mono">#{e.numero}</span> — {e.clienteNome} ·{' '}
+                    {formatarMoeda(e.valor)} · entregue em {formatarData(e.entregueEm)}
+                  </div>
+                ))}
+              />
+            )}
+          />
 
-                      <td className="border-l border-white/5 px-2 py-2.5 text-center text-primary">
-                        {l.orcamentos.total}
-                      </td>
-                      <td className="px-2 py-2.5 text-center text-primary/80">{l.orcamentos.diretos}</td>
-                      <td className="px-2 py-2.5 text-center text-primary/80">{l.orcamentos.normais}</td>
-                      <td className="px-2 py-2.5 text-center font-mono text-primary">
-                        {formatarMoeda(l.orcamentos.valorTotal)}
-                      </td>
+          <BlocoAnalitico
+            titulo={`Tarefas (${somarCampo(linhasFiltradas, (l) => l.tarefas.total)})`}
+            linhas={linhasFiltradas}
+            colunas={[
+              {
+                key: 'total',
+                header: 'Total',
+                headerClassName: 'border-l border-white/10 text-center',
+                cellClassName: 'border-l border-white/5 text-center text-primary',
+                render: (l) => l.tarefas.total,
+              },
+              ...TAREFA_SITUACAO_OPCOES.map((s) => ({
+                key: `situacao-${s}`,
+                header: s,
+                headerClassName: 'text-center',
+                cellClassName: 'text-center text-primary/80',
+                render: (l: AgregadoFuncionario) => l.tarefas.porSituacao[s] ?? 0,
+              })),
+            ]}
+            renderDetalhe={(l) => (
+              <ListaDetalhe
+                itens={l.tarefas.lista.map((t) => (
+                  <div key={t.id} className="text-xs text-primary/80">
+                    {t.descricao || '(sem descrição)'}
+                    {t.tipo && ` · ${t.tipo}`} · {t.situacao}
+                    {t.refLabel && ` · ${t.refLabel}`} · {formatarData(t.dataPrevista ?? t.criadoEm)}
+                  </div>
+                ))}
+              />
+            )}
+          />
 
-                      <td className="border-l border-white/5 px-2 py-2.5 text-center text-primary">
-                        {l.efetuados.total}
-                      </td>
-                      <td className="px-2 py-2.5 text-center font-mono text-primary">
-                        {formatarMoeda(l.efetuados.valorTotal)}
-                      </td>
+          <BlocoAnalitico
+            titulo={`Interações (${somarCampo(linhasFiltradas, (l) => l.interacoes.total)})`}
+            linhas={linhasFiltradas}
+            colunas={[
+              {
+                key: 'total',
+                header: 'Total',
+                headerClassName: 'border-l border-white/10 text-center',
+                cellClassName: 'border-l border-white/5 text-center text-primary',
+                render: (l) => l.interacoes.total,
+              },
+              ...RESULTADO_INTERACAO_OPCOES.map((r) => ({
+                key: `resultado-${r}`,
+                header: r,
+                headerClassName: 'text-center',
+                cellClassName: 'text-center text-primary/80',
+                render: (l: AgregadoFuncionario) => l.interacoes.porResultado[r] ?? 0,
+              })),
+            ]}
+            renderDetalhe={(l) => (
+              <ListaDetalhe
+                itens={l.interacoes.lista.map((i) => (
+                  <div key={i.id} className="text-xs text-primary/80">
+                    {i.tipo} · {i.resultado}
+                    {i.refLabel && ` · ${i.refLabel}`} · {formatarData(i.criadoEm)}
+                    {i.observacao && <span className="block text-muted/80">&ldquo;{i.observacao}&rdquo;</span>}
+                  </div>
+                ))}
+              />
+            )}
+          />
 
-                      <td className="border-l border-white/5 px-2 py-2.5 text-center text-primary">
-                        {l.oportunidades.total}
-                      </td>
+          <BlocoAnalitico
+            titulo={`Chamadas (${somarCampo(linhasFiltradas, (l) => l.chamadas.total)})`}
+            linhas={linhasFiltradas}
+            colunas={[
+              {
+                key: 'total',
+                header: 'Total',
+                headerClassName: 'border-l border-white/10 text-center',
+                cellClassName: 'border-l border-white/5 text-center text-primary',
+                render: (l) => l.chamadas.total,
+              },
+              {
+                key: 'atendidas',
+                header: 'Atend.',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center',
+                render: (l) => <span style={{ color: '#2FAE66' }}>{l.chamadas.atendidas}</span>,
+              },
+              {
+                key: 'naoAtendidas',
+                header: 'Não atend.',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center',
+                render: (l) => <span style={{ color: '#F4B400' }}>{l.chamadas.naoAtendidas}</span>,
+              },
+              {
+                key: 'emAndamento',
+                header: 'Andamento',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center',
+                render: (l) => <span style={{ color: '#3B7DD8' }}>{l.chamadas.emAndamento}</span>,
+              },
+              {
+                key: 'falhas',
+                header: 'Falhas',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center',
+                render: (l) => <span style={{ color: '#E5484D' }}>{l.chamadas.falhas}</span>,
+              },
+              {
+                key: 'duracao',
+                header: 'Duração',
+                headerClassName: 'text-center',
+                cellClassName: 'text-center text-primary',
+                render: (l) => formatarDuracao(l.chamadas.duracaoTotalSegundos),
+              },
+            ]}
+            renderDetalhe={(l) => (
+              <ListaDetalhe
+                itens={l.chamadas.lista.map((c) => (
+                  <div key={c.id} className="text-xs text-primary/80">
+                    {c.direcao === 'saida' ? '📤' : '📥'} {c.numero ?? '—'}
+                    {c.clienteNome && ` — ${c.clienteNome}`} · {chamadaStatusLabel(c.status)} ·{' '}
+                    {c.duracaoSegundos ? formatarDuracao(c.duracaoSegundos) : '—'} ·{' '}
+                    {formatarDataHoraChamada(c.iniciadaEm)}
+                  </div>
+                ))}
+              />
+            )}
+          />
 
-                      <td className="border-l border-white/5 px-2 py-2.5 text-center text-primary">
-                        {l.tarefas.total}
-                      </td>
-                      {TAREFA_SITUACAO_OPCOES.map((s) => (
-                        <td key={s} className="px-2 py-2.5 text-center text-primary/80">
-                          {l.tarefas.porSituacao[s] ?? 0}
-                        </td>
-                      ))}
-
-                      <td className="border-l border-white/5 px-2 py-2.5 text-center text-primary">
-                        {l.interacoes.total}
-                      </td>
-                      {RESULTADO_INTERACAO_OPCOES.map((r) => (
-                        <td key={r} className="px-2 py-2.5 text-center text-primary/80">
-                          {l.interacoes.porResultado[r] ?? 0}
-                        </td>
-                      ))}
-
-                      <td className="border-l border-white/5 px-2 py-2.5 text-center text-primary">
-                        {l.chamadas.total}
-                      </td>
-                      <td className="px-2 py-2.5 text-center" style={{ color: '#2FAE66' }}>
-                        {l.chamadas.atendidas}
-                      </td>
-                      <td className="px-2 py-2.5 text-center" style={{ color: '#F4B400' }}>
-                        {l.chamadas.naoAtendidas}
-                      </td>
-                      <td className="px-2 py-2.5 text-center" style={{ color: '#3B7DD8' }}>
-                        {l.chamadas.emAndamento}
-                      </td>
-                      <td className="px-2 py-2.5 text-center" style={{ color: '#E5484D' }}>
-                        {l.chamadas.falhas}
-                      </td>
-                      <td className="px-2 py-2.5 text-center text-primary">
-                        {formatarDuracao(l.chamadas.duracaoTotalSegundos)}
-                      </td>
-
-                      <td className="px-2 py-2.5 text-center text-muted">{aberto ? '▾' : '▸'}</td>
-                    </tr>
-
-                    {aberto && (
-                      <tr className="border-t border-white/5 bg-surface-alt/40">
-                        <td colSpan={26} className="px-4 py-4">
-                          <div className="grid grid-cols-1 gap-4 lg:grid-cols-6">
-                            <DetalhePainel titulo={`Orçamentos (${l.orcamentos.total})`}>
-                              {l.orcamentos.lista.map((p) => (
-                                <div key={p.id} className="text-xs text-primary/80">
-                                  <span className="font-mono">#{p.numero}</span> — {p.clienteNome} ·{' '}
-                                  {STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status}
-                                  {p.orcamentoDireto && <span className="text-accent-compras"> · DIRETO</span>} ·{' '}
-                                  {formatarMoeda(p.valor)} · {formatarData(p.criadoEm)}
-                                </div>
-                              ))}
-                            </DetalhePainel>
-
-                            <DetalhePainel titulo={`Pedidos efetuados (${l.efetuados.total})`}>
-                              {l.efetuados.lista.map((p) => (
-                                <div key={p.id} className="text-xs text-primary/80">
-                                  <span className="font-mono">#{p.numero}</span> — {p.clienteNome} ·{' '}
-                                  {formatarMoeda(p.valor)} · {formatarData(p.criadoEm)}
-                                </div>
-                              ))}
-                            </DetalhePainel>
-
-                            <DetalhePainel titulo={`Leads/Oportunidades (${l.oportunidades.total})`}>
-                              {l.oportunidades.lista.map((o) => (
-                                <div key={o.id} className="text-xs text-primary/80">
-                                  <span className="font-mono">#{o.numero}</span> — {o.clienteNome}
-                                  {o.clienteTelefone && <span className="font-mono"> · {o.clienteTelefone}</span>} ·{' '}
-                                  {OPORTUNIDADE_STATUS_LABELS[o.status as keyof typeof OPORTUNIDADE_STATUS_LABELS] ??
-                                    o.status}{' '}
-                                  · {formatarData(o.criadoEm)}
-                                </div>
-                              ))}
-                            </DetalhePainel>
-
-                            <DetalhePainel titulo={`Tarefas (${l.tarefas.total})`}>
-                              {l.tarefas.lista.map((t) => (
-                                <div key={t.id} className="text-xs text-primary/80">
-                                  {t.descricao || '(sem descrição)'}
-                                  {t.tipo && ` · ${t.tipo}`} · {t.situacao}
-                                  {t.refLabel && ` · ${t.refLabel}`} · {formatarData(t.dataPrevista ?? t.criadoEm)}
-                                </div>
-                              ))}
-                            </DetalhePainel>
-
-                            <DetalhePainel titulo={`Interações (${l.interacoes.total})`}>
-                              {l.interacoes.lista.map((i) => (
-                                <div key={i.id} className="text-xs text-primary/80">
-                                  {i.tipo} · {i.resultado}
-                                  {i.refLabel && ` · ${i.refLabel}`} · {formatarData(i.criadoEm)}
-                                  {i.observacao && (
-                                    <span className="block text-muted/80">&ldquo;{i.observacao}&rdquo;</span>
-                                  )}
-                                </div>
-                              ))}
-                            </DetalhePainel>
-
-                            <DetalhePainel titulo={`Chamadas (${l.chamadas.total})`}>
-                              {l.chamadas.lista.map((c) => (
-                                <div key={c.id} className="text-xs text-primary/80">
-                                  {c.direcao === 'saida' ? '📤' : '📥'} {c.numero ?? '—'}
-                                  {c.clienteNome && ` — ${c.clienteNome}`} · {chamadaStatusLabel(c.status)} ·{' '}
-                                  {c.duracaoSegundos ? formatarDuracao(c.duracaoSegundos) : '—'} ·{' '}
-                                  {formatarDataHoraChamada(c.iniciadaEm)}
-                                </div>
-                              ))}
-                            </DetalhePainel>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                )
-              })}
-            </tbody>
-          </table>
+          <BlocoAnalitico
+            titulo={`Leads/Oportunidades (${somarCampo(linhasFiltradas, (l) => l.oportunidades.total)})`}
+            linhas={linhasFiltradas}
+            colunas={[
+              {
+                key: 'total',
+                header: 'Total',
+                headerClassName: 'border-l border-white/10 text-center',
+                cellClassName: 'border-l border-white/5 text-center text-primary',
+                render: (l) => l.oportunidades.total,
+              },
+            ]}
+            renderDetalhe={(l) => (
+              <ListaDetalhe
+                itens={l.oportunidades.lista.map((o) => (
+                  <div key={o.id} className="text-xs text-primary/80">
+                    <span className="font-mono">#{o.numero}</span> — {o.clienteNome}
+                    {o.clienteTelefone && <span className="font-mono"> · {o.clienteTelefone}</span>} ·{' '}
+                    {OPORTUNIDADE_STATUS_LABELS[o.status as keyof typeof OPORTUNIDADE_STATUS_LABELS] ?? o.status} ·{' '}
+                    {formatarData(o.criadoEm)}
+                  </div>
+                ))}
+              />
+            )}
+          />
         </div>
       )}
     </section>
   )
 }
 
-function DetalhePainel({ titulo, children }: { titulo: string; children: React.ReactNode }) {
-  const temConteudo = Array.isArray(children) ? children.length > 0 : Boolean(children)
+function somarCampo(linhas: AgregadoFuncionario[], campo: (l: AgregadoFuncionario) => number): number {
+  return linhas.reduce((acc, l) => acc + campo(l), 0)
+}
+
+interface ColunaBloco {
+  key: string
+  header: React.ReactNode
+  headerClassName: string
+  cellClassName: string
+  render: (l: AgregadoFuncionario) => React.ReactNode
+}
+
+// Uma tabela compacta e independente por categoria (fase de reestruturação
+// visual do Analítico — antes era uma única tabela gigante com todas as
+// categorias lado a lado, precisando de scroll horizontal). Cada bloco
+// controla seu próprio estado de expandido/drill-down, isolado dos demais —
+// expandir uma linha em "Chamadas" não afeta "Orçamentos" pro mesmo
+// funcionário. `linhas` já vem filtrada pela busca (um campo só, no
+// componente pai, reaplicado a todos os blocos ao mesmo tempo).
+function BlocoAnalitico({
+  titulo,
+  linhas,
+  colunas,
+  renderDetalhe,
+}: {
+  titulo: string
+  linhas: AgregadoFuncionario[]
+  colunas: ColunaBloco[]
+  renderDetalhe: (l: AgregadoFuncionario) => React.ReactNode
+}) {
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
+
+  function alternar(id: string) {
+    setExpandidos((atual) => {
+      const novo = new Set(atual)
+      if (novo.has(id)) novo.delete(id)
+      else novo.add(id)
+      return novo
+    })
+  }
+
   return (
-    <div className="rounded-md border border-white/10 bg-surface p-3">
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">{titulo}</p>
-      {temConteudo ? (
-        <div className="print-scroll-livre max-h-48 space-y-1.5 overflow-y-auto pr-1">{children}</div>
-      ) : (
-        <p className="text-xs text-muted/70">Nenhum registro no período.</p>
-      )}
+    <div className="rounded-lg border border-white/10 bg-surface-alt/20 p-3">
+      <h4 className="mb-2 text-sm font-medium text-primary">{titulo}</h4>
+      <div className="overflow-x-auto rounded-lg border border-white/10">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-surface-alt text-xs uppercase tracking-wide text-muted">
+            <tr>
+              <th className="px-3 py-2 font-medium">Funcionário</th>
+              {colunas.map((c) => (
+                <th key={c.key} className={`px-2 py-1.5 font-medium ${c.headerClassName}`}>
+                  {c.header}
+                </th>
+              ))}
+              <th className="px-2 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.map((l) => {
+              const aberto = expandidos.has(l.id)
+              return (
+                <Fragment key={l.id}>
+                  <tr
+                    onClick={() => alternar(l.id)}
+                    className="cursor-pointer border-t border-white/5 hover:bg-white/5"
+                  >
+                    <td className="px-3 py-2.5 font-medium text-primary">
+                      {l.nome}
+                      {!l.ativo && <span className="ml-1.5 font-normal text-muted">(inativo)</span>}
+                    </td>
+                    {colunas.map((c) => (
+                      <td key={c.key} className={`px-2 py-2.5 ${c.cellClassName}`}>
+                        {c.render(l)}
+                      </td>
+                    ))}
+                    <td className="px-2 py-2.5 text-center text-muted">{aberto ? '▾' : '▸'}</td>
+                  </tr>
+
+                  {aberto && (
+                    <tr className="border-t border-white/5 bg-surface-alt/40">
+                      <td colSpan={colunas.length + 2} className="px-4 py-3">
+                        {renderDetalhe(l)}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
+}
+
+function ListaDetalhe({ itens }: { itens: React.ReactNode[] }) {
+  if (itens.length === 0) {
+    return <p className="text-xs text-muted/70">Nenhum registro no período.</p>
+  }
+  return <div className="print-scroll-livre max-h-64 space-y-1.5 overflow-y-auto pr-1">{itens}</div>
 }
