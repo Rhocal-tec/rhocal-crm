@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
+import { contatoDaTarefa } from '@/lib/tarefas/contato'
 import type { Database } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
@@ -41,10 +42,18 @@ export function ConcluirTarefaModal({
   if (!tarefa) return null
 
   const jaTemOportunidade = tarefa.oportunidade_id !== null
+  const contato = contatoDaTarefa(tarefa)
 
   return (
     <Modal open onClose={onClose} title="Concluir tarefa" widthClassName="max-w-md">
-      <p className="mb-4 text-sm text-muted">{tarefa.descricao}</p>
+      <p className="mb-2 text-sm text-muted">{tarefa.descricao}</p>
+
+      {(contato.cliente || contato.detalhes) && (
+        <div className="mb-4 rounded-md border border-white/10 bg-surface-alt px-3 py-2">
+          {contato.cliente && <p className="text-sm font-medium text-primary">{contato.cliente}</p>}
+          {contato.detalhes && <p className="mt-0.5 text-xs text-muted">{contato.detalhes}</p>}
+        </div>
+      )}
 
       {erro && (
         <div className="mb-4 rounded-md border border-accent-danger/30 bg-accent-danger/10 px-3 py-2 text-sm text-accent-danger">

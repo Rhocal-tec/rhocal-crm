@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { PRAZO_COLUNAS, classificarPrazo } from '@/lib/tarefas/prazo'
+import { contatoDaTarefa } from '@/lib/tarefas/contato'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
 import { useConclusaoTarefa } from '@/lib/tarefas/useConclusaoTarefa'
 import { TarefaColuna } from './TarefaColuna'
@@ -235,7 +236,10 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         const pedido = pedidosPorId[tarefa.pedido_id]
         mapa[tarefa.id] = pedido ? `${pedido.cliente_nome} · Pedido #${pedido.numero}` : null
       } else {
-        mapa[tarefa.id] = null
+        // Tarefa solta (sem vínculo) — usa os campos de contato próprios da
+        // tarefa (migration 0022), que até aqui ficavam preenchidos no banco
+        // sem aparecer em lugar nenhum da interface.
+        mapa[tarefa.id] = contatoDaTarefa(tarefa).cliente
       }
     }
     return mapa

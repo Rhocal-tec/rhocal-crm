@@ -1,6 +1,7 @@
 'use client'
 
 import { formatarDataHoraPrevista } from '@/lib/kanban/formatacao'
+import { contatoDaTarefa } from '@/lib/tarefas/contato'
 import { badgeSituacao, situacaoTerminal } from '@/lib/tarefas/situacao'
 import { rotuloNotificarEm } from '@/lib/tarefas/opcoes'
 import type { Database } from '@/types/database'
@@ -31,6 +32,9 @@ export function TarefaCard({
   const terminal = situacaoTerminal(tarefa.situacao)
   const badge = badgeSituacao(tarefa.situacao)
   const notifica = tarefa.notificar_em && tarefa.notificar_em !== 'nao_notificar'
+  // Detalhes de contato (telefone/nome/cargo/e-mail) de tarefa solta — vem
+  // vazio quando a tarefa tem oportunidade/pedido vinculado.
+  const { detalhes: contatoDetalhes } = contatoDaTarefa(tarefa)
 
   return (
     <div
@@ -58,6 +62,9 @@ export function TarefaCard({
 
       {clienteLabel && (
         <p className="mt-1 truncate text-xs text-primary/70">{clienteLabel}</p>
+      )}
+      {contatoDetalhes && (
+        <p className="mt-0.5 truncate text-[11px] text-muted">{contatoDetalhes}</p>
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
