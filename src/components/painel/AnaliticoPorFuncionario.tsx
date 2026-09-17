@@ -614,6 +614,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           <BlocoAnalitico
             titulo={`Orçamentos (${somarCampo(linhasFiltradas, (l) => l.orcamentos.total)})`}
             linhas={linhasFiltradas}
+            temAtividade={(l) => l.orcamentos.total > 0}
             colunas={[
               {
                 key: 'total',
@@ -661,6 +662,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           <BlocoAnalitico
             titulo={`Pedidos efetuados (${somarCampo(linhasFiltradas, (l) => l.efetuados.total)})`}
             linhas={linhasFiltradas}
+            temAtividade={(l) => l.efetuados.total > 0}
             colunas={[
               {
                 key: 'qtd',
@@ -692,6 +694,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           <BlocoAnalitico
             titulo={`Entregues (${somarCampo(linhasFiltradas, (l) => l.entregas.total)})`}
             linhas={linhasFiltradas}
+            temAtividade={(l) => l.entregas.total > 0}
             colunas={[
               {
                 key: 'qtd',
@@ -723,6 +726,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           <BlocoAnalitico
             titulo={`Tarefas (${somarCampo(linhasFiltradas, (l) => l.tarefas.total)})`}
             linhas={linhasFiltradas}
+            temAtividade={(l) => l.tarefas.total > 0}
             colunas={[
               {
                 key: 'total',
@@ -755,6 +759,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           <BlocoAnalitico
             titulo={`Interações (${somarCampo(linhasFiltradas, (l) => l.interacoes.total)})`}
             linhas={linhasFiltradas}
+            temAtividade={(l) => l.interacoes.total > 0}
             colunas={[
               {
                 key: 'total',
@@ -787,6 +792,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           <BlocoAnalitico
             titulo={`Chamadas (${somarCampo(linhasFiltradas, (l) => l.chamadas.total)})`}
             linhas={linhasFiltradas}
+            temAtividade={(l) => l.chamadas.total > 0}
             colunas={[
               {
                 key: 'total',
@@ -848,6 +854,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           <BlocoAnalitico
             titulo={`Leads/Oportunidades (${somarCampo(linhasFiltradas, (l) => l.oportunidades.total)})`}
             linhas={linhasFiltradas}
+            temAtividade={(l) => l.oportunidades.total > 0}
             colunas={[
               {
                 key: 'total',
@@ -900,11 +907,16 @@ function BlocoAnalitico({
   linhas,
   colunas,
   renderDetalhe,
+  temAtividade,
 }: {
   titulo: string
   linhas: AgregadoFuncionario[]
   colunas: ColunaBloco[]
   renderDetalhe: (l: AgregadoFuncionario) => React.ReactNode
+  // Decide, por linha, se o funcionário teve atividade NESSA categoria no
+  // período — cada bloco passa seu próprio critério (ex: l.tarefas.total > 0),
+  // então a mesma pessoa pode aparecer destacada num bloco e apagada noutro.
+  temAtividade: (l: AgregadoFuncionario) => boolean
 }) {
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
 
@@ -936,11 +948,14 @@ function BlocoAnalitico({
           <tbody>
             {linhas.map((l) => {
               const aberto = expandidos.has(l.id)
+              const ativoNoBloco = temAtividade(l)
               return (
                 <Fragment key={l.id}>
                   <tr
                     onClick={() => alternar(l.id)}
-                    className="cursor-pointer border-t border-white/5 hover:bg-white/5"
+                    className={`cursor-pointer border-t border-white/5 transition-colors hover:bg-white/5 ${
+                      ativoNoBloco ? 'bg-white/[0.04]' : 'opacity-50'
+                    }`}
                   >
                     <td className="px-3 py-2.5 font-medium text-primary">
                       {l.nome}

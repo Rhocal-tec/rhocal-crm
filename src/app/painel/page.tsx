@@ -12,6 +12,11 @@ import ChamadasSemEmpresa from '@/components/painel/ChamadasSemEmpresa'
 import { ErrosRecentesSection } from '@/components/painel/ErrosRecentesSection'
 import { FiltroPeriodo } from '@/components/painel/FiltroPeriodo'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
+import {
+  MotivosPerdaCard,
+  type MotivoPerdaBarra,
+  type PedidoPerdidoLinha,
+} from '@/components/painel/MotivosPerdaCard'
 import { KANBAN_COLUMNS, STATUS_LABELS, STATUS_STRIPE_VAR } from '@/lib/kanban/status'
 import { ehStatusTerminal } from '@/lib/kanban/status-terminais'
 import { estaParado } from '@/lib/kanban/dias-parado'
@@ -65,7 +70,7 @@ export default function PainelPage() {
   const [paradosCount, setParadosCount] = useState(0)
   const [taxaConversao, setTaxaConversao] = useState<number | null>(null)
   const [tempoMedioPorEtapa, setTempoMedioPorEtapa] = useState<BarraDado[]>([])
-  const [motivosPerda, setMotivosPerda] = useState<BarraDado[]>([])
+  const [motivosPerda, setMotivosPerda] = useState<MotivoPerdaBarra[]>([])
 
   // Fase 32.2 — seção "Oportunidades" do painel.
   const [oportCarregando, setOportCarregando] = useState(true)
@@ -109,15 +114,18 @@ export default function PainelPage() {
         const { inicio, fim } = range
         let queryPedidos = supabase
           .from('pedidos')
-          .select('id, status, ultima_movimentacao, criado_em, motivo_perda')
+          .select('id, numero, cliente_nome, criado_por, status, ultima_movimentacao, criado_em, motivo_perda')
           .eq('empresa_id', empresaAtiva!.id)
 
         if (inicio) queryPedidos = queryPedidos.gte('criado_em', `${inicio}T00:00:00`)
         if (fim) queryPedidos = queryPedidos.lt('criado_em', `${proximoDia(fim)}T00:00:00`)
 
-        const { data: pedidos, error: erroPedidos } = await queryPedidos
+        const [{ data: pedidos, error: erroPedidos }, { data: profilesData, error: erroProfiles }] =
+          await Promise.all([queryPedidos, supabase.from('profiles').select('id, nome')])
         if (erroPedidos) throw erroPedidos
+        if (erroProfiles) throw erroProfiles
         const listaPedidos = pedidos ?? []
+        const nomePorId = new Map((profilesData ?? []).map((p) => [p.id, p.nome]))
 
         // Pedidos ativos por etapa (as 5 colunas do kanban).
         const contagem: Partial<Record<PedidoStatus, number>> = {}
@@ -140,43 +148,60 @@ export default function PainelPage() {
         const denominador = efetuados + perdidos
         const taxa = denominador > 0 ? (efetuados / denominador) * 100 : null
 
-        // Motivos de perda: agrupa pela parte antes do "—" em motivo_perda.
-        const mapaMotivos = new Map<string, number>()
-        for (const p of listaPedidos) {
-          if (p.status !== 'PERDIDO') continue
-          const bruto = p.motivo_perda ?? ''
-          const motivo = bruto.split('—')[0]?.trim() || 'Outro'
-          mapaMotivos.set(motivo, (mapaMotivos.get(motivo) ?? 0) + 1)
-        }
-        const listaMotivos: BarraDado[] = Array.from(mapaMotivos.entries())
-          .sort((a, b) => b[1] - a[1])
-          .map(([motivo, quantidade]) => ({
-            chave: motivo,
-            rotulo: motivo,
-            valor: quantidade,
-            rotuloValor: `${quantidade}`,
-          }))
-
         // Valor total em negociação: soma de preco_venda dos itens dos pedidos
         // ainda ativos (fora dos status terminais ARQUIVADO/PERDIDO/ENTREGUE —
-        // um pedido já entregue não está mais "em negociação").
+        // um pedido já entregue não está mais "em negociação"). Busca também
+        // os itens dos PERDIDOS na mesma query (idsParaItens), reaproveitado
+        // pelo valor exibido no drill-down de "Motivos de perda" — evita uma
+        // segunda query só pra isso.
         const idsAtivos = listaPedidos.filter((p) => !ehStatusTerminal(p.status)).map((p) => p.id)
+        const idsPerdidos = listaPedidos.filter((p) => p.status === 'PERDIDO').map((p) => p.id)
+        const idsParaItens = Array.from(new Set([...idsAtivos, ...idsPerdidos]))
 
-        let valorNegociacaoCalc = 0
-        if (idsAtivos.length > 0) {
+        const valorPorPedido = new Map<string, number>()
+        if (idsParaItens.length > 0) {
           const { data: itens, error: erroItens } = await supabase
             .from('pedido_itens')
             .select('pedido_id, preco_venda, quantidade')
-            .in('pedido_id', idsAtivos)
+            .in('pedido_id', idsParaItens)
             .eq('excluido', false)
           if (erroItens) throw erroItens
           // preco_venda é o preço UNITÁRIO do item — precisa multiplicar pela
           // quantidade para chegar no valor da linha.
-          valorNegociacaoCalc = (itens ?? []).reduce(
-            (soma, item) => soma + Number(item.preco_venda ?? 0) * Number(item.quantidade),
-            0,
-          )
+          for (const item of itens ?? []) {
+            const atual = valorPorPedido.get(item.pedido_id) ?? 0
+            valorPorPedido.set(item.pedido_id, atual + Number(item.preco_venda ?? 0) * Number(item.quantidade))
+          }
         }
+        const valorNegociacaoCalc = idsAtivos.reduce(
+          (soma, id) => soma + (valorPorPedido.get(id) ?? 0),
+          0,
+        )
+
+        // Motivos de perda: agrupa pela parte antes do "—" em motivo_perda,
+        // guardando também os pedidos de cada motivo (drill-down do card).
+        const pedidosPorMotivo = new Map<string, PedidoPerdidoLinha[]>()
+        for (const p of listaPedidos) {
+          if (p.status !== 'PERDIDO') continue
+          const bruto = p.motivo_perda ?? ''
+          const motivo = bruto.split('—')[0]?.trim() || 'Outro'
+          const lista = pedidosPorMotivo.get(motivo) ?? []
+          lista.push({
+            id: p.id,
+            numero: p.numero,
+            clienteNome: p.cliente_nome,
+            valor: valorPorPedido.get(p.id) ?? 0,
+            criadoPorNome: nomePorId.get(p.criado_por) ?? 'Perfil removido',
+          })
+          pedidosPorMotivo.set(motivo, lista)
+        }
+        const listaMotivos: MotivoPerdaBarra[] = Array.from(pedidosPorMotivo.entries())
+          .sort((a, b) => b[1].length - a[1].length)
+          .map(([motivo, pedidosDoMotivo]) => ({
+            motivo,
+            quantidade: pedidosDoMotivo.length,
+            pedidos: pedidosDoMotivo,
+          }))
 
         // Tempo médio por etapa: reconstrói, a partir do audit_log, quanto
         // tempo cada pedido ficou em cada status antes de sair dele. Updates
@@ -539,11 +564,7 @@ export default function PainelPage() {
               Pedidos marcados como perdidos no período, agrupados por motivo.
             </p>
             <div className="mt-4">
-              <GraficoBarras
-                dados={motivosPerda}
-                corPadrao="var(--accent-danger)"
-                vazioTexto="Nenhum pedido perdido no período."
-              />
+              <MotivosPerdaCard dados={motivosPerda} />
             </div>
           </div>
         </div>
