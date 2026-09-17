@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
-import { PRAZO_COLUNAS, classificarPrazo } from '@/lib/tarefas/prazo'
+import { PRAZO_COLUNAS, PRAZO_LABELS, classificarPrazo, type PrazoBucket } from '@/lib/tarefas/prazo'
 import { contatoDaTarefa } from '@/lib/tarefas/contato'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
 import { useConclusaoTarefa } from '@/lib/tarefas/useConclusaoTarefa'
+import { FiltroData } from '@/components/busca/FiltroData'
+import type { ModoFiltroData } from '@/lib/kanban/filtro-data'
 import { TarefaColuna } from './TarefaColuna'
 import { EncadearTarefaModal } from './EncadearTarefaModal'
 import { TarefaModal } from './TarefaModal'
@@ -20,6 +22,16 @@ import type { Database, SetorTipo } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
 type Oportunidade = Database['public']['Tables']['oportunidades']['Row']
+
+// Filtro por coluna (fase de busca do FunilBoard) — as 4 colunas de prazo das
+// tarefas + a coluna única de Oportunidades, que não tem "prazo" (por isso
+// não é um PrazoBucket, fica de fora do classificarPrazo).
+type ColunaFiltro = PrazoBucket | 'OPORTUNIDADES'
+const COLUNAS_FILTRO: ColunaFiltro[] = [...PRAZO_COLUNAS, 'OPORTUNIDADES']
+const COLUNA_FILTRO_LABELS: Record<ColunaFiltro, string> = {
+  ...PRAZO_LABELS,
+  OPORTUNIDADES: 'Oportunidades',
+}
 
 // Kanban único e contínuo: as 4 colunas de Tarefas (por prazo) seguidas de
 // UMA coluna "Oportunidades" (todos os leads ativos juntos, sem separar por
@@ -47,6 +59,14 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     {},
   )
   const [novaTarefaAberta, setNovaTarefaAberta] = useState(false)
+
+  // ===== Busca/filtro do quadro (tarefas + oportunidades juntas) =====
+  const [buscaCliente, setBuscaCliente] = useState('')
+  const [modoData, setModoData] = useState<ModoFiltroData>('nenhum')
+  const [dataEspecifica, setDataEspecifica] = useState('')
+  const [dataDe, setDataDe] = useState('')
+  const [dataAte, setDataAte] = useState('')
+  const [colunasVisiveis, setColunasVisiveis] = useState<Set<ColunaFiltro>>(new Set(COLUNAS_FILTRO))
 
   // ===== Oportunidades =====
   const [oportunidades, setOportunidades] = useState<Oportunidade[]>([])
@@ -245,6 +265,57 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     return mapa
   }, [tarefasVisiveis, oportunidadesPorId, pedidosPorId])
 
+  // Filtro de data (mesmo componente/UX de /arquivados e /busca) — aplicado
+  // sobre data_prevista nas tarefas e sobre criado_em nas oportunidades
+  // (Oportunidades não tem "prazo" nesse quadro, então não há um campo de
+  // data equivalente a data_prevista pra ela; criado_em é o mesmo campo já
+  // usado como padrão de filtro de data no resto do app). Comparação por
+  // string 'YYYY-MM-DD' (sem passar por Date), mesmo cuidado de fuso horário
+  // já documentado em classificarPrazo/formatarDataSomente.
+  function dentroDoFiltroData(dataIso: string | null): boolean {
+    if (modoData === 'nenhum') return true
+    if (!dataIso) return false
+    const data = dataIso.slice(0, 10)
+    if (modoData === 'especifica') return !dataEspecifica || data === dataEspecifica
+    if (dataDe && data < dataDe) return false
+    if (dataAte && data > dataAte) return false
+    return true
+  }
+
+  function alternarColuna(coluna: ColunaFiltro) {
+    setColunasVisiveis((atual) => {
+      const novo = new Set(atual)
+      if (novo.has(coluna)) novo.delete(coluna)
+      else novo.add(coluna)
+      return novo
+    })
+  }
+
+  // Busca só pelo nome do cliente/lead já resolvido (clienteLabelPorTarefa
+  // pras tarefas, cliente_nome direto pras oportunidades) — não entra na
+  // descrição da tarefa.
+  const tarefasFiltradas = useMemo(() => {
+    const termo = buscaCliente.trim().toLowerCase()
+    return tarefasVisiveis.filter((tarefa) => {
+      if (!colunasVisiveis.has(classificarPrazo(tarefa))) return false
+      if (termo && !(clienteLabelPorTarefa[tarefa.id] ?? '').toLowerCase().includes(termo)) return false
+      if (!dentroDoFiltroData(tarefa.data_prevista)) return false
+      return true
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tarefasVisiveis, colunasVisiveis, buscaCliente, clienteLabelPorTarefa, modoData, dataEspecifica, dataDe, dataAte])
+
+  const oportunidadesFiltradas = useMemo(() => {
+    if (!colunasVisiveis.has('OPORTUNIDADES')) return []
+    const termo = buscaCliente.trim().toLowerCase()
+    return oportunidades.filter((oportunidade) => {
+      if (termo && !oportunidade.cliente_nome.toLowerCase().includes(termo)) return false
+      if (!dentroDoFiltroData(oportunidade.criado_em)) return false
+      return true
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oportunidades, colunasVisiveis, buscaCliente, modoData, dataEspecifica, dataDe, dataAte])
+
   async function alterarSituacao(tarefa: Tarefa, novaSituacao: string) {
     const atualizada = { ...tarefa, situacao: novaSituacao }
     setTarefas((atual) => atual.map((t) => (t.id === tarefa.id ? atualizada : t)))
@@ -399,6 +470,58 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-end gap-3 px-6 pt-3">
+        <div>
+          <label className="block text-xs text-muted">Buscar cliente/lead</label>
+          <input
+            type="text"
+            value={buscaCliente}
+            onChange={(e) => setBuscaCliente(e.target.value)}
+            placeholder="Nome do cliente ou lead..."
+            className="input-field mt-1 w-56 rounded-md px-3 py-1.5 text-sm"
+          />
+        </div>
+
+        <FiltroData
+          modo={modoData}
+          onModoChange={setModoData}
+          dataEspecifica={dataEspecifica}
+          onDataEspecificaChange={setDataEspecifica}
+          dataDe={dataDe}
+          onDataDeChange={setDataDe}
+          dataAte={dataAte}
+          onDataAteChange={setDataAte}
+        />
+
+        <div>
+          <label className="block text-xs text-muted">Colunas</label>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setColunasVisiveis(new Set(COLUNAS_FILTRO))}
+              className="rounded-full border border-white/15 px-3 py-1.5 text-xs font-medium text-primary/80 transition-colors hover:bg-white/10"
+            >
+              Todas
+            </button>
+            {COLUNAS_FILTRO.map((coluna) => (
+              <button
+                key={coluna}
+                type="button"
+                onClick={() => alternarColuna(coluna)}
+                aria-pressed={colunasVisiveis.has(coluna)}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                  colunasVisiveis.has(coluna)
+                    ? 'bg-accent-primary text-white'
+                    : 'bg-white/5 text-muted hover:bg-white/10 hover:text-primary'
+                }`}
+              >
+                {COLUNA_FILTRO_LABELS[coluna]}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {mensagemSucesso && (
         <div className="mx-6 mt-4 rounded-md border border-accent-success/40 bg-accent-success/10 px-4 py-2 text-sm text-accent-success">
           {mensagemSucesso}
@@ -406,11 +529,11 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
       )}
 
       <div className="flex flex-1 gap-4 overflow-x-auto p-6">
-        {PRAZO_COLUNAS.map((bucket) => (
+        {PRAZO_COLUNAS.filter((bucket) => colunasVisiveis.has(bucket)).map((bucket) => (
           <TarefaColuna
             key={bucket}
             bucket={bucket}
-            tarefas={tarefasVisiveis.filter((t) => classificarPrazo(t) === bucket)}
+            tarefas={tarefasFiltradas.filter((t) => classificarPrazo(t) === bucket)}
             clienteLabelPorTarefa={clienteLabelPorTarefa}
             responsavelPorId={profilesPorId}
             onConcluir={abrirConcluir}
@@ -421,13 +544,15 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
           />
         ))}
 
-        <OportunidadeColumn
-          titulo="Oportunidades"
-          corVar="--accent-primary"
-          oportunidades={oportunidades}
-          onAbrir={setOportunidadeAbertaId}
-          nomesPorId={nomesPorId}
-        />
+        {colunasVisiveis.has('OPORTUNIDADES') && (
+          <OportunidadeColumn
+            titulo="Oportunidades"
+            corVar="--accent-primary"
+            oportunidades={oportunidadesFiltradas}
+            onAbrir={setOportunidadeAbertaId}
+            nomesPorId={nomesPorId}
+          />
+        )}
       </div>
 
       <EncadearTarefaModal
