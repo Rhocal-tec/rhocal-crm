@@ -39,6 +39,12 @@ export async function GET(req: NextRequest) {
   const startDate = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const endDate = new Date().toISOString();
 
+  // Log de diagnóstico temporário — confirma nos logs da Vercel qual
+  // MOBCALL_API_URL e qual janela essa instância está realmente usando em
+  // produção, sem expor a X-API-KEY. Remover depois de confirmado.
+  console.log("[mobcall/sync] MOBCALL_API_URL =", MOBCALL_API_URL);
+  console.log("[mobcall/sync] janela:", startDate, "->", endDate);
+
   const mobcallResponse = await fetch(
     `${MOBCALL_API_URL}/calls?startDate=${startDate}&endDate=${endDate}&page=1&perPage=200`,
     {
