@@ -431,7 +431,10 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
           else agregado.orcamentos.normais += 1
           agregado.orcamentos.lista.push(linha)
 
-          if (pedido.status === 'PEDIDO_EFETUADO') {
+          // ENTREGUE conta aqui também — pedido entregue já passou por
+          // PEDIDO_EFETUADO antes, só avançou mais uma etapa; sem isso, ele
+          // desaparecia do bloco assim que fosse marcado como entregue.
+          if (pedido.status === 'PEDIDO_EFETUADO' || pedido.status === 'ENTREGUE') {
             agregado.efetuados.total += 1
             agregado.efetuados.valorTotal += valor
             agregado.efetuados.lista.push(linha)
