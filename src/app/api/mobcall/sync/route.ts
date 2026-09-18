@@ -87,6 +87,14 @@ export async function GET(req: NextRequest) {
 
   const calls = await mobcallResponse.json();
 
+  // Diagnóstico permanente: quantas chamadas a Mobcall retornou no array de
+  // resposta, ANTES de qualquer processamento/filtro — isola se o problema
+  // está na busca (janela/filtro não acha as chamadas na Mobcall) ou no
+  // processamento depois (acha, mas não sincroniza/grava).
+  await logDiagnostico(
+    `Mobcall retornou ${Array.isArray(calls) ? calls.length : "resposta não-array"} chamadas na janela ${startDate} a ${endDate}`
+  );
+
   // Mapa mobcall_user_id -> profiles.id, carregado uma vez (fora do loop) pra
   // cruzar sourceUserId/destinationUserId do payload da Mobcall e resolver
   // chamadas.usuario_id sem uma query de profiles por chamada.
