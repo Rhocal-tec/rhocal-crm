@@ -39,11 +39,24 @@ export async function GET(req: NextRequest) {
   const startDate = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const endDate = new Date().toISOString();
 
-  // Log de diagnóstico temporário — confirma nos logs da Vercel qual
-  // MOBCALL_API_URL e qual janela essa instância está realmente usando em
-  // produção, sem expor a X-API-KEY. Remover depois de confirmado.
-  console.log("[mobcall/sync] MOBCALL_API_URL =", MOBCALL_API_URL);
-  console.log("[mobcall/sync] janela:", startDate, "->", endDate);
+  // Log de diagnóstico — confirma em error_log (fase 25) qual MOBCALL_API_URL
+  // e qual janela essa instância está realmente usando em produção, sem
+  // expor a X-API-KEY. Mesmo padrão do motor de recompra (registrarErroLog).
+  try {
+    await supabase.from("error_log").insert({
+      rota: "/api/mobcall/sync",
+      mensagem: `MOBCALL_API_URL=${MOBCALL_API_URL} janela=${startDate}->${endDate}`,
+      pedido_id: null,
+      colaborador: null,
+      data_hora: new Date().toISOString(),
+    });
+  } catch (logErr) {
+    console.error(
+      `[mobcall/sync] erro ao gravar em error_log: ${
+        logErr instanceof Error ? logErr.message : String(logErr)
+      }`
+    );
+  }
 
   const mobcallResponse = await fetch(
     `${MOBCALL_API_URL}/calls?startDate=${startDate}&endDate=${endDate}&page=1&perPage=200`,
