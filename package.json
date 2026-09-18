@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "backfill:chamadas-empresa": "node --env-file=.env.local scripts/backfill-empresa-chamadas.mjs"
+    "backfill:chamadas-empresa": "node --env-file=.env.local scripts/backfill-empresa-chamadas.mjs",
+    "backfill:mobcall-usuario": "node --env-file=.env.local scripts/backfill-mobcall-usuario.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -74,6 +74,7 @@ type ChamadaBruta = Pick<
   | 'duracao_segundos'
   | 'iniciada_em'
   | 'oportunidade_id'
+  | 'empresa_id'
 >
 type Profile = Pick<Database['public']['Tables']['profiles']['Row'], 'id' | 'nome' | 'ativo'>
 
@@ -117,6 +118,7 @@ interface ChamadaLinha {
   clienteNome: string | null
   duracaoSegundos: number | null
   iniciadaEm: string | null
+  empresaId: string | null
 }
 
 interface OportunidadeLinha {
@@ -295,12 +297,17 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
         if (range.inicio) queryInteracoes = queryInteracoes.gte('criado_em', `${range.inicio}T00:00:00`)
         if (range.fim) queryInteracoes = queryInteracoes.lt('criado_em', `${proximoDia(range.fim)}T00:00:00`)
 
+        // Inclui também chamadas sem empresa_id identificada (mesmo
+        // raciocínio de ChamadasPorFuncionario.tsx/ChamadasSemEmpresa.tsx) —
+        // sabemos quem fez a ligação mesmo sem saber a empresa, então elas
+        // aparecem em qualquer empresa ativa em vez de sumir do analítico. O
+        // indicador visual no drill-down abaixo deixa claro quais são.
         let queryChamadas = supabase
           .from('chamadas')
           .select(
-            'id, usuario_id, direcao, status, numero_origem, numero_destino, duracao_segundos, iniciada_em, oportunidade_id',
+            'id, usuario_id, direcao, status, numero_origem, numero_destino, duracao_segundos, iniciada_em, oportunidade_id, empresa_id',
           )
-          .eq('empresa_id', empresaId)
+          .or(`empresa_id.eq.${empresaId},empresa_id.is.null`)
         if (range.inicio) queryChamadas = queryChamadas.gte('iniciada_em', `${range.inicio}T00:00:00`)
         if (range.fim) queryChamadas = queryChamadas.lt('iniciada_em', `${proximoDia(range.fim)}T00:00:00`)
 
@@ -537,6 +544,7 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
             clienteNome: chamada.oportunidade_id ? nomePorOportunidadeId.get(chamada.oportunidade_id) ?? null : null,
             duracaoSegundos: chamada.duracao_segundos,
             iniciadaEm: chamada.iniciada_em,
+            empresaId: chamada.empresa_id,
           })
         }
 
@@ -848,6 +856,11 @@ export default function AnaliticoPorFuncionario({ range, empresaId }: { range: R
                     {c.clienteNome && ` — ${c.clienteNome}`} · {chamadaStatusLabel(c.status)} ·{' '}
                     {c.duracaoSegundos ? formatarDuracao(c.duracaoSegundos) : '—'} ·{' '}
                     {formatarDataHoraChamada(c.iniciadaEm)}
+                    {!c.empresaId && (
+                      <span className="ml-1.5 rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] text-muted">
+                        empresa não identificada
+                      </span>
+                    )}
                   </div>
                 ))}
               />

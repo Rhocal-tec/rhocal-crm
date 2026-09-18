@@ -102,6 +102,7 @@ export interface Database {
           setor: SetorTipo
           vendedor_omie_id: string | null
           ramal_mobcall: string | null
+          mobcall_user_id: string | null
           ativo: boolean
           criado_em: string
         }
@@ -111,6 +112,7 @@ export interface Database {
           setor: SetorTipo
           vendedor_omie_id?: string | null
           ramal_mobcall?: string | null
+          mobcall_user_id?: string | null
           ativo?: boolean
           criado_em?: string
         }
@@ -120,6 +122,7 @@ export interface Database {
           setor?: SetorTipo
           vendedor_omie_id?: string | null
           ramal_mobcall?: string | null
+          mobcall_user_id?: string | null
           ativo?: boolean
           criado_em?: string
         }

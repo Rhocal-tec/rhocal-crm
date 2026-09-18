@@ -22,7 +22,7 @@ import type { Database } from '@/types/database'
 
 type Chamada = Pick<
   Database['public']['Tables']['chamadas']['Row'],
-  'usuario_id' | 'direcao' | 'status' | 'duracao_segundos' | 'iniciada_em'
+  'usuario_id' | 'direcao' | 'status' | 'duracao_segundos' | 'iniciada_em' | 'empresa_id'
 >
 type Profile = Database['public']['Tables']['profiles']['Row']
 
@@ -35,6 +35,7 @@ interface LinhaResumo {
   emAndamento: number
   falhas: number
   duracaoTotalSegundos: number
+  semEmpresa: number
 }
 
 function formatarDuracao(segundos: number) {
@@ -64,10 +65,15 @@ export default function ChamadasPorFuncionario({
       setErro(null)
 
       try {
+        // Inclui também chamadas sem empresa_id identificada (ver
+        // ChamadasSemEmpresa.tsx) — não dá pra saber se são da empresa ativa
+        // ou da outra, mas sabemos quem fez a ligação, então aparecem em
+        // qualquer empresa selecionada em vez de sumir do total do
+        // funcionário. O indicador visual abaixo deixa claro quais são.
         let query = supabase
           .from('chamadas')
-          .select('usuario_id, direcao, status, duracao_segundos, iniciada_em')
-          .eq('empresa_id', empresaId)
+          .select('usuario_id, direcao, status, duracao_segundos, iniciada_em, empresa_id')
+          .or(`empresa_id.eq.${empresaId},empresa_id.is.null`)
 
         if (range.inicio) {
           query = query.gte('iniciada_em', `${range.inicio}T00:00:00`)
@@ -104,12 +110,14 @@ export default function ChamadasPorFuncionario({
               emAndamento: 0,
               falhas: 0,
               duracaoTotalSegundos: 0,
+              semEmpresa: 0,
             })
           }
 
           const linha = porUsuario.get(usuarioId)!
           linha.total += 1
           linha.duracaoTotalSegundos += c.duracao_segundos ?? 0
+          if (!c.empresa_id) linha.semEmpresa += 1
 
           if (c.status === 'atendida') linha.atendidas += 1
           else if (c.status === 'nao_atendida') linha.naoAtendidas += 1
@@ -169,7 +177,14 @@ export default function ChamadasPorFuncionario({
             <tbody>
               {linhas.map((l) => (
                 <tr key={l.usuarioId} className="border-t border-white/5 hover:bg-white/5">
-                  <td className="px-3 py-2.5 font-medium text-primary">{l.nome}</td>
+                  <td className="px-3 py-2.5 font-medium text-primary">
+                    {l.nome}
+                    {l.semEmpresa > 0 && (
+                      <span className="ml-1.5 rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-normal text-muted">
+                        {l.semEmpresa} sem empresa identificada
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5 text-center text-primary">{l.total}</td>
                   <td className="px-3 py-2.5 text-center" style={{ color: '#2FAE66' }}>
                     {l.atendidas}

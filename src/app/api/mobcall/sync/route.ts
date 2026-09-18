@@ -86,6 +86,22 @@ export async function GET(req: NextRequest) {
   }
 
   const calls = await mobcallResponse.json();
+
+  // Mapa mobcall_user_id -> profiles.id, carregado uma vez (fora do loop) pra
+  // cruzar sourceUserId/destinationUserId do payload da Mobcall e resolver
+  // chamadas.usuario_id sem uma query de profiles por chamada.
+  const { data: perfis } = await supabase
+    .from("profiles")
+    .select("id, mobcall_user_id")
+    .not("mobcall_user_id", "is", null);
+
+  const perfilPorMobcallUserId = new Map<string, string>();
+  for (const perfil of perfis ?? []) {
+    if (perfil.mobcall_user_id) {
+      perfilPorMobcallUserId.set(perfil.mobcall_user_id, perfil.id);
+    }
+  }
+
   let sincronizadas = 0;
   let vinculadas = 0;
 
@@ -113,6 +129,25 @@ export async function GET(req: NextRequest) {
 
     if (!error && chamada) {
       sincronizadas++;
+
+      // Cruza sourceUserId/destinationUserId (o que vier preenchido no
+      // payload da Mobcall) contra profiles.mobcall_user_id pra descobrir
+      // quem fez/atendeu a ligação. Só grava se ainda não tinha usuario_id
+      // (preserva o valor já setado pelo click-to-call, por exemplo).
+      if (!chamada.usuario_id) {
+        const mobcallUserId = call.sourceUserId ?? call.destinationUserId;
+        const perfilId =
+          mobcallUserId != null
+            ? perfilPorMobcallUserId.get(String(mobcallUserId))
+            : undefined;
+        if (perfilId) {
+          await supabase
+            .from("chamadas")
+            .update({ usuario_id: perfilId })
+            .eq("id", chamada.id);
+        }
+      }
+
       // Chamada sincronizada pelo cron não tem usuário logado nem contexto de
       // browser (diferente do click-to-call) — a única forma de descobrir a
       // empresa aqui é via oportunidade vinculada. Sem match de oportunidade,
