@@ -59,10 +59,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   }
 
-  // TEMPORÁRIO — TESTE PONTA A PONTA: janela ampliada pra 30 dias pra forçar
-  // trazer chamadas reais da Mobcall e validar upsert/vinculação de ponta a
-  // ponta. REVERTER PRA 15 MINUTOS ASSIM QUE O TESTE TERMINAR.
-  const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  // Busca chamadas desde os últimos 15 minutos (ajustar conforme frequência do cron)
+  const startDate = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const endDate = new Date().toISOString();
 
   // Log de diagnóstico — confirma em error_log (fase 25) qual MOBCALL_API_URL
@@ -88,14 +86,6 @@ export async function GET(req: NextRequest) {
   }
 
   const calls = await mobcallResponse.json();
-
-  // Diagnóstico: quantas chamadas a Mobcall retornou no período, ANTES de
-  // qualquer processamento — isola se o problema é na busca (filtro/janela
-  // não acha as chamadas) ou no processamento depois (acha, mas não grava).
-  await logDiagnostico(
-    `Mobcall retornou ${Array.isArray(calls) ? calls.length : "resposta não-array"} chamadas no período ${startDate}->${endDate}`
-  );
-
   let sincronizadas = 0;
   let vinculadas = 0;
 
