@@ -43,13 +43,21 @@ export async function GET(req: NextRequest) {
   // e qual janela essa instância está realmente usando em produção, sem
   // expor a X-API-KEY. Mesmo padrão do motor de recompra (registrarErroLog).
   try {
-    await supabase.from("error_log").insert({
+    const { error: logError } = await supabase.from("error_log").insert({
       rota: "/api/mobcall/sync",
       mensagem: `MOBCALL_API_URL=${MOBCALL_API_URL} janela=${startDate}->${endDate}`,
       pedido_id: null,
       colaborador: null,
       data_hora: new Date().toISOString(),
     });
+    // supabase-js não lança exceção em erro de insert (RLS, coluna, etc.) —
+    // ele resolve com { error }. Sem checar isso explicitamente, uma falha
+    // fica muda: nem cai no catch, nem aparece no error_log.
+    if (logError) {
+      console.error(
+        `[mobcall/sync] erro ao gravar em error_log: ${logError.message}`
+      );
+    }
   } catch (logErr) {
     console.error(
       `[mobcall/sync] erro ao gravar em error_log: ${
