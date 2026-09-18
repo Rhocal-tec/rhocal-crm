@@ -27,6 +27,30 @@ const statusMap: Record<string, string> = {
   ONGOING: "em_andamento",
 };
 
+// Diagnóstico best-effort em error_log (fase 25) — nunca deixa uma falha ao
+// logar derrubar o fluxo original do sync. supabase-js não lança exceção em
+// erro de insert (RLS, coluna, etc.), então checamos { error } explicitamente.
+async function logDiagnostico(mensagem: string) {
+  try {
+    const { error: logError } = await supabase.from("error_log").insert({
+      rota: "/api/mobcall/sync",
+      mensagem,
+      pedido_id: null,
+      colaborador: null,
+      data_hora: new Date().toISOString(),
+    });
+    if (logError) {
+      console.error(`[mobcall/sync] erro ao gravar em error_log: ${logError.message}`);
+    }
+  } catch (logErr) {
+    console.error(
+      `[mobcall/sync] erro ao gravar em error_log: ${
+        logErr instanceof Error ? logErr.message : String(logErr)
+      }`
+    );
+  }
+}
+
 export async function GET(req: NextRequest) {
   // Protege contra chamadas externas — só o Vercel Cron (ou você manualmente
   // com o header certo) pode disparar essa sincronização
@@ -43,30 +67,10 @@ export async function GET(req: NextRequest) {
 
   // Log de diagnóstico — confirma em error_log (fase 25) qual MOBCALL_API_URL
   // e qual janela essa instância está realmente usando em produção, sem
-  // expor a X-API-KEY. Mesmo padrão do motor de recompra (registrarErroLog).
-  try {
-    const { error: logError } = await supabase.from("error_log").insert({
-      rota: "/api/mobcall/sync",
-      mensagem: `MOBCALL_API_URL=${MOBCALL_API_URL} janela=${startDate}->${endDate}`,
-      pedido_id: null,
-      colaborador: null,
-      data_hora: new Date().toISOString(),
-    });
-    // supabase-js não lança exceção em erro de insert (RLS, coluna, etc.) —
-    // ele resolve com { error }. Sem checar isso explicitamente, uma falha
-    // fica muda: nem cai no catch, nem aparece no error_log.
-    if (logError) {
-      console.error(
-        `[mobcall/sync] erro ao gravar em error_log: ${logError.message}`
-      );
-    }
-  } catch (logErr) {
-    console.error(
-      `[mobcall/sync] erro ao gravar em error_log: ${
-        logErr instanceof Error ? logErr.message : String(logErr)
-      }`
-    );
-  }
+  // expor a X-API-KEY.
+  await logDiagnostico(
+    `MOBCALL_API_URL=${MOBCALL_API_URL} janela=${startDate}->${endDate}`
+  );
 
   const mobcallResponse = await fetch(
     `${MOBCALL_API_URL}/calls?startDate=${startDate}&endDate=${endDate}&page=1&perPage=200`,
@@ -84,6 +88,14 @@ export async function GET(req: NextRequest) {
   }
 
   const calls = await mobcallResponse.json();
+
+  // Diagnóstico: quantas chamadas a Mobcall retornou no período, ANTES de
+  // qualquer processamento — isola se o problema é na busca (filtro/janela
+  // não acha as chamadas) ou no processamento depois (acha, mas não grava).
+  await logDiagnostico(
+    `Mobcall retornou ${Array.isArray(calls) ? calls.length : "resposta não-array"} chamadas no período ${startDate}->${endDate}`
+  );
+
   let sincronizadas = 0;
   let vinculadas = 0;
 
