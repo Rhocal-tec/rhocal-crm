@@ -62,6 +62,7 @@ export function TarefasTab({
     confirmarVirouOportunidade,
     confirmarAgendar,
     confirmarSemInteresse,
+    marcarRealizada,
   } = useConclusaoTarefa({
     supabase,
     userId: user?.id,
@@ -439,7 +440,8 @@ export function TarefasTab({
       <EncadearTarefaModal
         tarefaConcluida={tarefaEncadeando}
         onClose={fecharEncadear}
-        onCriada={(nova) => setTarefas((atual) => [...atual, nova])}
+        onCriada={(nova) => setTarefas((atual) => (atual.some((t) => t.id === nova.id) ? atual : [...atual, nova]))}
+        onConcluirTarefaOriginal={marcarRealizada}
       />
     </div>
   )

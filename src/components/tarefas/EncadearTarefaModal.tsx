@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import type { PostgrestError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { Modal } from '@/components/ui/Modal'
@@ -20,18 +21,30 @@ function dataSugerida(): string {
   return `${ano}-${mes}-${dia}`
 }
 
-// Encadeamento (fase 33): oferecido logo depois de concluir uma tarefa —
+// Encadeamento (fase 33): oferecido ao escolher "Agendar novo contato" —
 // "Criar próxima tarefa?" vinculada à mesma oportunidade/pedido, com data
 // sugerida de hoje + 3 dias. Totalmente opcional, fecha sem criar nada se o
 // usuário só quiser seguir em frente.
+//
+// A tarefa original (`tarefaConcluida`) só é marcada Realizada DEPOIS que a
+// próxima tarefa é criada com sucesso (via `onConcluirTarefaOriginal`, o
+// `marcarRealizada` do hook useConclusaoTarefa) — nunca antes. Cancelar este
+// modal ("Não, obrigado") ou fechar sem submeter não toca na original, que
+// continua exatamente como estava (pendente, na coluna de prazo que já era
+// dela). Isso evita o caso em que a original ficava presa como "concluída"
+// sem nenhuma tarefa nova em seu lugar.
 export function EncadearTarefaModal({
   tarefaConcluida,
   onClose,
   onCriada,
+  onConcluirTarefaOriginal,
 }: {
   tarefaConcluida: Tarefa | null
   onClose: () => void
   onCriada: (tarefa: Tarefa) => void
+  onConcluirTarefaOriginal: (
+    tarefa: Tarefa,
+  ) => Promise<{ data: Tarefa | null; error: PostgrestError | null }>
 }) {
   const { user } = useAuth()
   const [supabase] = useState(() => createClient())
@@ -69,20 +82,46 @@ export function EncadearTarefaModal({
         descricao: descricao.trim(),
         responsavel: tarefaConcluida.responsavel,
         data_prevista: dataPrevista || null,
+        // Copia os dados de contato da tarefa original (fase 0022/0028) —
+        // sem isso, uma tarefa solta (sem oportunidade_id/pedido_id) perdia
+        // toda identificação de qual cliente/lead a próxima tarefa era sobre.
+        cliente_nome: tarefaConcluida.cliente_nome,
+        cliente_telefone: tarefaConcluida.cliente_telefone,
+        cliente_cnpj: tarefaConcluida.cliente_cnpj,
+        contato_nome: tarefaConcluida.contato_nome,
+        contato_cargo: tarefaConcluida.contato_cargo,
+        contato_email: tarefaConcluida.contato_email,
+        contato_telefone: tarefaConcluida.contato_telefone,
+        whatsapp_empresa: tarefaConcluida.whatsapp_empresa,
+        whatsapp_comprador: tarefaConcluida.whatsapp_comprador,
+        necessidade_cliente: tarefaConcluida.necessidade_cliente,
         criado_por: user.id,
       })
       .select()
       .single()
 
-    setSalvando(false)
-
     if (error || !data) {
+      setSalvando(false)
       setErro('Não foi possível criar a próxima tarefa. Tente novamente.')
       return
     }
 
+    // Só agora, com a próxima tarefa garantidamente criada, marca a
+    // original como Realizada — nunca antes (ver comentário no topo do
+    // arquivo). Se isso falhar, a tarefa nova já existe e fica de pé; só
+    // avisa que a original não fechou, sem desfazer o que já deu certo.
+    const { error: erroOriginal } = await onConcluirTarefaOriginal(tarefaConcluida)
+
+    setSalvando(false)
+
     onCriada(data)
     if (data.oportunidade_id) sincronizarTarefaComOmie(data.id)
+
+    if (erroOriginal) {
+      setErro('Próxima tarefa criada, mas não foi possível concluir a tarefa atual. Tente novamente.')
+      return
+    }
+
     onClose()
   }
 
@@ -95,7 +134,8 @@ export function EncadearTarefaModal({
     >
       <form onSubmit={criarProxima} className="flex flex-col gap-4">
         <p className="text-xs text-muted">
-          Opcional — só se fizer sentido dar sequência a este contato/oportunidade.
+          Opcional — só se fizer sentido dar sequência a este contato/oportunidade. Cancelar aqui
+          não altera a tarefa atual: ela continua como estava.
         </p>
 
         <div>

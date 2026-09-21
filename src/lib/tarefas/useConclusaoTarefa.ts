@@ -225,12 +225,15 @@ export function useConclusaoTarefa({
     onOportunidadeCriada?.()
   }
 
-  async function confirmarAgendar(tarefa: Tarefa) {
-    setSalvando(true)
-    const { data } = await marcarRealizada(tarefa)
-    setSalvando(false)
+  // "Agendar novo contato" só troca qual modal está aberto — a tarefa
+  // original NUNCA é marcada Realizada aqui. Ela só fecha depois que a
+  // próxima tarefa é de fato criada em EncadearTarefaModal (via
+  // `marcarRealizada`, exposto abaixo), pra nunca deixar a original presa
+  // como "concluída" sem nenhuma tarefa nova em seu lugar caso o usuário
+  // cancele o formulário de agendamento ou o insert falhe.
+  function confirmarAgendar(tarefa: Tarefa) {
     setTarefaConcluindo(null)
-    if (data) setTarefaEncadeando(data)
+    setTarefaEncadeando(tarefa)
   }
 
   async function confirmarSemInteresse(tarefa: Tarefa, motivo: string | null) {
@@ -252,5 +255,8 @@ export function useConclusaoTarefa({
     confirmarVirouOportunidade,
     confirmarAgendar,
     confirmarSemInteresse,
+    // Exposto pra EncadearTarefaModal chamar depois (e só depois) de criar a
+    // próxima tarefa com sucesso — ver comentário em confirmarAgendar.
+    marcarRealizada,
   }
 }

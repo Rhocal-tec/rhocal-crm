@@ -97,6 +97,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     confirmarVirouOportunidade,
     confirmarAgendar,
     confirmarSemInteresse,
+    marcarRealizada,
   } = useConclusaoTarefa({
     supabase,
     userId: user?.id,
@@ -559,7 +560,8 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
       <EncadearTarefaModal
         tarefaConcluida={tarefaEncadeando}
         onClose={fecharEncadear}
-        onCriada={(nova) => setTarefas((atual) => [...atual, nova])}
+        onCriada={(nova) => setTarefas((atual) => (atual.some((t) => t.id === nova.id) ? atual : [...atual, nova]))}
+        onConcluirTarefaOriginal={marcarRealizada}
       />
 
       {novaTarefaAberta && (
