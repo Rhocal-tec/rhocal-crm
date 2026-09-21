@@ -46,6 +46,7 @@ export function ConcluirTarefaModal({
   const [motivo, setMotivo] = useState('')
   const [carregandoFormulario, setCarregandoFormulario] = useState(false)
   const [dadosOportunidade, setDadosOportunidade] = useState<DadosContato>(DADOS_CONTATO_VAZIO)
+  const [necessidadeCliente, setNecessidadeCliente] = useState('')
   const [historicoConversa, setHistoricoConversa] = useState('')
 
   // Reseta só quando a tarefa em edição muda de fato (id diferente) — não a
@@ -57,6 +58,7 @@ export function ConcluirTarefaModal({
       setView('opcoes')
       setMotivo('')
       setDadosOportunidade(DADOS_CONTATO_VAZIO)
+      setNecessidadeCliente('')
       setHistoricoConversa('')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,13 +80,14 @@ export function ConcluirTarefaModal({
     const dados = await onPrepararOportunidade(tarefa)
     setCarregandoFormulario(false)
     setDadosOportunidade(dados)
+    setNecessidadeCliente(dados.necessidadeCliente)
     setHistoricoConversa(dados.historicoConversa)
     setView('oportunidade')
   }
 
   function confirmarCriarOportunidade() {
     if (!tarefa) return
-    onVirouOportunidade(tarefa, { ...dadosOportunidade, historicoConversa })
+    onVirouOportunidade(tarefa, { ...dadosOportunidade, necessidadeCliente, historicoConversa })
   }
 
   const podeConfirmarOportunidade =
@@ -192,6 +195,18 @@ export function ConcluirTarefaModal({
             disabled={salvando}
             titulo="Dados de contato"
           />
+
+          <div>
+            <label className="block text-xs text-muted">O que o cliente deseja/precisa</label>
+            <textarea
+              value={necessidadeCliente}
+              onChange={(e) => setNecessidadeCliente(e.target.value)}
+              rows={2}
+              className="input-field mt-1 w-full rounded-md px-3 py-2 text-sm"
+              placeholder="Ex: 50 capacetes Classe A, com urgência para entrega até sexta"
+              disabled={salvando}
+            />
+          </div>
 
           <div>
             <label className="block text-xs text-muted">O que foi conversado com o cliente</label>

@@ -11,8 +11,11 @@ type SupabaseClient = ReturnType<typeof createClient>
 
 // Dados do formulário exibido antes de criar a oportunidade de fato (ver
 // ConcluirTarefaModal) — os mesmos 9 campos de contato reaproveitados de
-// DadosContatoFields, mais o relato livre da conversa com o cliente.
+// DadosContatoFields, mais a necessidade identificada do cliente (o que ele
+// quer/precisa) e o relato livre da conversa que já rolou — dois campos
+// distintos de propósito.
 export interface DadosNovaOportunidade extends DadosContato {
+  necessidadeCliente: string
   historicoConversa: string
 }
 
@@ -105,6 +108,7 @@ export function useConclusaoTarefa({
       contatoTelefone: tarefa.contato_telefone ?? '',
       whatsappEmpresa: tarefa.whatsapp_empresa ?? '',
       whatsappComprador: tarefa.whatsapp_comprador ?? '',
+      necessidadeCliente: tarefa.necessidade_cliente ?? '',
       historicoConversa: tarefa.historico_conversa ?? '',
     }
   }
@@ -153,6 +157,7 @@ export function useConclusaoTarefa({
     const contatoTelefone = dados.contatoTelefone.trim() || null
     const whatsappEmpresa = dados.whatsappEmpresa.trim() || null
     const whatsappComprador = dados.whatsappComprador.trim() || null
+    const necessidadeCliente = dados.necessidadeCliente.trim() || null
     const historicoConversa = dados.historicoConversa.trim() || null
 
     const { data: novaOportunidade, error: erroOportunidade } = await supabase
@@ -167,6 +172,7 @@ export function useConclusaoTarefa({
         contato_telefone: contatoTelefone,
         whatsapp_empresa: whatsappEmpresa,
         whatsapp_comprador: whatsappComprador,
+        necessidade_cliente: necessidadeCliente,
         historico_conversa: historicoConversa,
         origem_tarefa_id: tarefa.id,
         criado_por: userId,
@@ -196,6 +202,7 @@ export function useConclusaoTarefa({
       contato_telefone: contatoTelefone,
       whatsapp_empresa: whatsappEmpresa,
       whatsapp_comprador: whatsappComprador,
+      necessidade_cliente: necessidadeCliente,
       historico_conversa: historicoConversa,
     })
 

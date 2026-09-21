@@ -46,6 +46,7 @@ export function TarefaModal({
   // Dados de contato (opcional) — só fazem sentido pra tarefa "solta", sem
   // oportunidade/pedido pai (o contato já vive lá quando há um dos dois).
   const [dadosContato, setDadosContato] = useState<DadosContato>(DADOS_CONTATO_VAZIO)
+  const [necessidadeCliente, setNecessidadeCliente] = useState('')
   const semVinculo = !oportunidadeId && !pedidoId
 
   useEffect(() => {
@@ -90,6 +91,7 @@ export function TarefaModal({
         contato_telefone: dadosContato.contatoTelefone.trim() || null,
         whatsapp_empresa: dadosContato.whatsappEmpresa.trim() || null,
         whatsapp_comprador: dadosContato.whatsappComprador.trim() || null,
+        necessidade_cliente: necessidadeCliente.trim() || null,
         criado_por: user.id,
       })
       .select()
@@ -197,11 +199,24 @@ export function TarefaModal({
         </div>
 
         {semVinculo && (
-          <DadosContatoFields
-            value={dadosContato}
-            onChange={(patch) => setDadosContato((atual) => ({ ...atual, ...patch }))}
-            disabled={salvando}
-          />
+          <>
+            <div>
+              <label className="block text-xs text-muted">O que o cliente deseja/precisa (opcional)</label>
+              <textarea
+                value={necessidadeCliente}
+                onChange={(e) => setNecessidadeCliente(e.target.value)}
+                rows={2}
+                className="input-field mt-1 w-full rounded-md px-2.5 py-1.5 text-sm"
+                placeholder="Ex: 50 capacetes Classe A, com urgência para entrega até sexta"
+                disabled={salvando}
+              />
+            </div>
+            <DadosContatoFields
+              value={dadosContato}
+              onChange={(patch) => setDadosContato((atual) => ({ ...atual, ...patch }))}
+              disabled={salvando}
+            />
+          </>
         )}
 
         {erro && <p className="text-xs text-accent-danger">{erro}</p>}

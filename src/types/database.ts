@@ -380,6 +380,7 @@ export interface Database {
           whatsapp_empresa: string | null
           whatsapp_comprador: string | null
           historico_conversa: string | null
+          necessidade_cliente: string | null
           origem_tarefa_id: string | null
           produto_servico: string | null
           concorrentes: string | null
@@ -412,6 +413,7 @@ export interface Database {
           whatsapp_empresa?: string | null
           whatsapp_comprador?: string | null
           historico_conversa?: string | null
+          necessidade_cliente?: string | null
           origem_tarefa_id?: string | null
           produto_servico?: string | null
           concorrentes?: string | null
@@ -444,6 +446,7 @@ export interface Database {
           whatsapp_empresa?: string | null
           whatsapp_comprador?: string | null
           historico_conversa?: string | null
+          necessidade_cliente?: string | null
           origem_tarefa_id?: string | null
           produto_servico?: string | null
           concorrentes?: string | null
@@ -485,6 +488,7 @@ export interface Database {
           whatsapp_empresa: string | null
           whatsapp_comprador: string | null
           historico_conversa: string | null
+          necessidade_cliente: string | null
           motivo_conclusao: string | null
           criado_por: string
           criado_em: string
@@ -519,6 +523,7 @@ export interface Database {
           whatsapp_empresa?: string | null
           whatsapp_comprador?: string | null
           historico_conversa?: string | null
+          necessidade_cliente?: string | null
           motivo_conclusao?: string | null
           criado_por: string
           criado_em?: string
@@ -553,6 +558,7 @@ export interface Database {
           whatsapp_empresa?: string | null
           whatsapp_comprador?: string | null
           historico_conversa?: string | null
+          necessidade_cliente?: string | null
           motivo_conclusao?: string | null
           criado_por?: string
           criado_em?: string

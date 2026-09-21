@@ -28,6 +28,7 @@ type CampoTexto =
   | 'contato_telefone'
   | 'whatsapp_empresa'
   | 'whatsapp_comprador'
+  | 'necessidade_cliente'
   | 'historico_conversa'
 
 type Aba = 'dados' | 'tarefas' | 'historico'
@@ -66,6 +67,7 @@ export function OportunidadeDetalheModal({
   const [contatoTelefoneInput, setContatoTelefoneInput] = useState('')
   const [whatsappEmpresaInput, setWhatsappEmpresaInput] = useState('')
   const [whatsappCompradorInput, setWhatsappCompradorInput] = useState('')
+  const [necessidadeClienteInput, setNecessidadeClienteInput] = useState('')
   const [historicoConversaInput, setHistoricoConversaInput] = useState('')
 
   useEffect(() => {
@@ -113,6 +115,7 @@ export function OportunidadeDetalheModal({
         setContatoTelefoneInput(data?.contato_telefone ?? origem?.contato_telefone ?? '')
         setWhatsappEmpresaInput(data?.whatsapp_empresa ?? origem?.whatsapp_empresa ?? '')
         setWhatsappCompradorInput(data?.whatsapp_comprador ?? origem?.whatsapp_comprador ?? '')
+        setNecessidadeClienteInput(data?.necessidade_cliente ?? origem?.necessidade_cliente ?? '')
         setHistoricoConversaInput(data?.historico_conversa ?? origem?.historico_conversa ?? '')
         setValorEstimadoInput(
           data?.valor_estimado !== undefined && data?.valor_estimado !== null
@@ -234,7 +237,41 @@ export function OportunidadeDetalheModal({
 
           {aba === 'dados' && (
             <div>
-              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+              <div className="mt-4 rounded-md border-2 border-accent-primary/50 bg-accent-primary/10 p-3">
+                <h3 className="text-xs font-bold uppercase tracking-wide text-accent-primary">
+                  O que o cliente deseja/precisa
+                </h3>
+                <textarea
+                  value={necessidadeClienteInput}
+                  onChange={(e) => setNecessidadeClienteInput(e.target.value)}
+                  onBlur={() => salvarCampoTexto('necessidade_cliente', necessidadeClienteInput)}
+                  rows={3}
+                  placeholder="Ainda não informado."
+                  className="input-field mt-2 w-full rounded-md px-2 py-1.5 text-sm"
+                />
+              </div>
+
+              <div className="mt-3 rounded-md border border-white/10 bg-surface-alt p-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  Histórico da conversa
+                </h3>
+                <p className="mt-1 text-xs text-muted">
+                  O que foi conversado com o cliente antes desta oportunidade ser criada
+                  {tarefaOrigem && !oportunidade.historico_conversa
+                    ? ' (herdado da tarefa de origem).'
+                    : '.'}
+                </p>
+                <textarea
+                  value={historicoConversaInput}
+                  onChange={(e) => setHistoricoConversaInput(e.target.value)}
+                  onBlur={() => salvarCampoTexto('historico_conversa', historicoConversaInput)}
+                  rows={4}
+                  placeholder="Nenhum relato registrado."
+                  className="input-field mt-2 w-full whitespace-pre-wrap rounded-md px-2 py-1.5 text-sm"
+                />
+              </div>
+
+              <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                 <div>
                   <dt className="text-muted">Cliente</dt>
                   <dd className="font-medium text-primary">{oportunidade.cliente_nome}</dd>
@@ -456,26 +493,6 @@ export function OportunidadeDetalheModal({
                     </dd>
                   </div>
                 </dl>
-              </div>
-
-              <div className="mt-5 border-t border-white/10 pt-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
-                  Histórico da conversa
-                </h3>
-                <p className="mt-1 text-xs text-muted">
-                  O que foi conversado com o cliente antes desta oportunidade ser criada
-                  {tarefaOrigem && !oportunidade.historico_conversa
-                    ? ' (herdado da tarefa de origem).'
-                    : '.'}
-                </p>
-                <textarea
-                  value={historicoConversaInput}
-                  onChange={(e) => setHistoricoConversaInput(e.target.value)}
-                  onBlur={() => salvarCampoTexto('historico_conversa', historicoConversaInput)}
-                  rows={4}
-                  placeholder="Nenhum relato registrado."
-                  className="input-field mt-2 w-full whitespace-pre-wrap rounded-md px-2 py-1.5 text-sm"
-                />
               </div>
 
               <ConverterEmOrcamentoSection
