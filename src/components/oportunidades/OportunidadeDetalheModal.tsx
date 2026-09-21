@@ -16,6 +16,7 @@ import { MarcarOportunidadePerdidaSection } from './MarcarOportunidadePerdidaSec
 import type { Database, OportunidadeStatus, SetorTipo } from '@/types/database'
 
 type Oportunidade = Database['public']['Tables']['oportunidades']['Row']
+type Tarefa = Database['public']['Tables']['tarefas']['Row']
 
 type CampoTexto =
   | 'contato_nome'
@@ -24,6 +25,10 @@ type CampoTexto =
   | 'produto_servico'
   | 'concorrentes'
   | 'cliente_telefone'
+  | 'contato_telefone'
+  | 'whatsapp_empresa'
+  | 'whatsapp_comprador'
+  | 'historico_conversa'
 
 type Aba = 'dados' | 'tarefas' | 'historico'
 
@@ -42,6 +47,12 @@ export function OportunidadeDetalheModal({
   const [carregando, setCarregando] = useState(false)
   const [tarefaModalAberto, setTarefaModalAberto] = useState(false)
 
+  // Fallback de exibição: se a oportunidade nasceu do fluxo "Criar
+  // Oportunidade" na conclusão de uma tarefa (origem_tarefa_id), busca a
+  // tarefa de origem só pra preencher campos que tenham ficado vazios na
+  // oportunidade — nunca sobrescreve o que já está salvo nela.
+  const [tarefaOrigem, setTarefaOrigem] = useState<Tarefa | null>(null)
+
   // Fase 38: estado local dos campos editáveis inline (mesmo padrão de
   // input controlado + salvar no blur já usado no modal de Pedido).
   const [previsaoFechamentoInput, setPrevisaoFechamentoInput] = useState('')
@@ -52,11 +63,16 @@ export function OportunidadeDetalheModal({
   const [contatoEmailInput, setContatoEmailInput] = useState('')
   const [clienteTelefoneInput, setClienteTelefoneInput] = useState('')
   const [valorEstimadoInput, setValorEstimadoInput] = useState('')
+  const [contatoTelefoneInput, setContatoTelefoneInput] = useState('')
+  const [whatsappEmpresaInput, setWhatsappEmpresaInput] = useState('')
+  const [whatsappCompradorInput, setWhatsappCompradorInput] = useState('')
+  const [historicoConversaInput, setHistoricoConversaInput] = useState('')
 
   useEffect(() => {
     if (!oportunidadeId) {
       setOportunidade(null)
       setAba('dados')
+      setTarefaOrigem(null)
       return
     }
 
@@ -68,16 +84,36 @@ export function OportunidadeDetalheModal({
       .select('*')
       .eq('id', oportunidadeId)
       .single()
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         if (!ativo) return
+
+        // Se a oportunidade nasceu do fluxo "Criar Oportunidade" (conclusão
+        // de tarefa), busca a tarefa de origem pra usar como fallback de
+        // exibição nos campos que tenham ficado vazios aqui.
+        let origem: Tarefa | null = null
+        if (data?.origem_tarefa_id) {
+          const { data: tarefa } = await supabase
+            .from('tarefas')
+            .select('*')
+            .eq('id', data.origem_tarefa_id)
+            .single()
+          origem = tarefa ?? null
+        }
+        if (!ativo) return
+        setTarefaOrigem(origem)
+
         setOportunidade(data ?? null)
         setPrevisaoFechamentoInput(data?.previsao_fechamento ?? '')
         setProdutoServicoInput(data?.produto_servico ?? '')
         setConcorrentesInput(data?.concorrentes ?? '')
-        setContatoNomeInput(data?.contato_nome ?? '')
-        setContatoCargoInput(data?.contato_cargo ?? '')
-        setContatoEmailInput(data?.contato_email ?? '')
-        setClienteTelefoneInput(data?.cliente_telefone ?? '')
+        setContatoNomeInput(data?.contato_nome ?? origem?.contato_nome ?? '')
+        setContatoCargoInput(data?.contato_cargo ?? origem?.contato_cargo ?? '')
+        setContatoEmailInput(data?.contato_email ?? origem?.contato_email ?? '')
+        setClienteTelefoneInput(data?.cliente_telefone ?? origem?.cliente_telefone ?? '')
+        setContatoTelefoneInput(data?.contato_telefone ?? origem?.contato_telefone ?? '')
+        setWhatsappEmpresaInput(data?.whatsapp_empresa ?? origem?.whatsapp_empresa ?? '')
+        setWhatsappCompradorInput(data?.whatsapp_comprador ?? origem?.whatsapp_comprador ?? '')
+        setHistoricoConversaInput(data?.historico_conversa ?? origem?.historico_conversa ?? '')
         setValorEstimadoInput(
           data?.valor_estimado !== undefined && data?.valor_estimado !== null
             ? String(data.valor_estimado)
@@ -356,7 +392,7 @@ export function OportunidadeDetalheModal({
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted">Telefone</dt>
+                    <dt className="text-muted">Telefone da empresa</dt>
                     <dd className="mt-0.5">
                       <input
                         type="tel"
@@ -372,7 +408,74 @@ export function OportunidadeDetalheModal({
                       />
                     </dd>
                   </div>
+                  <div>
+                    <dt className="text-muted">Telefone do contato</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="tel"
+                        value={contatoTelefoneInput}
+                        onChange={(e) =>
+                          setContatoTelefoneInput(formatarTelefoneInput(e.target.value))
+                        }
+                        onBlur={() => salvarCampoTexto('contato_telefone', contatoTelefoneInput)}
+                        placeholder="(11) 91234-5678"
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted">WhatsApp da empresa</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="tel"
+                        value={whatsappEmpresaInput}
+                        onChange={(e) =>
+                          setWhatsappEmpresaInput(formatarTelefoneInput(e.target.value))
+                        }
+                        onBlur={() => salvarCampoTexto('whatsapp_empresa', whatsappEmpresaInput)}
+                        placeholder="(11) 91234-5678"
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted">WhatsApp do comprador</dt>
+                    <dd className="mt-0.5">
+                      <input
+                        type="tel"
+                        value={whatsappCompradorInput}
+                        onChange={(e) =>
+                          setWhatsappCompradorInput(formatarTelefoneInput(e.target.value))
+                        }
+                        onBlur={() =>
+                          salvarCampoTexto('whatsapp_comprador', whatsappCompradorInput)
+                        }
+                        placeholder="(11) 91234-5678"
+                        className="input-field w-full rounded-md px-2 py-1 text-sm"
+                      />
+                    </dd>
+                  </div>
                 </dl>
+              </div>
+
+              <div className="mt-5 border-t border-white/10 pt-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  Histórico da conversa
+                </h3>
+                <p className="mt-1 text-xs text-muted">
+                  O que foi conversado com o cliente antes desta oportunidade ser criada
+                  {tarefaOrigem && !oportunidade.historico_conversa
+                    ? ' (herdado da tarefa de origem).'
+                    : '.'}
+                </p>
+                <textarea
+                  value={historicoConversaInput}
+                  onChange={(e) => setHistoricoConversaInput(e.target.value)}
+                  onBlur={() => salvarCampoTexto('historico_conversa', historicoConversaInput)}
+                  rows={4}
+                  placeholder="Nenhum relato registrado."
+                  className="input-field mt-2 w-full whitespace-pre-wrap rounded-md px-2 py-1.5 text-sm"
+                />
               </div>
 
               <ConverterEmOrcamentoSection

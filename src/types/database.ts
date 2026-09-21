@@ -376,6 +376,11 @@ export interface Database {
           contato_nome: string | null
           contato_cargo: string | null
           contato_email: string | null
+          contato_telefone: string | null
+          whatsapp_empresa: string | null
+          whatsapp_comprador: string | null
+          historico_conversa: string | null
+          origem_tarefa_id: string | null
           produto_servico: string | null
           concorrentes: string | null
           criado_por: string
@@ -403,6 +408,11 @@ export interface Database {
           contato_nome?: string | null
           contato_cargo?: string | null
           contato_email?: string | null
+          contato_telefone?: string | null
+          whatsapp_empresa?: string | null
+          whatsapp_comprador?: string | null
+          historico_conversa?: string | null
+          origem_tarefa_id?: string | null
           produto_servico?: string | null
           concorrentes?: string | null
           criado_por: string
@@ -430,6 +440,11 @@ export interface Database {
           contato_nome?: string | null
           contato_cargo?: string | null
           contato_email?: string | null
+          contato_telefone?: string | null
+          whatsapp_empresa?: string | null
+          whatsapp_comprador?: string | null
+          historico_conversa?: string | null
+          origem_tarefa_id?: string | null
           produto_servico?: string | null
           concorrentes?: string | null
           criado_por?: string
@@ -466,6 +481,10 @@ export interface Database {
           contato_nome: string | null
           contato_cargo: string | null
           contato_email: string | null
+          contato_telefone: string | null
+          whatsapp_empresa: string | null
+          whatsapp_comprador: string | null
+          historico_conversa: string | null
           motivo_conclusao: string | null
           criado_por: string
           criado_em: string
@@ -496,6 +515,10 @@ export interface Database {
           contato_nome?: string | null
           contato_cargo?: string | null
           contato_email?: string | null
+          contato_telefone?: string | null
+          whatsapp_empresa?: string | null
+          whatsapp_comprador?: string | null
+          historico_conversa?: string | null
           motivo_conclusao?: string | null
           criado_por: string
           criado_em?: string
@@ -526,6 +549,10 @@ export interface Database {
           contato_nome?: string | null
           contato_cargo?: string | null
           contato_email?: string | null
+          contato_telefone?: string | null
+          whatsapp_empresa?: string | null
+          whatsapp_comprador?: string | null
+          historico_conversa?: string | null
           motivo_conclusao?: string | null
           criado_por?: string
           criado_em?: string

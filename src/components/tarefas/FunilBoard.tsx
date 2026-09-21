@@ -93,6 +93,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     abrirConcluir,
     fecharConcluir,
     fecharEncadear,
+    prepararDadosOportunidade,
     confirmarVirouOportunidade,
     confirmarAgendar,
     confirmarSemInteresse,
@@ -572,6 +573,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
       <ConcluirTarefaModal
         tarefa={tarefaConcluindo}
         onClose={fecharConcluir}
+        onPrepararOportunidade={prepararDadosOportunidade}
         onVirouOportunidade={confirmarVirouOportunidade}
         onAgendarNovoContato={confirmarAgendar}
         onSemInteresse={confirmarSemInteresse}

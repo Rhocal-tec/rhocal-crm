@@ -3,10 +3,18 @@
 import { useState } from 'react'
 import type { createClient } from '@/lib/supabase/client'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
+import { DADOS_CONTATO_VAZIO, type DadosContato } from '@/components/tarefas/DadosContatoFields'
 import type { Database } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
 type SupabaseClient = ReturnType<typeof createClient>
+
+// Dados do formulário exibido antes de criar a oportunidade de fato (ver
+// ConcluirTarefaModal) — os mesmos 9 campos de contato reaproveitados de
+// DadosContatoFields, mais o relato livre da conversa com o cliente.
+export interface DadosNovaOportunidade extends DadosContato {
+  historicoConversa: string
+}
 
 // Lógica compartilhada do fluxo de conclusão de tarefa com 3 opções (virou
 // oportunidade / agendar novo contato / sem interesse) — usada tanto pelo
@@ -61,7 +69,47 @@ export function useConclusaoTarefa({
     return { data, error }
   }
 
-  async function confirmarVirouOportunidade(tarefa: Tarefa) {
+  // Monta o preenchimento inicial do formulário de "Criar Oportunidade"
+  // (ver ConcluirTarefaModal) a partir dos dados já existentes na tarefa; se
+  // ela pertence a um pedido (upsell — tarefa de pedido nunca tem
+  // cliente_nome preenchido, já que TarefasTab não coleta isso) e não tem
+  // nome preenchido, busca no pedido — mesmo dado que o comercial já
+  // digitaria manualmente. O funcionário ainda pode editar tudo antes de
+  // confirmar.
+  async function prepararDadosOportunidade(tarefa: Tarefa): Promise<DadosNovaOportunidade> {
+    let clienteNome = tarefa.cliente_nome ?? ''
+    let clienteTelefone = tarefa.cliente_telefone ?? ''
+    let clienteCnpj = tarefa.cliente_cnpj ?? ''
+
+    if (!clienteNome && tarefa.pedido_id) {
+      const { data: pedido } = await supabase
+        .from('pedidos')
+        .select('cliente_nome, cliente_telefone, cliente_cnpj')
+        .eq('id', tarefa.pedido_id)
+        .single()
+      if (pedido) {
+        clienteNome = pedido.cliente_nome ?? ''
+        clienteTelefone = clienteTelefone || (pedido.cliente_telefone ?? '')
+        clienteCnpj = clienteCnpj || (pedido.cliente_cnpj ?? '')
+      }
+    }
+
+    return {
+      ...DADOS_CONTATO_VAZIO,
+      clienteNome,
+      clienteTelefone,
+      clienteCnpj,
+      contatoNome: tarefa.contato_nome ?? '',
+      contatoCargo: tarefa.contato_cargo ?? '',
+      contatoEmail: tarefa.contato_email ?? '',
+      contatoTelefone: tarefa.contato_telefone ?? '',
+      whatsappEmpresa: tarefa.whatsapp_empresa ?? '',
+      whatsappComprador: tarefa.whatsapp_comprador ?? '',
+      historicoConversa: tarefa.historico_conversa ?? '',
+    }
+  }
+
+  async function confirmarVirouOportunidade(tarefa: Tarefa, dados?: DadosNovaOportunidade) {
     if (tarefa.oportunidade_id) {
       setErro(null)
       setSalvando(true)
@@ -83,37 +131,29 @@ export function useConclusaoTarefa({
       return
     }
 
+    if (!dados) {
+      setErro('Preencha os dados da oportunidade antes de confirmar.')
+      return
+    }
+
+    const clienteNome = dados.clienteNome.trim()
+    if (!clienteNome) {
+      setErro('Informe o nome do cliente para criar a oportunidade.')
+      return
+    }
+
     setErro(null)
     setSalvando(true)
 
-    // Dados de contato: usa os da própria tarefa; se ela pertence a um
-    // pedido (upsell — tarefa de pedido nunca tem cliente_nome preenchido,
-    // já que TarefasTab não coleta isso) e não tem nome preenchido, busca no
-    // pedido — mesmo dado que o comercial já digitaria manualmente.
-    let clienteNome = tarefa.cliente_nome
-    let clienteTelefone = tarefa.cliente_telefone
-    let clienteCnpj = tarefa.cliente_cnpj
-    let clienteContato: string | null = null
-
-    if (!clienteNome && tarefa.pedido_id) {
-      const { data: pedido } = await supabase
-        .from('pedidos')
-        .select('cliente_nome, cliente_telefone, cliente_cnpj, cliente_contato')
-        .eq('id', tarefa.pedido_id)
-        .single()
-      if (pedido) {
-        clienteNome = pedido.cliente_nome
-        clienteTelefone = clienteTelefone ?? pedido.cliente_telefone
-        clienteCnpj = clienteCnpj ?? pedido.cliente_cnpj
-        clienteContato = pedido.cliente_contato
-      }
-    }
-
-    if (!clienteNome) {
-      setSalvando(false)
-      setErro('Não foi possível criar a oportunidade: a tarefa não tem o nome do cliente preenchido.')
-      return
-    }
+    const clienteTelefone = dados.clienteTelefone.trim() || null
+    const clienteCnpj = dados.clienteCnpj.trim() || null
+    const contatoNome = dados.contatoNome.trim() || null
+    const contatoCargo = dados.contatoCargo.trim() || null
+    const contatoEmail = dados.contatoEmail.trim() || null
+    const contatoTelefone = dados.contatoTelefone.trim() || null
+    const whatsappEmpresa = dados.whatsappEmpresa.trim() || null
+    const whatsappComprador = dados.whatsappComprador.trim() || null
+    const historicoConversa = dados.historicoConversa.trim() || null
 
     const { data: novaOportunidade, error: erroOportunidade } = await supabase
       .from('oportunidades')
@@ -121,10 +161,14 @@ export function useConclusaoTarefa({
         cliente_nome: clienteNome,
         cliente_telefone: clienteTelefone,
         cliente_cnpj: clienteCnpj,
-        cliente_contato: clienteContato,
-        contato_nome: tarefa.contato_nome,
-        contato_cargo: tarefa.contato_cargo,
-        contato_email: tarefa.contato_email,
+        contato_nome: contatoNome,
+        contato_cargo: contatoCargo,
+        contato_email: contatoEmail,
+        contato_telefone: contatoTelefone,
+        whatsapp_empresa: whatsappEmpresa,
+        whatsapp_comprador: whatsappComprador,
+        historico_conversa: historicoConversa,
+        origem_tarefa_id: tarefa.id,
         criado_por: userId,
         empresa_id: empresaId,
       })
@@ -137,7 +181,23 @@ export function useConclusaoTarefa({
       return
     }
 
-    const { error: erroVinculo } = await marcarRealizada(tarefa, { oportunidade_id: novaOportunidade.id })
+    // Grava os mesmos dados (possivelmente corrigidos/completados no
+    // formulário) de volta na tarefa original, além de marcar Realizada e
+    // vincular a oportunidade recém-criada — assim a tarefa fica com o
+    // registro completo também, não só a oportunidade.
+    const { error: erroVinculo } = await marcarRealizada(tarefa, {
+      oportunidade_id: novaOportunidade.id,
+      cliente_nome: clienteNome,
+      cliente_telefone: clienteTelefone,
+      cliente_cnpj: clienteCnpj,
+      contato_nome: contatoNome,
+      contato_cargo: contatoCargo,
+      contato_email: contatoEmail,
+      contato_telefone: contatoTelefone,
+      whatsapp_empresa: whatsappEmpresa,
+      whatsapp_comprador: whatsappComprador,
+      historico_conversa: historicoConversa,
+    })
 
     setSalvando(false)
 
@@ -181,6 +241,7 @@ export function useConclusaoTarefa({
     abrirConcluir,
     fecharConcluir: () => setTarefaConcluindo(null),
     fecharEncadear: () => setTarefaEncadeando(null),
+    prepararDadosOportunidade,
     confirmarVirouOportunidade,
     confirmarAgendar,
     confirmarSemInteresse,
