@@ -6,21 +6,22 @@ import { useAuth } from '@/contexts/AuthContext'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { InteligenciaComercial } from '@/components/inteligencia/InteligenciaComercial'
 
-// Fase 35: mesma regra de acesso do Painel executivo (fase 14) — exclusiva
-// do gestor, qualquer outro perfil volta pro Kanban.
+// Liberada também pro Comercial (além do Gestor) — Compras não participa
+// dessa etapa de segmentação/campanha, mesmo critério já usado em
+// Oportunidades/Tarefas.
 export default function InteligenciaPage() {
   const { profile, loading } = useAuth()
   const router = useRouter()
 
-  const ehGestor = profile?.setor === 'gestor'
+  const podeAcessar = profile?.setor === 'gestor' || profile?.setor === 'comercial'
 
   useEffect(() => {
-    if (!loading && profile && !ehGestor) {
+    if (!loading && profile && !podeAcessar) {
       router.replace('/dashboard')
     }
-  }, [loading, profile, ehGestor, router])
+  }, [loading, profile, podeAcessar, router])
 
-  if (loading || !profile || !ehGestor) {
+  if (loading || !profile || !podeAcessar) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-base text-muted">
         Carregando…

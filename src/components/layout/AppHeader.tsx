@@ -35,7 +35,11 @@ const NAV_ITEMS: { href: string; label: string; check?: (setor: SetorTipo) => bo
   { href: '/busca', label: 'Busca' },
   { href: '/arquivados', label: 'Arquivados' },
   { href: '/painel', label: 'Painel', check: (setor) => setor === 'gestor' },
-  { href: '/inteligencia', label: 'Inteligência', check: (setor) => setor === 'gestor' },
+  {
+    href: '/inteligencia',
+    label: 'Inteligência',
+    check: (setor) => setor === 'gestor' || setor === 'comercial',
+  },
 ]
 
 export function AppHeader() {
