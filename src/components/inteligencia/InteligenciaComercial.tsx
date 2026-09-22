@@ -326,47 +326,21 @@ export function InteligenciaComercial() {
         {empresaAtiva && <span className="text-primary/70"> Empresa ativa: {empresaAtiva.nome_fantasia}.</span>}
       </p>
 
-      <div className="mt-4">
-        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
-          Período (oportunidades criadas em)
-        </p>
-        <FiltroPeriodo
-          preset={preset}
-          onPresetChange={selecionarPreset}
-          personalizadoDe={personalizadoDe}
-          onPersonalizadoDeChange={setPersonalizadoDe}
-          personalizadoAte={personalizadoAte}
-          onPersonalizadoAteChange={setPersonalizadoAte}
-          onAplicarPersonalizado={aplicarPersonalizado}
-        />
-        <p className="mt-1.5 text-xs text-muted/70">
-          Restringe só as oportunidades (etapa, origem, valor estimado). Pedidos e o histórico de
-          RFM/score continuam completos, independente do período.
-        </p>
-      </div>
-
-      {erro && <p className="mt-4 text-sm text-accent-danger">{erro}</p>}
-
-      {!carregando && (
-        <div className="mt-6">
-          <AlertasChurn clientes={clientes} onCriarTarefa={setClienteParaTarefa} />
-        </div>
-      )}
-
-      {!carregando && (
-        <div className="mt-6">
-          <SegmentacaoCampanhas clientes={clientes} empresaId={empresaAtiva?.id ?? null} />
-        </div>
-      )}
-
-      <div className="mt-6 flex gap-2 border-b border-white/10">
+      {/* Navegação principal da página — fica logo abaixo do título, sempre
+          visível, mesmo padrão de pill (rounded-full) do filtro de período
+          abaixo. Antes ficava como aba sublinhada depois de todo o bloco de
+          Segmentação/AlertasChurn, fácil de nunca rolar até ela — por isso o
+          Léo não achava "Campanhas" depois de criar uma campanha com
+          sucesso. Cada aba agora também esconde o conteúdo da outra, em vez
+          de deixar Segmentação sempre renderizada acima de Campanhas. */}
+      <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => setAba('segmentacao')}
-          className={`px-3 py-2 text-sm font-medium transition-colors ${
+          className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
             aba === 'segmentacao'
-              ? 'border-b-2 border-accent-primary text-primary'
-              : 'text-muted hover:text-primary'
+              ? 'bg-accent-primary text-white'
+              : 'bg-white/5 text-muted hover:bg-white/10 hover:text-primary'
           }`}
         >
           Segmentação
@@ -374,18 +348,55 @@ export function InteligenciaComercial() {
         <button
           type="button"
           onClick={() => setAba('campanhas')}
-          className={`px-3 py-2 text-sm font-medium transition-colors ${
-            aba === 'campanhas' ? 'border-b-2 border-accent-primary text-primary' : 'text-muted hover:text-primary'
+          className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+            aba === 'campanhas'
+              ? 'bg-accent-primary text-white'
+              : 'bg-white/5 text-muted hover:bg-white/10 hover:text-primary'
           }`}
         >
           Campanhas
         </button>
       </div>
 
+      {erro && <p className="mt-4 text-sm text-accent-danger">{erro}</p>}
+
       {aba === 'campanhas' ? (
-        <CampanhasTab clientes={clientes} />
+        <div className="mt-6">
+          <CampanhasTab clientes={clientes} />
+        </div>
       ) : (
         <>
+          <div className="mt-6">
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
+              Período (oportunidades criadas em)
+            </p>
+            <FiltroPeriodo
+              preset={preset}
+              onPresetChange={selecionarPreset}
+              personalizadoDe={personalizadoDe}
+              onPersonalizadoDeChange={setPersonalizadoDe}
+              personalizadoAte={personalizadoAte}
+              onPersonalizadoAteChange={setPersonalizadoAte}
+              onAplicarPersonalizado={aplicarPersonalizado}
+            />
+            <p className="mt-1.5 text-xs text-muted/70">
+              Restringe só as oportunidades (etapa, origem, valor estimado). Pedidos e o histórico de
+              RFM/score continuam completos, independente do período.
+            </p>
+          </div>
+
+          {!carregando && (
+            <div className="mt-6">
+              <AlertasChurn clientes={clientes} onCriarTarefa={setClienteParaTarefa} />
+            </div>
+          )}
+
+          {!carregando && (
+            <div className="mt-6">
+              <SegmentacaoCampanhas clientes={clientes} empresaId={empresaAtiva?.id ?? null} />
+            </div>
+          )}
+
           {!carregando && (
             <div className="mt-6">
               <CardsResumoInteligencia clientes={clientesFiltrados} />
