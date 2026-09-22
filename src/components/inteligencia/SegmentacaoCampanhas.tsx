@@ -35,6 +35,14 @@ export default function SegmentacaoCampanhas({
   const [sucesso, setSucesso] = useState<SegmentoId | null>(null)
   const [erro, setErro] = useState<string | null>(null)
 
+  // Reabrir o painel de um segmento limpa o "criada ✓" anterior — cada
+  // abertura é uma decisão nova e intencional de criar (ou não) de novo.
+  function alternarSegmento(id: SegmentoId) {
+    setSegmentoAberto((atual) => (atual === id ? null : id))
+    setSucesso(null)
+    setErro(null)
+  }
+
   const grupos = useMemo(() => {
     return SEGMENTOS.map((seg) => ({
       seg,
@@ -66,6 +74,7 @@ export default function SegmentacaoCampanhas({
       .single()
 
     if (erroCampanha || !campanha) {
+      console.error('Erro ao criar campanha:', erroCampanha)
       setErro(erroCampanha?.message ?? 'Erro ao criar campanha.')
       setCriando(null)
       return
@@ -84,12 +93,19 @@ export default function SegmentacaoCampanhas({
     setCriando(null)
 
     if (erroClientes) {
+      console.error('Erro ao registrar clientes da campanha:', erroClientes)
       setErro(erroClientes.message)
       return
     }
 
+    // Fica marcado até o usuário fechar/reabrir o painel do segmento (ver
+    // alternarSegmento) — nunca volta sozinho pro texto original do botão.
+    // Antes, um setTimeout limpava isso em 4s e o botão reaparecia idêntico
+    // ao de antes do clique, sem nenhum sinal persistente de que a campanha
+    // já tinha sido criada — o usuário clicava de novo achando que não
+    // tinha funcionado, e cada clique criava uma campanha duplicada de
+    // verdade (foi o que aconteceu: 3 campanhas "Inativos" pra MATSEG).
     setSucesso(seg.id)
-    setTimeout(() => setSucesso(null), 4000)
   }
 
   return (
@@ -115,7 +131,7 @@ export default function SegmentacaoCampanhas({
 
             <button
               type="button"
-              onClick={() => setSegmentoAberto(segmentoAberto === seg.id ? null : seg.id)}
+              onClick={() => alternarSegmento(seg.id)}
               className="text-sm font-medium text-accent-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
               disabled={clientesSeg.length === 0}
             >
@@ -146,16 +162,23 @@ export default function SegmentacaoCampanhas({
                   />
                 </div>
 
+                {sucesso === seg.id && (
+                  <p className="rounded-md border border-accent-success/40 bg-accent-success/10 px-3 py-2 text-xs text-accent-success">
+                    ✓ Campanha criada com {clientesSeg.length} cliente(s). Veja em &quot;Campanhas&quot;
+                    (aba ao lado) pra abrir a lista de disparo no WhatsApp.
+                  </p>
+                )}
+
                 <button
                   type="button"
                   onClick={() => criarCampanha(seg, clientesSeg)}
-                  disabled={criando === seg.id}
+                  disabled={criando === seg.id || sucesso === seg.id}
                   className="w-full rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-dark disabled:opacity-50"
                 >
                   {criando === seg.id
                     ? 'Criando...'
                     : sucesso === seg.id
-                      ? 'Campanha criada ✓'
+                      ? 'Campanha já criada ✓'
                       : `Criar campanha com esses ${clientesSeg.length} clientes`}
                 </button>
               </div>
