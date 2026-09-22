@@ -118,7 +118,7 @@ export default function SegmentacaoCampanhas({
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {grupos.map(({ seg, clientes: clientesSeg }) => (
           <div key={seg.id} className={`rounded-lg border p-4 ${seg.corCard}`}>
             <div className="mb-2 flex items-center justify-between">

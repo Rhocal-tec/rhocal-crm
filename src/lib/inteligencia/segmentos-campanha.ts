@@ -5,7 +5,13 @@ import type { ClienteInteligencia } from './agregar'
 // também na lista de disparo de uma campanha já salva (CampanhasTab.tsx):
 // os dois precisam do mesmo texto sugerido por segmento, sem duplicar.
 
-export type SegmentoId = 'churn' | 'esfriando' | 'inativos' | 'upsell'
+export type SegmentoId =
+  | 'churn'
+  | 'esfriando'
+  | 'nunca_comprou'
+  | 'orcamento_parado'
+  | 'comprou_sumiu'
+  | 'upsell'
 
 export interface Segmento {
   id: SegmentoId
@@ -17,18 +23,38 @@ export interface Segmento {
   textoSugerido: (c: ClienteInteligencia) => string
 }
 
+// "Inativos" (temperaturaAutomatica === 'cinza') virou dois segmentos: por
+// trás da mesma cor cinza escondem-se dois públicos bem diferentes — quem
+// nunca teve nenhum pedido (puro lead) e quem já tem orçamento no sistema
+// mas nenhum fechou. Ver investigação registrada no histórico do projeto:
+// misturar os dois deixava "Inativos" artificialmente enorme (>80% da base
+// em empresas jovens como a MATSEG) e a mensagem sugerida não fazia sentido
+// pra nenhum dos dois grupos de verdade.
+//
+// Também ganhou um segmento próprio pra `vermelho` (última compra há mais
+// de 180 dias) — "comprou e sumiu" é o público mais correto pra campanha de
+// reengajamento, e antes não caía em NENHUM dos 4 segmentos (só entrava em
+// "Risco de Churn" quem tivesse 2+ pedidos efetuados, o que é raro).
 export const SEGMENTOS: Segmento[] = [
   {
-    id: 'churn',
-    titulo: '🔴 Risco de Churn',
-    corCard: 'border-accent-danger/30 bg-accent-danger/10',
-    corTitulo: 'text-accent-danger',
-    descricao: 'Clientes com alerta de churn ativo — pararam de comprar no ritmo normal.',
-    filtro: (c) => c.emRiscoChurn,
+    id: 'nunca_comprou',
+    titulo: '⚪ Nunca Comprou',
+    corCard: 'border-white/15 bg-white/5',
+    corTitulo: 'text-muted',
+    descricao: 'Leads/oportunidades que nunca viraram pedido efetuado — ainda não fecharam a primeira compra.',
+    filtro: (c) => c.temperaturaAutomatica === 'cinza' && c.qtdPedidosTotal === 0,
     textoSugerido: (c) =>
-      `Olá${c.contato ? ' ' + c.contato : ''}! Notamos que faz um tempo desde sua última compra com a gente${
-        c.diasDesdeUltimaCompra ? ` (${c.diasDesdeUltimaCompra} dias)` : ''
-      }. Está tudo bem? Temos novidades que podem te interessar — vamos conversar?`,
+      `Olá${c.contato ? ' ' + c.contato : ''}! Vi que você já teve contato com a gente mas ainda não fechamos negócio — posso te ajudar com um orçamento agora?`,
+  },
+  {
+    id: 'orcamento_parado',
+    titulo: '🔵 Orçamento Parado',
+    corCard: 'border-accent-compras/30 bg-accent-compras/10',
+    corTitulo: 'text-accent-compras',
+    descricao: 'Já tem orçamento no sistema (aberto, perdido ou arquivado), mas nenhum chegou a fechar.',
+    filtro: (c) => c.temperaturaAutomatica === 'cinza' && c.qtdPedidosTotal > 0,
+    textoSugerido: (c) =>
+      `Olá${c.contato ? ' ' + c.contato : ''}! Notei que seu orçamento ficou em aberto — ainda tem interesse? Posso rever as condições com você.`,
   },
   {
     id: 'esfriando',
@@ -41,14 +67,26 @@ export const SEGMENTOS: Segmento[] = [
       `Oi${c.contato ? ' ' + c.contato : ''}, tudo bem? Faz um tempinho que não conversamos — separei algumas novidades da RHOCAL que fazem sentido pro seu negócio. Posso te mandar?`,
   },
   {
-    id: 'inativos',
-    titulo: '⚪ Inativos',
-    corCard: 'border-white/15 bg-white/5',
-    corTitulo: 'text-muted',
-    descricao: 'Sem dado recente de interação — candidatos a reengajamento.',
-    filtro: (c) => c.temperaturaAutomatica === 'cinza',
+    id: 'comprou_sumiu',
+    titulo: '👻 Comprou e Sumiu',
+    corCard: 'border-accent-primary/30 bg-accent-primary/10',
+    corTitulo: 'text-accent-primary',
+    descricao: 'Já comprou antes, mas a última compra foi há mais de 180 dias — reengajamento direto.',
+    filtro: (c) => c.temperaturaAutomatica === 'vermelho',
     textoSugerido: (c) =>
-      `Olá${c.contato ? ' ' + c.contato : ''}! Já faz um tempo que não temos contato. Gostaríamos de retomar — temos condições especiais pra clientes como você. Podemos agendar uma conversa rápida?`,
+      `Olá${c.contato ? ' ' + c.contato : ''}! Faz tempo que não fechamos negócio — temos novidades que podem te interessar. Vamos conversar?`,
+  },
+  {
+    id: 'churn',
+    titulo: '🔴 Risco de Churn',
+    corCard: 'border-accent-danger/30 bg-accent-danger/10',
+    corTitulo: 'text-accent-danger',
+    descricao: 'Clientes com alerta de churn ativo — pararam de comprar no ritmo normal.',
+    filtro: (c) => c.emRiscoChurn,
+    textoSugerido: (c) =>
+      `Olá${c.contato ? ' ' + c.contato : ''}! Notamos que faz um tempo desde sua última compra com a gente${
+        c.diasDesdeUltimaCompra ? ` (${c.diasDesdeUltimaCompra} dias)` : ''
+      }. Está tudo bem? Temos novidades que podem te interessar — vamos conversar?`,
   },
   {
     id: 'upsell',
