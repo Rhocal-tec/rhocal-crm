@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { formatarDataSomente } from '@/lib/kanban/formatacao'
 import { resumirFiltrosSalvos } from './FiltrosInteligencia'
+import { CampanhaListaDisparo } from './CampanhaListaDisparo'
+import type { ClienteInteligencia } from '@/lib/inteligencia/agregar'
 import type { Database } from '@/types/database'
 
 type Campanha = Database['public']['Tables']['campanhas']['Row']
@@ -51,7 +53,7 @@ function encontrarPedidoCorrespondente(
 // Fase 36.3: sub-aba "Campanhas" — lista as campanhas salvas e calcula/
 // persiste o resultado (quantos clientes incluídos compraram de novo depois
 // da campanha) sob demanda, via "Ver resultado".
-export function CampanhasTab() {
+export function CampanhasTab({ clientes }: { clientes: ClienteInteligencia[] }) {
   const { empresaAtiva } = useEmpresa()
   const [supabase] = useState(() => createClient())
   const [campanhas, setCampanhas] = useState<Campanha[]>([])
@@ -59,6 +61,9 @@ export function CampanhasTab() {
   const [calculando, setCalculando] = useState<string | null>(null)
   const [resultados, setResultados] = useState<Record<string, ResultadoCampanha>>({})
   const [erro, setErro] = useState<string | null>(null)
+  // Lista de disparo (WhatsApp) fica fechada por padrão — só carrega
+  // `campanha_clientes` quando o usuário abre uma campanha específica.
+  const [campanhaAberta, setCampanhaAberta] = useState<string | null>(null)
 
   useEffect(() => {
     if (!empresaAtiva) return
@@ -170,14 +175,23 @@ export function CampanhasTab() {
                 </p>
                 <p className="mt-1 text-xs text-primary/70">{resumirFiltrosSalvos(campanha.filtros_aplicados)}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => verResultado(campanha)}
-                disabled={calculando === campanha.id}
-                className="shrink-0 rounded-md border border-white/15 px-3 py-1.5 text-xs font-medium text-primary/80 transition-colors hover:bg-white/10 disabled:opacity-50"
-              >
-                {calculando === campanha.id ? 'Calculando…' : 'Ver resultado'}
-              </button>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCampanhaAberta((atual) => (atual === campanha.id ? null : campanha.id))}
+                  className="rounded-md border border-white/15 px-3 py-1.5 text-xs font-medium text-primary/80 transition-colors hover:bg-white/10"
+                >
+                  {campanhaAberta === campanha.id ? 'Ocultar disparo' : 'Disparo no WhatsApp'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => verResultado(campanha)}
+                  disabled={calculando === campanha.id}
+                  className="rounded-md border border-white/15 px-3 py-1.5 text-xs font-medium text-primary/80 transition-colors hover:bg-white/10 disabled:opacity-50"
+                >
+                  {calculando === campanha.id ? 'Calculando…' : 'Ver resultado'}
+                </button>
+              </div>
             </div>
 
             {resultado && (
@@ -185,6 +199,10 @@ export function CampanhasTab() {
                 {resultado.convertidos} de {resultado.total} cliente(s) fizeram pelo menos 1 pedido depois desta
                 campanha{percentual !== null ? ` (${percentual}%)` : ''}.
               </p>
+            )}
+
+            {campanhaAberta === campanha.id && (
+              <CampanhaListaDisparo campanha={campanha} clientes={clientes} />
             )}
           </div>
         )

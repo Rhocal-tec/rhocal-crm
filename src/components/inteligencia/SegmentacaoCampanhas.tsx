@@ -18,65 +18,7 @@ import { useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import type { ClienteInteligencia } from '@/lib/inteligencia/agregar'
-
-type SegmentoId = 'churn' | 'esfriando' | 'inativos' | 'upsell'
-
-interface Segmento {
-  id: SegmentoId
-  titulo: string
-  corCard: string
-  corTitulo: string
-  descricao: string
-  filtro: (c: ClienteInteligencia) => boolean
-  textoSugerido: (c: ClienteInteligencia) => string
-}
-
-const SEGMENTOS: Segmento[] = [
-  {
-    id: 'churn',
-    titulo: '🔴 Risco de Churn',
-    corCard: 'border-accent-danger/30 bg-accent-danger/10',
-    corTitulo: 'text-accent-danger',
-    descricao: 'Clientes com alerta de churn ativo — pararam de comprar no ritmo normal.',
-    filtro: (c) => c.emRiscoChurn,
-    textoSugerido: (c) =>
-      `Olá${c.contato ? ' ' + c.contato : ''}! Notamos que faz um tempo desde sua última compra com a gente${
-        c.diasDesdeUltimaCompra ? ` (${c.diasDesdeUltimaCompra} dias)` : ''
-      }. Está tudo bem? Temos novidades que podem te interessar — vamos conversar?`,
-  },
-  {
-    id: 'esfriando',
-    titulo: '🟡 Esfriando',
-    corCard: 'border-accent-alert/30 bg-accent-alert/10',
-    corTitulo: 'text-accent-alert',
-    descricao: 'Temperatura amarela — relacionamento esfriando, ainda dá tempo de reaquecer.',
-    filtro: (c) => c.temperaturaAutomatica === 'amarelo',
-    textoSugerido: (c) =>
-      `Oi${c.contato ? ' ' + c.contato : ''}, tudo bem? Faz um tempinho que não conversamos — separei algumas novidades da RHOCAL que fazem sentido pro seu negócio. Posso te mandar?`,
-  },
-  {
-    id: 'inativos',
-    titulo: '⚪ Inativos',
-    corCard: 'border-white/15 bg-white/5',
-    corTitulo: 'text-muted',
-    descricao: 'Sem dado recente de interação — candidatos a reengajamento.',
-    filtro: (c) => c.temperaturaAutomatica === 'cinza',
-    textoSugerido: (c) =>
-      `Olá${c.contato ? ' ' + c.contato : ''}! Já faz um tempo que não temos contato. Gostaríamos de retomar — temos condições especiais pra clientes como você. Podemos agendar uma conversa rápida?`,
-  },
-  {
-    id: 'upsell',
-    titulo: '🟢 Oportunidade de Upsell',
-    corCard: 'border-accent-success/30 bg-accent-success/10',
-    corTitulo: 'text-accent-success',
-    descricao: 'Temperatura verde + score de propensão alto — momento bom pra oferecer mais.',
-    filtro: (c) => c.temperaturaAutomatica === 'verde' && c.scorePropensao >= 70,
-    textoSugerido: (c) =>
-      `Oi${c.contato ? ' ' + c.contato : ''}! Vi que você é cliente frequente da RHOCAL${
-        c.itensMaisComprados?.[0] ? ` (principalmente ${c.itensMaisComprados[0].descricao})` : ''
-      }. Temos itens complementares que combinam com o que você já compra — posso te apresentar?`,
-  },
-]
+import { SEGMENTOS, type Segmento, type SegmentoId } from '@/lib/inteligencia/segmentos-campanha'
 
 export default function SegmentacaoCampanhas({
   clientes,

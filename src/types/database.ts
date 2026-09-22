@@ -902,6 +902,7 @@ export interface Database {
           status: CampanhaClienteStatus
           convertido_em: string | null
           pedido_id: string | null
+          whatsapp_enviado_em: string | null
         }
         Insert: {
           id?: string
@@ -912,6 +913,7 @@ export interface Database {
           status?: CampanhaClienteStatus
           convertido_em?: string | null
           pedido_id?: string | null
+          whatsapp_enviado_em?: string | null
         }
         Update: {
           id?: string
@@ -922,6 +924,7 @@ export interface Database {
           status?: CampanhaClienteStatus
           convertido_em?: string | null
           pedido_id?: string | null
+          whatsapp_enviado_em?: string | null
         }
         Relationships: []
       }

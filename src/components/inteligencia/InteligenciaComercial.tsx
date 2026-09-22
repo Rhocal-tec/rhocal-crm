@@ -108,7 +108,9 @@ export function InteligenciaComercial() {
       try {
         const { data: pedidosData, error: erroPedidos } = await supabase
           .from('pedidos')
-          .select('id, numero, cliente_nome, cliente_cnpj, cliente_omie_id, status, criado_em, criado_por, valor_frete')
+          .select(
+            'id, numero, cliente_nome, cliente_cnpj, cliente_omie_id, cliente_telefone, cliente_contato, status, criado_em, criado_por, valor_frete',
+          )
           .eq('empresa_id', empresaAtiva!.id)
         if (erroPedidos) throw erroPedidos
         const pedidos = (pedidosData ?? []) as PedidoBruto[]
@@ -119,7 +121,9 @@ export function InteligenciaComercial() {
         // do estado `range` acima.
         let queryOportunidades = supabase
           .from('oportunidades')
-          .select('id, numero, cliente_nome, cliente_cnpj, status, origem, temperatura, valor_estimado, criado_em, criado_por')
+          .select(
+            'id, numero, cliente_nome, cliente_cnpj, cliente_telefone, contato_nome, whatsapp_comprador, whatsapp_empresa, status, origem, temperatura, valor_estimado, criado_em, criado_por',
+          )
           .eq('empresa_id', empresaAtiva!.id)
         if (range.inicio) queryOportunidades = queryOportunidades.gte('criado_em', `${range.inicio}T00:00:00`)
         if (range.fim) {
@@ -379,7 +383,7 @@ export function InteligenciaComercial() {
       </div>
 
       {aba === 'campanhas' ? (
-        <CampanhasTab />
+        <CampanhasTab clientes={clientes} />
       ) : (
         <>
           {!carregando && (

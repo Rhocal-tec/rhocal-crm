@@ -176,6 +176,12 @@ export interface ClienteInteligencia {
   cep: string | null
   observacoes: string | null
 
+  // Origem do telefone/contato exibidos acima — a tabela `clientes` (cadastro
+  // Omie) é a fonte de maior confiança, mas hoje está pouco povoada; sem ela,
+  // cai pro dado mais recente já digitado em algum pedido ou oportunidade
+  // desse cliente (ver fallback no loop de agregação, abaixo).
+  telefoneOrigem: 'cadastro' | 'pedido' | 'oportunidade' | null
+
   temperaturaAutomatica: TemperaturaAutomatica
   temperaturaManual: string | null
   etapaFunil: OportunidadeStatus | null
@@ -226,6 +232,8 @@ export interface PedidoBruto {
   cliente_nome: string
   cliente_cnpj: string | null
   cliente_omie_id: number | null
+  cliente_telefone: string | null
+  cliente_contato: string | null
   status: PedidoStatus
   criado_em: string
   criado_por: string
@@ -252,6 +260,10 @@ export interface OportunidadeBruta {
   numero: number
   cliente_nome: string
   cliente_cnpj: string | null
+  cliente_telefone: string | null
+  contato_nome: string | null
+  whatsapp_comprador: string | null
+  whatsapp_empresa: string | null
   status: OportunidadeStatus
   origem: string | null
   temperatura: string | null
@@ -359,6 +371,15 @@ interface Acumulador {
   vendedorAtualizadoEm: string
   omieClienteId: number | null
   omieClienteIdAtualizadoEm: string
+  // Fallback de telefone/contato quando o cadastro em `clientes` não tem o
+  // dado (hoje o caso mais comum) — pega o valor mais recente já digitado em
+  // QUALQUER pedido ou oportunidade desse cliente, os dois disputando pela
+  // mesma linha do tempo (criado_em), igual ao nome/vendedor acima.
+  telefoneFallback: string | null
+  telefoneFallbackAtualizadoEm: string
+  telefoneFallbackOrigem: 'pedido' | 'oportunidade' | null
+  contatoFallback: string | null
+  contatoFallbackAtualizadoEm: string
 }
 
 // Reconstrói, a partir do audit_log já ordenado por data_hora crescente, a
@@ -443,6 +464,11 @@ export function agregarClientesInteligencia(params: {
       vendedorAtualizadoEm: '',
       omieClienteId: null,
       omieClienteIdAtualizadoEm: '',
+      telefoneFallback: null,
+      telefoneFallbackAtualizadoEm: '',
+      telefoneFallbackOrigem: null,
+      contatoFallback: null,
+      contatoFallbackAtualizadoEm: '',
     }
     acumuladores.set(chave, novo)
     return novo
@@ -478,6 +504,15 @@ export function agregarClientesInteligencia(params: {
       acc.omieClienteId = pedido.cliente_omie_id
       acc.omieClienteIdAtualizadoEm = pedido.criado_em
     }
+    if (pedido.cliente_telefone && pedido.criado_em >= acc.telefoneFallbackAtualizadoEm) {
+      acc.telefoneFallback = pedido.cliente_telefone
+      acc.telefoneFallbackAtualizadoEm = pedido.criado_em
+      acc.telefoneFallbackOrigem = 'pedido'
+    }
+    if (pedido.cliente_contato && pedido.criado_em >= acc.contatoFallbackAtualizadoEm) {
+      acc.contatoFallback = pedido.cliente_contato
+      acc.contatoFallbackAtualizadoEm = pedido.criado_em
+    }
 
     const total = (totalPorPedido.get(pedido.id) ?? 0) + Number(pedido.valor_frete ?? 0)
     acc.pedidos.push({
@@ -502,6 +537,20 @@ export function agregarClientesInteligencia(params: {
     if (oportunidade.criado_em >= acc.vendedorAtualizadoEm) {
       acc.vendedorId = oportunidade.criado_por
       acc.vendedorAtualizadoEm = oportunidade.criado_em
+    }
+    // Dentro da própria oportunidade, o WhatsApp do comprador é o contato
+    // mais direto pra campanha; cliente_telefone e o WhatsApp geral da
+    // empresa entram só como fallback, nessa ordem.
+    const telefoneOportunidade =
+      oportunidade.whatsapp_comprador || oportunidade.cliente_telefone || oportunidade.whatsapp_empresa || null
+    if (telefoneOportunidade && oportunidade.criado_em >= acc.telefoneFallbackAtualizadoEm) {
+      acc.telefoneFallback = telefoneOportunidade
+      acc.telefoneFallbackAtualizadoEm = oportunidade.criado_em
+      acc.telefoneFallbackOrigem = 'oportunidade'
+    }
+    if (oportunidade.contato_nome && oportunidade.criado_em >= acc.contatoFallbackAtualizadoEm) {
+      acc.contatoFallback = oportunidade.contato_nome
+      acc.contatoFallbackAtualizadoEm = oportunidade.criado_em
     }
 
     acc.oportunidades.push({
@@ -672,12 +721,13 @@ export function agregarClientesInteligencia(params: {
       nomeFantasia: cadastro?.nome_fantasia ?? null,
       cnpj: cadastro?.cnpj ?? (acc.chave.startsWith('cnpj:') ? acc.chave.slice('cnpj:'.length) : null),
       email: cadastro?.email ?? null,
-      telefone: cadastro?.telefone ?? null,
-      contato: cadastro?.contato ?? null,
+      telefone: cadastro?.telefone ?? acc.telefoneFallback,
+      contato: cadastro?.contato ?? acc.contatoFallback,
       cidade: cadastro?.cidade ?? null,
       estado: cadastro?.estado ?? null,
       cep: cadastro?.cep ?? null,
       observacoes: cadastro?.observacoes ?? null,
+      telefoneOrigem: cadastro?.telefone ? 'cadastro' : acc.telefoneFallbackOrigem,
 
       temperaturaAutomatica: calcularTemperaturaAutomatica(ultimaCompra),
       temperaturaManual: oportunidadeMaisRecente?.temperatura ?? null,
