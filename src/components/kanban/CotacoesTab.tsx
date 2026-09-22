@@ -372,6 +372,11 @@ export function CotacoesTab({
         const ca = item.ca?.trim()
         const historico = ca ? (historicoPorCa[ca] ?? []) : []
         const destaque = historico.find((registro) => registro.vencedora) ?? historico[0]
+        // Sem código de produto vinculado no Omie, a descrição sozinha costuma
+        // não bastar pra cotar — é quando a observação do comercial vira a
+        // instrução real do que precisa ser cotado. Não existe uma flag
+        // "genérico" própria no banco; este é o proxy mais confiável disponível.
+        const itemGenerico = !item.codigo_produto_omie
 
         return (
           <div key={item.id} className="rounded-lg border border-white/10 bg-surface p-4">
@@ -379,6 +384,27 @@ export function CotacoesTab({
               <h3 className="font-medium text-primary">{item.descricao}</h3>
               <span className="font-mono text-xs text-muted">Qtd. {item.quantidade}</span>
             </div>
+
+            {item.observacao && (
+              <div
+                className={`mt-3 rounded-md border px-3 py-2 text-xs ${
+                  itemGenerico
+                    ? 'border-accent-alert/40 bg-accent-alert/10'
+                    : 'border-white/10 bg-surface-alt'
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-1.5 font-semibold text-primary">
+                  {itemGenerico && <span aria-hidden="true">⚠️</span>}
+                  <span>Observação do Comercial</span>
+                  {itemGenerico && (
+                    <span className="rounded-full border border-accent-alert/50 bg-accent-alert/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-alert">
+                      Item genérico — cotar conforme instrução
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 whitespace-pre-wrap text-primary/80">{item.observacao}</p>
+              </div>
+            )}
 
             {destaque && (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-accent-compras/25 bg-accent-compras/10 px-3 py-2 text-xs text-primary">
