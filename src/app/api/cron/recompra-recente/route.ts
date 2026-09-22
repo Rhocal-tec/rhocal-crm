@@ -8,8 +8,13 @@ import { supabase } from '@/lib/recompra/supabase-client'
 // esperar o cursor do backfill dar a volta, este pega só os pedidos com
 // dAlt nos últimos 45 dias (1-2 páginas do ListarPedidos via
 // filtrar_por_data_de/ate), então um pedido novo entra no Motor de Recompra
-// no dia seguinte. Cursor próprio (`recompra_recente_ultima_execucao`, só
-// informativo) — não toca no cursor do backfill, que continua igual.
+// no dia seguinte. Cursor próprio (`recompra_recente_ultima_execucao_<slug>`,
+// só informativo) — não toca no cursor do backfill, que continua igual.
+//
+// Multi-empresa (RHOCAL + MATSEG): rodarSincronizacaoRecente processa as
+// duas em loop sequencial dentro deste mesmo maxDuration=60s (plano Hobby
+// não permite cron separado por empresa — ver sync-recompra-preditiva.ts),
+// por isso a resposta virou uma lista de resultados, um por empresa.
 //
 // Só GET (assim que o Vercel Cron chama), protegido pelo mesmo CRON_SECRET.
 export const dynamic = 'force-dynamic'
@@ -25,11 +30,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       executado_em: new Date().toISOString(),
-      janela: { de: resultado.janelaDe, ate: resultado.janelaAte },
-      paginas_lidas: resultado.paginasLidas,
-      codigos_na_janela: resultado.codigosNaJanela,
-      processados: resultado.processados,
-      restantes_estimado: resultado.restantes,
+      resultados: resultado.resultados,
     })
   } catch (err) {
     const mensagem =

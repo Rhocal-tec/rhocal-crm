@@ -742,6 +742,7 @@ export interface Database {
       recompra_previsao: {
         Row: {
           id: string
+          empresa_id: string
           cliente_omie_codigo: string
           cliente_nome: string
           cliente_cnpj: string | null
@@ -771,6 +772,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          empresa_id: string
           cliente_omie_codigo: string
           cliente_nome: string
           cliente_cnpj?: string | null
@@ -800,6 +802,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          empresa_id?: string
           cliente_omie_codigo?: string
           cliente_nome?: string
           cliente_cnpj?: string | null
@@ -831,6 +834,7 @@ export interface Database {
       }
       itens_associados: {
         Row: {
+          empresa_id: string
           item_codigo_principal: string
           item_codigo_associado: string
           nome_associado: string
@@ -840,6 +844,7 @@ export interface Database {
           atualizado_em: string
         }
         Insert: {
+          empresa_id: string
           item_codigo_principal: string
           item_codigo_associado: string
           nome_associado: string
@@ -849,6 +854,7 @@ export interface Database {
           atualizado_em?: string
         }
         Update: {
+          empresa_id?: string
           item_codigo_principal?: string
           item_codigo_associado?: string
           nome_associado?: string
@@ -933,6 +939,7 @@ export interface Database {
       v_recompra_priorizada: {
         Row: {
           id: string
+          empresa_id: string
           cliente_omie_codigo: string
           cliente_nome: string
           cliente_cnpj: string | null

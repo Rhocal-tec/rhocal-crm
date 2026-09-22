@@ -1,5 +1,5 @@
 // ===============================================
-// MOTOR DE RECOMPRA PREDITIVA — RHOCAL
+// MOTOR DE RECOMPRA PREDITIVA — multi-empresa (RHOCAL + MATSEG)
 // Job diário de sincronização — v2
 //
 // Fluxo:
@@ -21,6 +21,7 @@ import {
   consultarPedido,
   resolverCliente,
   resolverVendedor,
+  type Empresa,
 } from "@/lib/recompra/omie-client";
 import { supabase } from "@/lib/recompra/supabase-client";
 import { registrarErroLog } from "@/lib/recompra/registrar-erro-log";
@@ -89,33 +90,42 @@ function formatarDataBR(data: Date): string {
   return `${dia}/${mes}/${ano}`;
 }
 
+// Multi-empresa: sync_estado não ganhou coluna empresa_id (é uma tabela
+// chave/valor livre, ver migração 0031) — cada chave passa a ser prefixada
+// pelo slug da empresa (ex: "recompra_pagina_atual_matseg"), namespace
+// simples que evita qualquer alteração de schema nessa tabela. Chaves
+// antigas sem sufixo (da RHOCAL, de antes desta mudança) ficam órfãs e
+// inofensivas — a primeira execução pós-migração relê a partir da página 1
+// pra RHOCAL também, custo baixo (uma tabela pequena).
 const CHAVE_PAGINA_CURSOR_SYNC = "recompra_pagina_atual";
+const CHAVE_ULTIMA_EXECUCAO_RECENTE = "recompra_recente_ultima_execucao";
+
+function chaveComEmpresa(chaveBase: string, slug: string): string {
+  return `${chaveBase}_${slug}`;
+}
 
 // Job da janela recente (/api/cron/recompra-recente): varre só os pedidos com
 // dAlt nos últimos DIAS_JANELA_RECENTE dias. MAX_PAGINAS_RECENTE é um teto de
-// segurança — a janela costuma ter 1-2 páginas de 50. Cursor próprio
-// (informativo) em sync_estado, chave CHAVE_ULTIMA_EXECUCAO_RECENTE — não
-// interfere com CHAVE_PAGINA_CURSOR_SYNC, o cursor do backfill completo.
+// segurança — a janela costuma ter 1-2 páginas de 50.
 const DIAS_JANELA_RECENTE = 45;
 const MAX_PAGINAS_RECENTE = 5;
-const CHAVE_ULTIMA_EXECUCAO_RECENTE = "recompra_recente_ultima_execucao";
 
 // Cursor persistido em sync_estado — qual página do ListarPedidos buscar na
-// próxima execução. Listar TODAS as páginas de uma vez (comportamento
-// antigo) estourava sozinho o tempo de execução da function antes mesmo de
-// processar qualquer pedido; buscando uma página por vez, o backfill
-// completo acontece ao longo de várias execuções (cron diário). Ao alcançar
-// a última página, volta pra página 1 (recomeça o ciclo, pra pegar pedidos
-// novos criados desde o início do backfill).
-async function lerPaginaCursorSync(): Promise<number> {
+// próxima execução, PARA ESTA EMPRESA. Listar TODAS as páginas de uma vez
+// (comportamento antigo) estourava sozinho o tempo de execução da function
+// antes mesmo de processar qualquer pedido; buscando uma página por vez, o
+// backfill completo acontece ao longo de várias execuções (cron diário). Ao
+// alcançar a última página, volta pra página 1 (recomeça o ciclo, pra pegar
+// pedidos novos criados desde o início do backfill).
+async function lerPaginaCursorSync(slug: string): Promise<number> {
   const { data, error } = await supabase
     .from("sync_estado")
     .select("valor")
-    .eq("chave", CHAVE_PAGINA_CURSOR_SYNC)
+    .eq("chave", chaveComEmpresa(CHAVE_PAGINA_CURSOR_SYNC, slug))
     .maybeSingle();
 
   if (error) {
-    console.error(`[sync] erro ao ler página cursor: ${error.message}`);
+    console.error(`[sync] erro ao ler página cursor (${slug}): ${error.message}`);
     return 1;
   }
 
@@ -134,8 +144,8 @@ async function salvarEstadoSync(chave: string, valor: string): Promise<void> {
   if (error) console.error(`[sync] erro ao salvar estado "${chave}": ${error.message}`);
 }
 
-async function salvarPaginaCursorSync(pagina: number): Promise<void> {
-  await salvarEstadoSync(CHAVE_PAGINA_CURSOR_SYNC, String(pagina));
+async function salvarPaginaCursorSync(pagina: number, slug: string): Promise<void> {
+  await salvarEstadoSync(chaveComEmpresa(CHAVE_PAGINA_CURSOR_SYNC, slug), String(pagina));
 }
 
 // -----------------------------------------------------------
@@ -143,9 +153,12 @@ async function salvarPaginaCursorSync(pagina: number): Promise<void> {
 // descobre quais ainda não estão no nosso histórico (nem foram pulados) e
 // consulta o DETALHE só desses, gravando em pedidos_itens_historico. Usado
 // tanto pelo backfill completo (sincronizarHistorico) quanto pelo job da
-// janela recente (sincronizarHistoricoRecente).
+// janela recente (sincronizarHistoricoRecente). Tudo escopado pela empresa
+// recebida — RHOCAL e MATSEG têm numeração de pedido própria no Omie
+// (apps separados), então o dedup nunca pode misturar as duas.
 // -----------------------------------------------------------
 async function processarLoteDePedidos(
+  empresa: Empresa,
   codigosCandidatos: number[],
   inicioJob: number,
   limitePedidos: number,
@@ -153,17 +166,18 @@ async function processarLoteDePedidos(
 ): Promise<{ processados: number; restantes: number; novos: number }> {
   const { data: existentes, error } = await supabase
     .from("pedidos_itens_historico")
-    .select("pedido_omie_id");
+    .select("pedido_omie_id")
+    .eq("empresa_id", empresa.id);
 
   if (error) throw new Error(`[sync] erro ao ler histórico existente: ${error.message}`);
 
-  // Dedup = já gravados COM sucesso + já vistos e pulados (cancelados etc.).
-  // Sem o segundo conjunto, os pulados voltavam pra `novos` a cada nova
-  // varredura e eram re-consultados no Omie eternamente. Consequência: um
-  // pedido já sincronizado que foi editado no Omie NÃO é re-consultado — o
-  // objetivo do job recente é pegar pedido NOVO rápido, não re-espelhar
-  // edições de pedido antigo.
-  const pedidosPulados = await carregarPedidosPulados();
+  // Dedup = já gravados COM sucesso + já vistos e pulados (cancelados etc.),
+  // ambos escopados a esta empresa. Sem o segundo conjunto, os pulados
+  // voltavam pra `novos` a cada nova varredura e eram re-consultados no Omie
+  // eternamente. Consequência: um pedido já sincronizado que foi editado no
+  // Omie NÃO é re-consultado — o objetivo do job recente é pegar pedido NOVO
+  // rápido, não re-espelhar edições de pedido antigo.
+  const pedidosPulados = await carregarPedidosPulados(empresa.id);
   const codigosJaVistos = new Set(
     (existentes ?? []).map((l) => String(l.pedido_omie_id)).concat(pedidosPulados)
   );
@@ -195,18 +209,20 @@ async function processarLoteDePedidos(
     // — loga com o código do pedido e segue pro próximo. O pedido pulado
     // volta a ser tentado na próxima varredura.
     try {
-      const pedido = await consultarPedido(codigo, inicioJob);
+      const pedido = await consultarPedido(empresa, codigo, inicioJob);
       if (pedido) {
         const { nome: clienteNome, cnpj: clienteCnpj } = await resolverCliente(
+          empresa,
           pedido.codigo_cliente_omie,
           inicioJob
         );
-        const vendedorNome = await resolverVendedor(pedido.codigo_vendedor_omie, inicioJob);
+        const vendedorNome = await resolverVendedor(empresa, pedido.codigo_vendedor_omie, inicioJob);
 
         const [dia, mes, ano] = pedido.data_pedido.split("/");
         const dataPedidoISO = `${ano}-${mes}-${dia}`;
 
         const linhas = pedido.itens.map((item) => ({
+          empresa_id: empresa.id,
           cliente_omie_codigo: pedido.codigo_cliente_omie,
           cliente_nome: clienteNome,
           cliente_cnpj: clienteCnpj,
@@ -225,7 +241,7 @@ async function processarLoteDePedidos(
 
         const { error: upsertError } = await supabase
           .from("pedidos_itens_historico")
-          .upsert(linhas, { onConflict: "pedido_omie_id,item_codigo" });
+          .upsert(linhas, { onConflict: "empresa_id,pedido_omie_id,item_codigo" });
 
         if (upsertError) {
           console.error(`[sync] erro ao gravar pedido ${codigo}: ${upsertError.message}`);
@@ -282,24 +298,27 @@ async function processarLoteDePedidos(
 // processamento pra processarLoteDePedidos.
 // -----------------------------------------------------------
 async function sincronizarHistorico(
+  empresa: Empresa,
   inicioJob: number
 ): Promise<{ processados: number; restantes: number; paginaAtual: number }> {
-  const paginaAtual = await lerPaginaCursorSync();
+  const paginaAtual = await lerPaginaCursorSync(empresa.slug);
 
   const inicioListagem = Date.now();
-  console.log(`[sync] listando página ${paginaAtual} de pedidos no Omie...`);
+  console.log(`[sync] (${empresa.slug}) listando página ${paginaAtual} de pedidos no Omie...`);
   const { codigos: codigosDaPagina, totalPaginas } = await listarPaginaDePedidos(
+    empresa,
     paginaAtual,
     inicioJob
   );
   console.log(
-    `[sync] página ${paginaAtual}/${totalPaginas} — ${codigosDaPagina.length} pedidos (listagem levou ${Date.now() - inicioListagem}ms)`
+    `[sync] (${empresa.slug}) página ${paginaAtual}/${totalPaginas} — ${codigosDaPagina.length} pedidos (listagem levou ${Date.now() - inicioListagem}ms)`
   );
 
   const proximaPagina = paginaAtual >= totalPaginas ? 1 : paginaAtual + 1;
-  await salvarPaginaCursorSync(proximaPagina);
+  await salvarPaginaCursorSync(proximaPagina, empresa.slug);
 
   const { processados, restantes } = await processarLoteDePedidos(
+    empresa,
     codigosDaPagina,
     inicioJob,
     LIMITE_PEDIDOS_NOVOS_POR_EXECUCAO,
@@ -317,7 +336,7 @@ async function sincronizarHistorico(
 // informativo (última execução + resumo); NÃO interfere com o cursor de
 // página do backfill completo.
 // -----------------------------------------------------------
-async function sincronizarHistoricoRecente(inicioJob: number): Promise<{
+async function sincronizarHistoricoRecente(empresa: Empresa, inicioJob: number): Promise<{
   processados: number;
   restantes: number;
   janelaDe: string;
@@ -345,6 +364,7 @@ async function sincronizarHistoricoRecente(inicioJob: number): Promise<{
     }
 
     const { codigos: codigosDaPagina, totalPaginas } = await listarPaginaDePedidos(
+      empresa,
       pagina,
       inicioJob,
       { de: janelaDe, ate: janelaAte }
@@ -353,7 +373,7 @@ async function sincronizarHistoricoRecente(inicioJob: number): Promise<{
     paginasLidas = pagina;
 
     console.log(
-      `[sync-recente] página ${pagina}/${totalPaginas} — ${codigosDaPagina.length} pedidos na janela`
+      `[sync-recente] (${empresa.slug}) página ${pagina}/${totalPaginas} — ${codigosDaPagina.length} pedidos na janela`
     );
 
     if (pagina >= totalPaginas) break;
@@ -366,6 +386,7 @@ async function sincronizarHistoricoRecente(inicioJob: number): Promise<{
   }
 
   const { processados, restantes, novos } = await processarLoteDePedidos(
+    empresa,
     codigos,
     inicioJob,
     LIMITE_PEDIDOS_NOVOS_RECENTE,
@@ -373,7 +394,7 @@ async function sincronizarHistoricoRecente(inicioJob: number): Promise<{
   );
 
   await salvarEstadoSync(
-    CHAVE_ULTIMA_EXECUCAO_RECENTE,
+    chaveComEmpresa(CHAVE_ULTIMA_EXECUCAO_RECENTE, empresa.slug),
     JSON.stringify({
       executado_em: new Date().toISOString(),
       janela: { de: janelaDe, ate: janelaAte },
@@ -432,6 +453,7 @@ async function resolverMapaCaPorItemCodigo(): Promise<Map<string, string>> {
 // então .select("*") volta como `any` e cascateia implicit-any por toda a
 // função que le esse histórico.
 interface LinhaHistorico {
+  empresa_id: string;
   cliente_omie_codigo: string;
   cliente_nome: string;
   cliente_cnpj: string | null;
@@ -451,10 +473,11 @@ interface LinhaHistorico {
 // -----------------------------------------------------------
 // 2) Recalcula recorrência por par cliente+item
 // -----------------------------------------------------------
-async function recalcularRecorrencias(inicioJob: number): Promise<void> {
+async function recalcularRecorrencias(empresa: Empresa, inicioJob: number): Promise<void> {
   const { data: historico, error } = await supabase
     .from("pedidos_itens_historico")
     .select("*")
+    .eq("empresa_id", empresa.id)
     .order("data_pedido", { ascending: true })
     .returns<LinhaHistorico[]>();
 
@@ -495,6 +518,7 @@ async function recalcularRecorrencias(inicioJob: number): Promise<void> {
       linhas.reduce((s, l) => s + Number(l.valor_unitario ?? 0), 0) / linhas.length;
 
     const registro = {
+      empresa_id: empresa.id,
       cliente_omie_codigo: ultima.cliente_omie_codigo,
       cliente_nome: ultima.cliente_nome,
       cliente_cnpj: ultima.cliente_cnpj,
@@ -529,6 +553,7 @@ async function recalcularRecorrencias(inicioJob: number): Promise<void> {
 }
 
 interface RegistroPrevisao {
+  empresa_id: string;
   cliente_omie_codigo: string;
   cliente_nome: string;
   cliente_cnpj: string | null;
@@ -555,6 +580,7 @@ async function upsertPreservandoStatus(previsao: RegistroPrevisao): Promise<void
   const { data: existente } = await supabase
     .from("recompra_previsao")
     .select("id")
+    .eq("empresa_id", previsao.empresa_id)
     .eq("cliente_omie_codigo", previsao.cliente_omie_codigo)
     .eq("item_codigo", previsao.item_codigo)
     .maybeSingle();
@@ -576,10 +602,11 @@ async function upsertPreservandoStatus(previsao: RegistroPrevisao): Promise<void
 // -----------------------------------------------------------
 // 3) Recalcula associações de itens (cross-sell)
 // -----------------------------------------------------------
-async function recalcularCrossSell(): Promise<void> {
+async function recalcularCrossSell(empresa: Empresa): Promise<void> {
   const { data: historico, error } = await supabase
     .from("pedidos_itens_historico")
-    .select("pedido_omie_id, item_codigo, item_nome");
+    .select("pedido_omie_id, item_codigo, item_nome")
+    .eq("empresa_id", empresa.id);
 
   if (error) throw new Error(`[cross-sell] erro ao ler histórico: ${error.message}`);
   if (!historico || historico.length === 0) return;
@@ -594,6 +621,7 @@ async function recalcularCrossSell(): Promise<void> {
   if (associacoes.length === 0) return;
 
   const linhas = associacoes.map((a) => ({
+    empresa_id: empresa.id,
     item_codigo_principal: a.itemPrincipal,
     item_codigo_associado: a.itemAssociado,
     nome_associado: a.nomeAssociado,
@@ -605,7 +633,7 @@ async function recalcularCrossSell(): Promise<void> {
 
   const { error: upsertError } = await supabase
     .from("itens_associados")
-    .upsert(linhas, { onConflict: "item_codigo_principal,item_codigo_associado" });
+    .upsert(linhas, { onConflict: "empresa_id,item_codigo_principal,item_codigo_associado" });
 
   if (upsertError) throw new Error(`[cross-sell] erro no upsert: ${upsertError.message}`);
   console.log(`[cross-sell] ${linhas.length} associações atualizadas`);
@@ -635,10 +663,11 @@ function calcularDataLimiteISO(diasAFrente: number): string {
   return limite.toISOString().slice(0, 10);
 }
 
-async function cruzarComVencimentoCA(inicioJob: number): Promise<void> {
+async function cruzarComVencimentoCA(empresa: Empresa, inicioJob: number): Promise<void> {
   const { data: previsoesPendentes, error } = await supabase
     .from("recompra_previsao")
     .select("id, ca")
+    .eq("empresa_id", empresa.id)
     .in("status", ["pendente", "contatado"]);
 
   if (error) throw new Error(`[CA] erro ao ler previsões: ${error.message}`);
@@ -700,72 +729,141 @@ async function cruzarComVencimentoCA(inicioJob: number): Promise<void> {
 }
 
 // -----------------------------------------------------------
-// ORQUESTRAÇÃO
+// ORQUESTRAÇÃO — multi-empresa
+//
+// Plano Hobby do Vercel (confirmado com o Léo): no máximo 2 cron jobs no
+// total, cada um 1x/dia — não dá pra ter uma rota+cron separada por
+// empresa. As duas rodam em loop SEQUENCIAL dentro dos 2 crons já
+// existentes, dividindo o mesmo orçamento de 60s (maxDuration)/45s
+// (LIMITE_TEMPO_MS interno).
+//
+// Pra nenhuma empresa ficar sempre em 2º lugar (e nunca sobrar tempo pra
+// ela, se a 1ª empresa da vez consumir o orçamento inteiro), a ORDEM
+// alterna por dia do mês (par/ímpar) — sem precisar de contador em
+// sync_estado, sem estado extra pra gerenciar.
 // -----------------------------------------------------------
 
+export interface ResultadoPorEmpresa {
+  slug: string;
+  ok: boolean;
+  erro?: string;
+  processados?: number;
+  restantes?: number;
+  paginaAtual?: number;
+  janelaDe?: string;
+  janelaAte?: string;
+  paginasLidas?: number;
+  codigosNaJanela?: number;
+}
+
+async function empresasParaProcessar(): Promise<Empresa[]> {
+  const { data, error } = await supabase.from("empresas").select("id, slug").order("slug", { ascending: true });
+
+  if (error || !data) {
+    console.error(`[job] erro ao listar empresas: ${error?.message}`);
+    return [];
+  }
+
+  // Dia par: ordem alfabética normal (matseg, rhocal). Dia ímpar: invertida.
+  // Ao longo de um mês, cada empresa passa aproximadamente metade das vezes
+  // em primeiro lugar.
+  const diaDoMes = new Date().getUTCDate();
+  return diaDoMes % 2 === 0 ? data : [...data].reverse();
+}
+
 // Fases de recálculo pós-sincronização — cada uma processa a tabela inteira
-// (não só o lote recém-sincronizado), então respeitam o mesmo teto de tempo
-// interno: ao estourar, param e retornam (o que já foi persistido fica).
-// Compartilhado entre o job diário completo e o da janela recente.
-async function recalcularTudoPosSync(inicioJob: number): Promise<void> {
+// da empresa (não só o lote recém-sincronizado), então respeitam o mesmo
+// teto de tempo interno: ao estourar, param e retornam (o que já foi
+// persistido fica). Compartilhado entre o job diário completo e o da janela
+// recente.
+async function recalcularTudoPosSync(empresa: Empresa, inicioJob: number): Promise<void> {
   if (tempoEsgotado(inicioJob)) {
-    console.warn("[job] tempo esgotado após sincronização — pulando recorrência/cross-sell/CA nesta execução");
+    console.warn(`[job] (${empresa.slug}) tempo esgotado após sincronização — pulando recorrência/cross-sell/CA nesta execução`);
     return;
   }
 
-  await recalcularRecorrencias(inicioJob);
+  await recalcularRecorrencias(empresa, inicioJob);
 
   if (tempoEsgotado(inicioJob)) {
-    console.warn("[job] tempo esgotado após recorrência — pulando cross-sell/CA nesta execução");
+    console.warn(`[job] (${empresa.slug}) tempo esgotado após recorrência — pulando cross-sell/CA nesta execução`);
     return;
   }
 
-  await recalcularCrossSell();
+  await recalcularCrossSell(empresa);
 
   if (tempoEsgotado(inicioJob)) {
-    console.warn("[job] tempo esgotado após cross-sell — pulando cruzamento de CA nesta execução");
+    console.warn(`[job] (${empresa.slug}) tempo esgotado após cross-sell — pulando cruzamento de CA nesta execução`);
     return;
   }
 
-  await cruzarComVencimentoCA(inicioJob);
+  await cruzarComVencimentoCA(empresa, inicioJob);
 }
 
 // Job diário completo (/api/cron/recompra-preditiva): backfill paginado do
-// histórico inteiro, um lote por execução.
-export async function rodarSincronizacaoDiaria(): Promise<{
-  processados: number;
-  restantes: number;
-  paginaAtual: number;
-}> {
+// histórico inteiro, um lote por execução, por empresa. Se uma empresa não
+// tiver credenciais Omie configuradas (OMIE_APP_KEY_<SLUG>/SECRET ausentes)
+// ou qualquer outra falha isolada, essa empresa entra no resultado com
+// ok:false e a próxima segue normalmente — não trava o job inteiro.
+export async function rodarSincronizacaoDiaria(): Promise<{ resultados: ResultadoPorEmpresa[] }> {
   const inicioJob = Date.now();
-  console.log("=== iniciando job de recompra preditiva (backfill completo) ===");
+  console.log("=== iniciando job de recompra preditiva (backfill completo, multi-empresa) ===");
 
-  const resultadoSync = await sincronizarHistorico(inicioJob);
-  await recalcularTudoPosSync(inicioJob);
+  const empresas = await empresasParaProcessar();
+  const resultados: ResultadoPorEmpresa[] = [];
 
-  console.log(`=== job concluído em ${Date.now() - inicioJob}ms ===`);
-  return resultadoSync;
+  for (const empresa of empresas) {
+    if (tempoEsgotado(inicioJob)) {
+      console.warn(`[job] tempo esgotado antes de processar ${empresa.slug} — fica pra próxima execução (ordem alterna por dia)`);
+      break;
+    }
+
+    try {
+      const resultadoSync = await sincronizarHistorico(empresa, inicioJob);
+      await recalcularTudoPosSync(empresa, inicioJob);
+      resultados.push({ slug: empresa.slug, ok: true, ...resultadoSync });
+    } catch (err) {
+      const mensagem = err instanceof Error ? err.message : String(err);
+      console.error(`[job] falha ao processar empresa ${empresa.slug}: ${mensagem}`);
+      await registrarErroLog(`[recompra-preditiva] falha na empresa ${empresa.slug}: ${mensagem}`, "/api/cron/recompra-preditiva");
+      resultados.push({ slug: empresa.slug, ok: false, erro: mensagem });
+    }
+  }
+
+  console.log(`=== job concluído em ${Date.now() - inicioJob}ms ===`, resultados);
+  return { resultados };
 }
 
 // Job da janela recente (/api/cron/recompra-recente): mesma lógica de
 // recálculo, mas a sincronização varre só os pedidos alterados/criados nos
 // últimos DIAS_JANELA_RECENTE dias (1-2 páginas) em vez do backfill paginado.
-export async function rodarSincronizacaoRecente(): Promise<{
-  processados: number;
-  restantes: number;
-  janelaDe: string;
-  janelaAte: string;
-  paginasLidas: number;
-  codigosNaJanela: number;
-}> {
+// Mesma orquestração multi-empresa/ordem alternada do job diário.
+export async function rodarSincronizacaoRecente(): Promise<{ resultados: ResultadoPorEmpresa[] }> {
   const inicioJob = Date.now();
-  console.log("=== iniciando job de recompra recente (janela de 45 dias) ===");
+  console.log("=== iniciando job de recompra recente (janela de 45 dias, multi-empresa) ===");
 
-  const resultadoSync = await sincronizarHistoricoRecente(inicioJob);
-  await recalcularTudoPosSync(inicioJob);
+  const empresas = await empresasParaProcessar();
+  const resultados: ResultadoPorEmpresa[] = [];
 
-  console.log(`=== job recente concluído em ${Date.now() - inicioJob}ms ===`);
-  return resultadoSync;
+  for (const empresa of empresas) {
+    if (tempoEsgotado(inicioJob)) {
+      console.warn(`[job recente] tempo esgotado antes de processar ${empresa.slug} — fica pra próxima execução (ordem alterna por dia)`);
+      break;
+    }
+
+    try {
+      const resultadoSync = await sincronizarHistoricoRecente(empresa, inicioJob);
+      await recalcularTudoPosSync(empresa, inicioJob);
+      resultados.push({ slug: empresa.slug, ok: true, ...resultadoSync });
+    } catch (err) {
+      const mensagem = err instanceof Error ? err.message : String(err);
+      console.error(`[job recente] falha ao processar empresa ${empresa.slug}: ${mensagem}`);
+      await registrarErroLog(`[recompra-recente] falha na empresa ${empresa.slug}: ${mensagem}`, "/api/cron/recompra-recente");
+      resultados.push({ slug: empresa.slug, ok: false, erro: mensagem });
+    }
+  }
+
+  console.log(`=== job recente concluído em ${Date.now() - inicioJob}ms ===`, resultados);
+  return { resultados };
 }
 
 if (require.main === module) {

@@ -1,5 +1,5 @@
 // ===============================================
-// MOTOR DE RECOMPRA PREDITIVA — RHOCAL
+// MOTOR DE RECOMPRA PREDITIVA — multi-empresa (RHOCAL + MATSEG)
 // Cliente Omie — v2, ajustado contra a resposta REAL da API
 // (validada em ambiente real em ago/2026, ver notas abaixo)
 //
@@ -24,9 +24,11 @@
 // - Categoria do item = det[].inf_adic.codigo_categoria_item
 // - Itens ficam em det[].produto (não direto em det[])
 //
-// IMPORTANTE: usar as credenciais da empresa correta (fase 30 do CRM) —
-// este módulo assume RHOCAL por padrão (OMIE_APP_KEY_RHOCAL/OMIE_APP_SECRET_RHOCAL);
-// ajustar para aceitar o slug da empresa se for rodar para MATSEG também.
+// Multi-empresa (RHOCAL + MATSEG): toda função aceita um `slug` e resolve a
+// credencial certa via obterCredenciaisOmiePorSlug (@/lib/omie/chamar-omie.ts
+// — mesmo helper já usado pelas rotas /api/omie/*, que já resolve
+// OMIE_APP_KEY_<SLUG>/OMIE_APP_SECRET_<SLUG> dinamicamente a partir da
+// tabela `empresas`). Nunca há um par de credencial "global" aqui.
 //
 // AJUSTE AO COLAR: OMIE_BASE_URL veio sem o ".br" (https://app.omie.com/api/v1)
 // — corrigido para https://app.omie.com.br/api/v1, mesmo domínio já usado em
@@ -42,9 +44,18 @@
 
 import { registrarErroLog } from "@/lib/recompra/registrar-erro-log";
 import { registrarPedidoPulado } from "@/lib/recompra/pedidos-pulados";
+import { obterCredenciaisOmiePorSlug } from "@/lib/omie/chamar-omie";
 
-const OMIE_APP_KEY = process.env.OMIE_APP_KEY_RHOCAL!;
-const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET_RHOCAL!;
+// `id` (uuid de `empresas`, vai em toda coluna empresa_id gravada por este
+// módulo) + `slug` (resolve a credencial Omie certa). Todas as funções
+// exportadas deste arquivo recebem o objeto inteiro, mesmo as que só
+// precisam do slug — evita o chamador ter que lembrar qual campo cada
+// função usa.
+export interface Empresa {
+  id: string;
+  slug: string;
+}
+
 const OMIE_BASE_URL = "https://app.omie.com.br/api/v1";
 
 const DELAY_ENTRE_REQUISICOES_MS = 150;
@@ -116,6 +127,7 @@ function ehErroDeTimeout(err: unknown): boolean {
 }
 
 async function chamarOmie<T>(
+  slug: string,
   endpoint: string,
   call: string,
   param: Record<string, unknown>,
@@ -124,11 +136,11 @@ async function chamarOmie<T>(
 ): Promise<T> {
   await sleep(delayMs);
 
-  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
-    throw new Error(
-      `[omie-client] OMIE_APP_KEY_RHOCAL/OMIE_APP_SECRET_RHOCAL não configuradas neste ambiente — abortando antes de chamar ${endpoint}/${call}.`
-    );
-  }
+  // Lança com mensagem já indicando qual empresa está sem credencial — é
+  // esse texto ("Credenciais do Omie não configuradas...") que o
+  // orquestrador multi-empresa (sync-recompra-preditiva.ts) usa pra
+  // reconhecer "empresa sem credencial, pula" e não travar as demais.
+  const { appKey, appSecret } = obterCredenciaisOmiePorSlug(slug);
 
   let resp: Response | undefined;
 
@@ -145,8 +157,8 @@ async function chamarOmie<T>(
         signal: AbortSignal.timeout(TIMEOUT_REQUISICAO_MS),
         body: JSON.stringify({
           call,
-          app_key: OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET,
+          app_key: appKey,
+          app_secret: appSecret,
           param: [param],
         }),
       });
@@ -207,6 +219,7 @@ async function chamarOmie<T>(
 }
 
 async function chamarOmieComCache<T>(
+  slug: string,
   chave: string,
   endpoint: string,
   call: string,
@@ -218,7 +231,7 @@ async function chamarOmieComCache<T>(
     return cacheado.data as T;
   }
 
-  const resultado = await chamarOmie<T>(endpoint, call, param, DELAY_ENTRE_REQUISICOES_MS, inicioJob);
+  const resultado = await chamarOmie<T>(slug, endpoint, call, param, DELAY_ENTRE_REQUISICOES_MS, inicioJob);
   cache.set(chave, { data: resultado, expiraEm: Date.now() + CACHE_TTL_MS });
   return resultado;
 }
@@ -269,6 +282,7 @@ export interface FiltroDataPedidos {
 // diário completo (/api/cron/recompra-preditiva) chama sem filtro e pagina o
 // histórico inteiro.
 export async function listarPaginaDePedidos(
+  empresa: Empresa,
   pagina: number,
   inicioJob?: number,
   filtroData?: FiltroDataPedidos
@@ -285,6 +299,7 @@ export async function listarPaginaDePedidos(
   }
 
   const resposta = await chamarOmie<ListarPedidosResponse>(
+    empresa.slug,
     "produtos/pedido",
     "ListarPedidos",
     param,
@@ -326,6 +341,7 @@ interface ConsultarPedidoResponse {
 }
 
 export async function consultarPedido(
+  empresa: Empresa,
   codigoPedido: number,
   inicioJob?: number
 ): Promise<OmiePedido | null> {
@@ -333,6 +349,7 @@ export async function consultarPedido(
   // uma vez por pedido novo, dentro do teto já apertado de maxDuration da
   // rota de cron; dá mais margem pra processar mais pedidos por execução.
   const resposta = await chamarOmie<ConsultarPedidoResponse>(
+    empresa.slug,
     "produtos/pedido",
     "ConsultarPedido",
     { codigo_pedido: codigoPedido },
@@ -348,7 +365,7 @@ export async function consultarPedido(
     await registrarErroLog(
       `Pedido Omie ${codigoPedido}: resposta do ConsultarPedido sem pedido_venda_produto, pulado`
     );
-    await registrarPedidoPulado(codigoPedido, "resposta sem pedido_venda_produto");
+    await registrarPedidoPulado(empresa.id, codigoPedido, "resposta sem pedido_venda_produto");
     return null;
   }
 
@@ -358,21 +375,21 @@ export async function consultarPedido(
   if (!pvp.infoCadastro) {
     console.warn("[omie] pedido sem infoCadastro, pulando:", codigoPedido);
     await registrarErroLog(`Pedido Omie ${codigoPedido} sem infoCadastro, pulado`);
-    await registrarPedidoPulado(codigoPedido, "sem infoCadastro");
+    await registrarPedidoPulado(empresa.id, codigoPedido, "sem infoCadastro");
     return null;
   }
 
   if (pvp.infoCadastro.cancelado === "S") {
     console.warn("[omie] pedido cancelado, pulando:", codigoPedido);
     await registrarErroLog(`Pedido Omie ${codigoPedido} cancelado, pulado`);
-    await registrarPedidoPulado(codigoPedido, "cancelado");
+    await registrarPedidoPulado(empresa.id, codigoPedido, "cancelado");
     return null;
   }
 
   if (!pvp.det || pvp.det.length === 0) {
     console.warn("[omie] pedido sem itens (det), pulando:", codigoPedido);
     await registrarErroLog(`Pedido Omie ${codigoPedido} sem campo det, pulado`);
-    await registrarPedidoPulado(codigoPedido, "sem itens (det)");
+    await registrarPedidoPulado(empresa.id, codigoPedido, "sem itens (det)");
     return null;
   }
 
@@ -409,11 +426,19 @@ interface ConsultarClienteResponse {
   cnpj_cpf: string;
 }
 
+// Cache NÃO namespaced por empresa de propósito: clientes são cadastro
+// compartilhado entre as duas contas Omie (fase 30 — "Compartilhamento de
+// Cadastros entre Aplicativos"), então ConsultarCliente devolve o mesmo
+// registro pro mesmo codigo_cliente_omie independente de qual das duas
+// credenciais foi usada pra consultar — reaproveitar o cache entre
+// RHOCAL/MATSEG é correto, não só mais rápido.
 export async function resolverCliente(
+  empresa: Empresa,
   codigoCliente: string,
   inicioJob?: number
 ): Promise<{ nome: string; cnpj: string }> {
   const resposta = await chamarOmieComCache<ConsultarClienteResponse>(
+    empresa.slug,
     `cliente:${codigoCliente}`,
     "geral/clientes",
     "ConsultarCliente",
@@ -431,15 +456,26 @@ interface ListarVendedoresResponse {
   cadastros: Array<{ codigo: number; nome: string }>;
 }
 
-let mapaVendedoresCache: Map<string, string> | null = null;
-let mapaVendedoresExpiraEm = 0;
+// Diferente de resolverCliente: vendedores NÃO são cadastro compartilhado
+// entre as contas Omie (só clientes e produtos são, fase 30) — cada empresa
+// tem seu próprio quadro de vendedores. O cache precisa ser namespaced por
+// slug; um cache único aqui faria a MATSEG herdar (ou sobrescrever) o mapa
+// de vendedores da RHOCAL sempre que as duas rodarem no mesmo processo —
+// o que acontece o tempo todo agora, já que o mesmo cron processa as duas
+// em sequência (ver sync-recompra-preditiva.ts) e a Vercel pode reaproveitar
+// a mesma instância de function entre execuções (Fluid Compute).
+const mapaVendedoresCachePorEmpresa = new Map<string, { mapa: Map<string, string>; expiraEm: number }>();
 
 export async function resolverVendedor(
+  empresa: Empresa,
   codigoVendedor: string,
   inicioJob?: number
 ): Promise<string> {
-  if (!mapaVendedoresCache || mapaVendedoresExpiraEm < Date.now()) {
+  const cacheado = mapaVendedoresCachePorEmpresa.get(empresa.slug);
+
+  if (!cacheado || cacheado.expiraEm < Date.now()) {
     const resposta = await chamarOmie<ListarVendedoresResponse>(
+      empresa.slug,
       "geral/vendedores",
       "ListarVendedores",
       { pagina: 1, registros_por_pagina: 200 },
@@ -447,11 +483,10 @@ export async function resolverVendedor(
       inicioJob
     );
 
-    mapaVendedoresCache = new Map(
-      (resposta.cadastros ?? []).map((v) => [String(v.codigo), v.nome])
-    );
-    mapaVendedoresExpiraEm = Date.now() + CACHE_TTL_MS;
+    const mapa = new Map((resposta.cadastros ?? []).map((v) => [String(v.codigo), v.nome]));
+    mapaVendedoresCachePorEmpresa.set(empresa.slug, { mapa, expiraEm: Date.now() + CACHE_TTL_MS });
+    return mapa.get(codigoVendedor) ?? "";
   }
 
-  return mapaVendedoresCache.get(codigoVendedor) ?? "";
+  return cacheado.mapa.get(codigoVendedor) ?? "";
 }

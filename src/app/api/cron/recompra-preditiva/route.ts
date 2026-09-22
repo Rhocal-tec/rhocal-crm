@@ -14,6 +14,11 @@ import { supabase } from '@/lib/recompra/supabase-client'
 // chegava a rodar. Corrigido na origem: omie-client.ts agora lista só UMA
 // página por execução (listarPaginaDePedidos), com o cursor de página em
 // sync_estado.
+//
+// Multi-empresa (RHOCAL + MATSEG): rodarSincronizacaoDiaria processa as duas
+// em loop sequencial dentro deste mesmo maxDuration=60s (plano Hobby não
+// permite cron separado por empresa — ver sync-recompra-preditiva.ts), por
+// isso a resposta virou uma lista de resultados, um por empresa.
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
@@ -27,9 +32,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       executado_em: new Date().toISOString(),
-      processados: resultado.processados,
-      pagina_atual: resultado.paginaAtual,
-      restantes_estimado: resultado.restantes,
+      resultados: resultado.resultados,
     })
   } catch (err) {
     const mensagem =

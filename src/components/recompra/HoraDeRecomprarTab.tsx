@@ -21,12 +21,14 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
   const [busca, setBusca] = useState('')
 
   useEffect(() => {
+    if (!empresaAtiva) return
     let ativo = true
     setLoading(true)
 
     supabase
       .from('v_recompra_priorizada')
       .select('*')
+      .eq('empresa_id', empresaAtiva.id)
       .then(({ data, error }) => {
         if (!ativo) return
         if (error) console.error('Erro ao carregar previsões de recompra:', error.message)
@@ -37,12 +39,13 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
     return () => {
       ativo = false
     }
-  }, [supabase])
+  }, [supabase, empresaAtiva])
 
   // Cross-sell: busca as associações só para os item_codigo que estão na
   // tela, agrupa por item principal e mantém só as 3 mais frequentes por
   // item — o resto fica denso demais pro card.
   useEffect(() => {
+    if (!empresaAtiva) return
     let ativo = true
     const codigos = Array.from(new Set(previsoes.map((p) => p.item_codigo)))
     if (codigos.length === 0) {
@@ -53,6 +56,7 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
     supabase
       .from('itens_associados')
       .select('*')
+      .eq('empresa_id', empresaAtiva.id)
       .in('item_codigo_principal', codigos)
       .order('frequencia_conjunta', { ascending: false })
       .then(({ data, error }) => {
@@ -76,7 +80,7 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
       ativo = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase, previsoes.map((p) => p.item_codigo).join(',')])
+  }, [supabase, empresaAtiva, previsoes.map((p) => p.item_codigo).join(',')])
 
   const previsoesVisiveis = useMemo(() => {
     const buscaNormalizada = busca.trim().toLowerCase()
@@ -100,21 +104,7 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
     setPrevisoes((atual) => atual.map((p) => (p.id === atualizada.id ? atualizada : p)))
   }
 
-  // O motor de recompra (src/lib/recompra/omie-client.ts) hoje só resolve
-  // credenciais da RHOCAL — recompra_previsao não tem empresa_id porque a
-  // sincronização ainda não cobre MATSEG. Em vez de mostrar dados da RHOCAL
-  // por baixo do pano com o workspace MATSEG ativo, a aba avisa e não lista
-  // nada nesse caso.
-  if (!empresaLoading && empresaAtiva && empresaAtiva.slug !== 'rhocal') {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted">
-        A Hora de Recomprar ainda só cobre dados da RHOCAL — o motor de sincronização não tem
-        credenciais da {empresaAtiva.nome_fantasia} configuradas ainda.
-      </div>
-    )
-  }
-
-  if (loading) {
+  if (loading || empresaLoading) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted">
         Carregando previsões de recompra…
