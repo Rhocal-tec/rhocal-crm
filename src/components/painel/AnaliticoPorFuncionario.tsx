@@ -1068,7 +1068,16 @@ export default function AnaliticoPorFuncionario({
                                 {valor}
                               </span>
                               {m.secundario && valor > 0 && (
-                                <span className="mt-0.5 block whitespace-nowrap font-mono text-xs text-muted">
+                                // Sobre o cinza da célula ativa, text-muted
+                                // (#8A939B) fica em ~2,8:1 — text-white/70 dá
+                                // ~5,2:1. Branco com opacidade é gerado
+                                // normalmente pelo Tailwind (diferente das
+                                // cores do tema em var(), com /opacidade).
+                                <span
+                                  className={`mt-0.5 block whitespace-nowrap font-mono text-xs ${
+                                    selecionada ? 'text-muted' : 'text-white/70'
+                                  }`}
+                                >
                                   {m.secundario.formatar(m.secundario.valor(l))}
                                 </span>
                               )}
