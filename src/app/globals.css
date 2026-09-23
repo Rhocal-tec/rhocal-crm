@@ -71,38 +71,128 @@ body {
   }
 }
 
-/* Impressão do Analítico por Funcionário (Painel executivo) — isola só essa
-   seção na folha impressa (header, filtros de período e demais cards do
-   Painel somem) e força fundo claro/texto escuro: o tema padrão do sistema
-   é escuro, o que gastaria tinta à toa e ficaria ilegível no papel. */
+/* Impressão do Analítico por Funcionário (Painel executivo) — versão
+   dedicada em AnaliticoPorFuncionarioImpressao.tsx, renderizada via portal
+   direto no <body>. Na tela ela fica escondida; na impressão, é a ÚNICA
+   coisa que aparece (o resto do body some com display:none, sem deixar
+   páginas em branco), em A4 paisagem, papel branco e texto escuro.
+   Tudo condicionado a :has(> .analitico-impressao) e a uma página nomeada
+   (@page analitico): imprimir qualquer outra tela não é afetado. */
+.analitico-impressao {
+  display: none;
+}
+
+@page analitico {
+  size: A4 landscape;
+  margin: 12mm 10mm;
+}
+
 @media print {
-  body * {
-    visibility: hidden;
-  }
-  .print-analitico-funcionario,
-  .print-analitico-funcionario * {
-    visibility: visible;
-  }
-  .print-analitico-funcionario {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-  }
-  .print-analitico-funcionario,
-  .print-analitico-funcionario * {
+  /* O :root usa color-scheme: dark, que pinta de escuro o fundo da folha
+     (inclusive as margens da página) — volta pro esquema claro aqui. */
+  html:has(> body > .analitico-impressao) {
+    color-scheme: light;
     background: #fff !important;
-    color: #000 !important;
-    border-color: #ccc !important;
   }
-  .print-analitico-funcionario .no-print {
+  body:has(> .analitico-impressao) {
+    background: #fff !important;
+    color: #111 !important;
+  }
+  body:has(> .analitico-impressao) > *:not(.analitico-impressao) {
     display: none !important;
   }
-  /* Os blocos de detalhe (expandidos) têm scroll interno na tela — na
-     impressão isso cortaria conteúdo fora da área visível, então libera
-     a altura pra sair tudo na folha. */
-  .print-analitico-funcionario .print-scroll-livre {
-    max-height: none !important;
-    overflow: visible !important;
+
+  .analitico-impressao {
+    display: block;
+    page: analitico;
+    color: #111;
+    font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+    font-size: 9.5pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .analitico-impressao-cabecalho {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #111;
+  }
+  .analitico-impressao-logo {
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+  }
+  .analitico-impressao-cabecalho h1 {
+    font-size: 15pt;
+    font-weight: 700;
+    margin: 0;
+  }
+  .analitico-impressao-cabecalho p {
+    margin: 1px 0 0;
+    color: #444;
+  }
+  .analitico-impressao-cabecalho .analitico-impressao-empresa {
+    color: #111;
+    font-weight: 600;
+  }
+
+  .analitico-impressao-tabela {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  /* Cabeçalho da tabela repetido no topo de cada página quando ela quebra. */
+  .analitico-impressao-tabela thead {
+    display: table-header-group;
+  }
+  .analitico-impressao-tabela tfoot {
+    display: table-row-group;
+  }
+  .analitico-impressao-tabela tr {
+    break-inside: avoid;
+  }
+  .analitico-impressao-tabela th,
+  .analitico-impressao-tabela td {
+    border: 1px solid #999;
+    padding: 4px 5px;
+    text-align: center;
+    vertical-align: top;
+  }
+  .analitico-impressao-tabela th {
+    background: #e8e8e8;
+    font-size: 8.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .analitico-impressao-tabela .analitico-impressao-nome {
+    text-align: left;
+    white-space: nowrap;
+  }
+  .analitico-impressao-tabela tbody tr:nth-child(even) td {
+    background: #f6f6f6;
+  }
+  .analitico-impressao-tabela tfoot td {
+    font-weight: 700;
+    border-top: 2.5px solid #111;
+    background: #e8e8e8;
+  }
+  .analitico-impressao-secundario {
+    display: block;
+    white-space: nowrap;
+    font-size: 7.5pt;
+    font-weight: 400;
+    color: #555;
+  }
+  .analitico-impressao-nome .analitico-impressao-secundario {
+    display: inline;
+  }
+
+  .analitico-impressao-rodape {
+    margin-top: 8px;
+    font-size: 8pt;
+    color: #666;
+    text-align: right;
   }
 }

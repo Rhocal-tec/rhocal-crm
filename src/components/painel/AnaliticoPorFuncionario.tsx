@@ -42,6 +42,8 @@ import { TAREFA_SITUACAO_OPCOES } from '@/lib/tarefas/opcoes'
 import { RESULTADO_INTERACAO_OPCOES } from '@/lib/interacoes/opcoes'
 import { situacaoTerminal } from '@/lib/tarefas/situacao'
 import { FiltroData } from '@/components/busca/FiltroData'
+import { useEmpresa } from '@/contexts/EmpresaContext'
+import { AnaliticoPorFuncionarioImpressao, type CelulaImpressao } from './AnaliticoPorFuncionarioImpressao'
 import type { Database } from '@/types/database'
 
 type PedidoBruto = Pick<
@@ -1111,11 +1113,44 @@ export default function AnaliticoPorFuncionario({
     ? METRICAS.find((m) => m.key === aberto.metrica) ?? null
     : null
 
+  // ===== Versão de impressão (AnaliticoPorFuncionarioImpressao) =====
+  // Só formata o que a tela já tem: métricas ligadas, linhas visíveis.
+  const { empresaAtiva } = useEmpresa()
+
+  function celulaImpressao(m: MetricaDef, l: AgregadoFuncionario): CelulaImpressao {
+    if (m.derivada) return { principal: m.derivada.texto(l), secundario: null }
+    const valor = m.principal(l)
+    return {
+      principal: String(valor),
+      secundario: m.secundario && valor > 0 ? m.secundario.formatar(m.secundario.valor(l)) : null,
+    }
+  }
+
+  function totalImpressao(m: MetricaDef): CelulaImpressao {
+    if (m.derivada) return { principal: m.derivada.textoTotal(linhasVisiveis), secundario: null }
+    const total = linhasVisiveis.reduce((acc, l) => acc + m.principal(l), 0)
+    const totalSecundario = m.secundario ? linhasVisiveis.reduce((acc, l) => acc + m.secundario!.valor(l), 0) : 0
+    return {
+      principal: String(total),
+      secundario: m.secundario && total > 0 ? m.secundario.formatar(totalSecundario) : null,
+    }
+  }
+
+  const periodoImpressao = usandoPeriodoPainel
+    ? periodoLabel
+    : modoData === 'mes_atual'
+      ? 'Mês atual'
+      : modoData === 'especifica'
+        ? formatarDataSomente(dataEspecifica)
+        : [dataDe && `de ${formatarDataSomente(dataDe)}`, dataAte && `até ${formatarDataSomente(dataAte)}`]
+            .filter(Boolean)
+            .join(' ')
+
   return (
-    <section className="print-analitico-funcionario rounded-lg border border-white/10 bg-surface p-4">
+    <section className="rounded-lg border border-white/10 bg-surface p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-sm font-medium text-primary">Analítico por funcionário</h3>
-        <div className="no-print flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <input
             type="text"
             value={busca}
@@ -1133,7 +1168,7 @@ export default function AnaliticoPorFuncionario({
         </div>
       </div>
 
-      <div className="no-print mb-3 flex flex-wrap items-end gap-3">
+      <div className="mb-3 flex flex-wrap items-end gap-3">
         <FiltroData
           modo={modoData}
           onModoChange={setModoData}
@@ -1151,7 +1186,7 @@ export default function AnaliticoPorFuncionario({
           : 'Usando o filtro de data desta seção (o período do Painel não se aplica aqui).'}
       </p>
 
-      <div className="no-print mb-4">
+      <div className="mb-4">
         <label className="block text-xs text-muted">Métricas</label>
         <div className="mt-1 flex flex-wrap gap-1.5">
           <button
@@ -1348,6 +1383,27 @@ export default function AnaliticoPorFuncionario({
           </table>
         </div>
       )}
+
+      {!carregando && !erro && metricasVisiveis.length > 0 && (
+        <AnaliticoPorFuncionarioImpressao
+          empresaNome={empresaAtiva?.nome_fantasia ?? 'RHOCAL'}
+          logoPath={empresaAtiva?.logo_path ?? '/rhocal-logo.png'}
+          periodoTexto={
+            metricasAtivas.has('oportAndamento')
+              ? `${periodoImpressao} (Oport. em Andamento: posição no momento da impressão)`
+              : periodoImpressao
+          }
+          buscaTexto={busca.trim() || null}
+          colunas={metricasVisiveis.map((m) => m.label)}
+          linhas={linhasVisiveis.map((l) => ({
+            id: l.id,
+            nome: l.nome,
+            inativo: !l.ativo,
+            celulas: metricasVisiveis.map((m) => celulaImpressao(m, l)),
+          }))}
+          total={metricasVisiveis.map((m) => totalImpressao(m))}
+        />
+      )}
     </section>
   )
 }
@@ -1378,7 +1434,7 @@ function DetalheMetrica({
           type="button"
           onClick={onFechar}
           aria-label="Fechar detalhe"
-          className="no-print rounded-md px-2 py-0.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+          className="rounded-md px-2 py-0.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
         >
           ×
         </button>
@@ -1409,5 +1465,5 @@ function ListaDetalhe({ itens }: { itens: React.ReactNode[] }) {
   if (itens.length === 0) {
     return <p className="text-xs text-white/50">Nenhum registro no período.</p>
   }
-  return <div className="print-scroll-livre max-h-64 space-y-1.5 overflow-y-auto pr-1">{itens}</div>
+  return <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">{itens}</div>
 }
