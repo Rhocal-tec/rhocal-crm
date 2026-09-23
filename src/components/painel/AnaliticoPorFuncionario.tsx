@@ -35,7 +35,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { RangePeriodo } from '@/lib/kanban/periodo'
 import { proximoDia, resolverFiltroData, type ModoFiltroData } from '@/lib/kanban/filtro-data'
-import { formatarMoeda } from '@/lib/kanban/formatacao'
+import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
 import { STATUS_LABELS } from '@/lib/kanban/status'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { TAREFA_SITUACAO_OPCOES } from '@/lib/tarefas/opcoes'
@@ -60,7 +60,13 @@ type PedidoBruto = Pick<
 type ItemBruto = Pick<Database['public']['Tables']['pedido_itens']['Row'], 'pedido_id' | 'preco_venda' | 'quantidade'>
 type OportunidadeBruta = Pick<
   Database['public']['Tables']['oportunidades']['Row'],
-  'id' | 'numero' | 'cliente_nome' | 'cliente_telefone' | 'status' | 'criado_por' | 'criado_em'
+  'id' | 'numero' | 'cliente_nome' | 'cliente_telefone' | 'status' | 'criado_por' | 'criado_em' | 'valor_estimado'
+>
+// Tarefas vinculadas a oportunidades, sem recorte de período — base da
+// métrica "Oport. em Andamento" (quem está tocando cada oportunidade agora).
+type TarefaOportunidadeBruta = Pick<
+  Database['public']['Tables']['tarefas']['Row'],
+  'oportunidade_id' | 'responsavel' | 'situacao' | 'criado_em' | 'data_prevista'
 >
 type TarefaBruta = Pick<
   Database['public']['Tables']['tarefas']['Row'],
@@ -138,6 +144,20 @@ interface OportunidadeLinha {
   criadoEm: string
 }
 
+// De onde veio a atribuição de uma oportunidade em andamento — mostrado no
+// drill-down pra deixar os casos de fallback visíveis.
+type OrigemAtribuicao = 'tarefa_aberta' | 'tarefa_concluida' | 'criador'
+
+interface OportunidadeAndamentoLinha {
+  id: string
+  numero: number
+  clienteNome: string
+  status: string
+  valorEstimado: number
+  origem: OrigemAtribuicao
+  dataPrevista: string | null
+}
+
 interface EntregaLinha {
   id: string
   numero: number
@@ -167,6 +187,7 @@ interface AgregadoFuncionario {
   perdidos: PedidoMetrica
   entregas: { total: number; valorTotal: number; lista: EntregaLinha[] }
   oportunidades: { total: number; lista: OportunidadeLinha[] }
+  oportAndamento: { total: number; valorEstimado: number; lista: OportunidadeAndamentoLinha[] }
   tarefas: {
     total: number
     abertas: number
@@ -203,6 +224,7 @@ function novoAgregado(id: string, nome: string, ativo = true): AgregadoFuncionar
     perdidos: novaPedidoMetrica(),
     entregas: { total: 0, valorTotal: 0, lista: [] },
     oportunidades: { total: 0, lista: [] },
+    oportAndamento: { total: 0, valorEstimado: 0, lista: [] },
     tarefas: { total: 0, abertas: 0, porSituacao: {}, porTipo: {}, lista: [] },
     interacoes: { total: 0, porResultado: {}, lista: [] },
     chamadas: {
@@ -299,6 +321,7 @@ type MetricaKey =
   | 'interacoes'
   | 'chamadas'
   | 'oportunidades'
+  | 'oportAndamento'
 
 interface QuebraItem {
   label: string
@@ -492,8 +515,8 @@ const METRICAS: MetricaDef[] = [
   },
   {
     key: 'oportunidades',
-    label: 'Leads/Oportunidades',
-    dataRef: 'Filtrado pela data de criação da oportunidade',
+    label: 'Leads Criados',
+    dataRef: 'Oportunidades cadastradas pelo funcionário — filtrado pela data de criação',
     principal: (l) => l.oportunidades.total,
     quebra: (l) => {
       const contagem: Record<string, number> = {}
@@ -515,7 +538,61 @@ const METRICAS: MetricaDef[] = [
         </div>
       )),
   },
+  {
+    // Quem está tocando cada oportunidade AGORA — pelo responsável da tarefa
+    // mais recente vinculada, não por quem a criou (ver atribuição no
+    // carregamento). Foto do momento: ignora o filtro de data.
+    key: 'oportAndamento',
+    label: 'Oport. em Andamento',
+    dataRef:
+      'Foto de agora (ignora o filtro de data): oportunidades abertas por responsável da tarefa mais recente vinculada',
+    principal: (l) => l.oportAndamento.total,
+    secundario: { valor: (l) => l.oportAndamento.valorEstimado, formatar: formatarMoeda },
+    quebra: (l) => {
+      const porEtapa: Record<string, number> = {}
+      const porOrigem: Record<string, number> = {}
+      for (const o of l.oportAndamento.lista) {
+        incrementa(porEtapa, o.status)
+        incrementa(porOrigem, o.origem)
+      }
+      return [
+        ...Object.entries(porEtapa)
+          .sort((a, b) => b[1] - a[1])
+          .map(([status, qtd]) => ({
+            label: OPORTUNIDADE_STATUS_LABELS[status as keyof typeof OPORTUNIDADE_STATUS_LABELS] ?? status,
+            valor: qtd,
+          })),
+        ...(['tarefa_aberta', 'tarefa_concluida', 'criador'] as const)
+          .filter((origem) => porOrigem[origem])
+          .map((origem) => ({ label: ORIGEM_ATRIBUICAO_LABELS[origem], valor: porOrigem[origem] })),
+      ]
+    },
+    detalhe: (l) =>
+      l.oportAndamento.lista.map((o) => (
+        <div key={o.id} className="text-xs text-white/80">
+          <span className="font-mono">#{o.numero}</span> — {o.clienteNome} ·{' '}
+          {OPORTUNIDADE_STATUS_LABELS[o.status as keyof typeof OPORTUNIDADE_STATUS_LABELS] ?? o.status}
+          {o.valorEstimado > 0 && (
+            <>
+              {' '}
+              · <span className="font-mono">{formatarMoeda(o.valorEstimado)}</span>
+            </>
+          )}
+          <span className="block text-white/60">
+            {o.origem === 'tarefa_aberta'
+              ? `Tarefa aberta${o.dataPrevista ? ` · prevista ${formatarDataSomente(o.dataPrevista)}` : ''}`
+              : ORIGEM_ATRIBUICAO_LABELS[o.origem]}
+          </span>
+        </div>
+      )),
+  },
 ]
+
+const ORIGEM_ATRIBUICAO_LABELS: Record<OrigemAtribuicao, string> = {
+  tarefa_aberta: 'Por tarefa aberta',
+  tarefa_concluida: 'Pela última tarefa concluída',
+  criador: 'Sem tarefa — pelo criador',
+}
 
 const TODAS_METRICAS: MetricaKey[] = METRICAS.map((m) => m.key)
 
@@ -526,8 +603,11 @@ const TODAS_METRICAS: MetricaKey[] = METRICAS.map((m) => m.key)
 // nascer escondida pra quem já tinha uma seleção salva.
 const STORAGE_KEY_METRICAS = 'rhocal:analitico-funcionario:metricas'
 
-// Formato antigo (só o array de ligadas) foi salvo antes da Efetividade existir.
-const METRICAS_ANTES_DA_EFETIVIDADE = TODAS_METRICAS.filter((k) => k !== 'efetividade')
+// Formato antigo (só o array de ligadas) foi salvo antes da Efetividade e da
+// Oport. em Andamento existirem — essas duas contam como "novas" pra ele.
+const METRICAS_ANTES_DA_EFETIVIDADE = TODAS_METRICAS.filter(
+  (k) => k !== 'efetividade' && k !== 'oportAndamento',
+)
 
 function lerMetricasSalvas(): Set<MetricaKey> | null {
   try {
@@ -670,6 +750,7 @@ export default function AnaliticoPorFuncionario({
           { data: tarefasData, error: erroTarefas },
           { data: interacoesData, error: erroInteracoes },
           { data: chamadasData, error: erroChamadas },
+          { data: tarefasOportData, error: erroTarefasOport },
         ] = await Promise.all([
           supabase.from('profiles').select('id, nome, ativo'),
           supabase
@@ -680,11 +761,20 @@ export default function AnaliticoPorFuncionario({
             .eq('empresa_id', empresaId),
           supabase
             .from('oportunidades')
-            .select('id, numero, cliente_nome, cliente_telefone, status, criado_por, criado_em')
+            .select('id, numero, cliente_nome, cliente_telefone, status, criado_por, criado_em, valor_estimado')
             .eq('empresa_id', empresaId),
           queryTarefas,
           queryInteracoes,
           queryChamadas,
+          // Sem filtro de período, de propósito: "Oport. em Andamento" é uma
+          // foto de agora (uma oportunidade antiga pode estar sendo tocada
+          // hoje), então precisa de todas as tarefas vinculadas.
+          supabase
+            .from('tarefas')
+            .select('oportunidade_id, responsavel, situacao, criado_em, data_prevista')
+            .eq('empresa_id', empresaId)
+            .eq('excluida', false)
+            .not('oportunidade_id', 'is', null),
         ])
 
         if (erroProfiles) throw erroProfiles
@@ -693,6 +783,7 @@ export default function AnaliticoPorFuncionario({
         if (erroTarefas) throw erroTarefas
         if (erroInteracoes) throw erroInteracoes
         if (erroChamadas) throw erroChamadas
+        if (erroTarefasOport) throw erroTarefasOport
         if (!ativo) return
 
         const pedidosTodos = (pedidosData ?? []) as PedidoBruto[]
@@ -840,6 +931,65 @@ export default function AnaliticoPorFuncionario({
             clienteTelefone: oportunidade.cliente_telefone,
             status: oportunidade.status,
             criadoEm: oportunidade.criado_em,
+          })
+        }
+
+        // 3b) Oport. em Andamento — oportunidades abertas (fora de GANHO/
+        // PERDIDO), sem recorte de período, atribuídas a quem está tocando
+        // cada uma agora:
+        //   1. responsável da tarefa ABERTA (Pendente/Em Execução) mais
+        //      recente vinculada — quem deve agir em seguida;
+        //   2. sem tarefa aberta: responsável da última tarefa Realizada
+        //      (Canceladas e excluídas não contam);
+        //   3. tarefa escolhida sem responsável (comum nas importadas do
+        //      Omie): "Não atribuído" — não volta pra uma tarefa mais antiga,
+        //      que poderia apontar alguém que já saiu do caso;
+        //   4. nenhuma tarefa: criado_por (Novo Lead/Cadastro rápido não
+        //      criam tarefa).
+        const tarefasPorOportunidade = new Map<string, TarefaOportunidadeBruta[]>()
+        for (const tarefa of (tarefasOportData ?? []) as TarefaOportunidadeBruta[]) {
+          if (!tarefa.oportunidade_id || tarefa.situacao === 'Cancelada') continue
+          const lista = tarefasPorOportunidade.get(tarefa.oportunidade_id) ?? []
+          lista.push(tarefa)
+          tarefasPorOportunidade.set(tarefa.oportunidade_id, lista)
+        }
+        const maisRecente = (lista: TarefaOportunidadeBruta[]) =>
+          lista.reduce<TarefaOportunidadeBruta | null>(
+            (atual, t) => (!atual || t.criado_em > atual.criado_em ? t : atual),
+            null,
+          )
+
+        for (const oportunidade of oportunidadesTodas) {
+          if (oportunidade.status === 'GANHO' || oportunidade.status === 'PERDIDO') continue
+
+          const tarefasDaOportunidade = tarefasPorOportunidade.get(oportunidade.id) ?? []
+          const abertaMaisRecente = maisRecente(tarefasDaOportunidade.filter((t) => !situacaoTerminal(t.situacao)))
+          const concluidaMaisRecente = abertaMaisRecente
+            ? null
+            : maisRecente(tarefasDaOportunidade.filter((t) => t.situacao === 'Realizada'))
+          const tarefaEscolhida = abertaMaisRecente ?? concluidaMaisRecente
+
+          const origem: OrigemAtribuicao = abertaMaisRecente
+            ? 'tarefa_aberta'
+            : concluidaMaisRecente
+              ? 'tarefa_concluida'
+              : 'criador'
+          const chave = tarefaEscolhida
+            ? tarefaEscolhida.responsavel ?? SEM_ATRIBUICAO_ID
+            : oportunidade.criado_por
+          const agregado = obterOuCriar(mapa, chave, chave === SEM_ATRIBUICAO_ID ? SEM_ATRIBUICAO_NOME : 'Perfil removido')
+          const valorEstimado = Number(oportunidade.valor_estimado ?? 0)
+
+          agregado.oportAndamento.total += 1
+          agregado.oportAndamento.valorEstimado += valorEstimado
+          agregado.oportAndamento.lista.push({
+            id: oportunidade.id,
+            numero: oportunidade.numero,
+            clienteNome: oportunidade.cliente_nome,
+            status: oportunidade.status,
+            valorEstimado,
+            origem,
+            dataPrevista: abertaMaisRecente?.data_prevista ?? null,
           })
         }
 
