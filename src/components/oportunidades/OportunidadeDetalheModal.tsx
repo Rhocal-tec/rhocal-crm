@@ -54,6 +54,28 @@ export function OportunidadeDetalheModal({
   // oportunidade — nunca sobrescreve o que já está salvo nela.
   const [tarefaOrigem, setTarefaOrigem] = useState<Tarefa | null>(null)
 
+  // Nome de quem criou a oportunidade (criado_por) — mesmo dado exibido como
+  // "Contato feito por" no card do FunilBoard.
+  const [nomeCriador, setNomeCriador] = useState<string | null>(null)
+  const criadoPor = oportunidade?.criado_por ?? null
+
+  useEffect(() => {
+    setNomeCriador(null)
+    if (!criadoPor) return
+    let ativo = true
+    supabase
+      .from('profiles')
+      .select('nome')
+      .eq('id', criadoPor)
+      .single()
+      .then(({ data }) => {
+        if (ativo) setNomeCriador(data?.nome ?? null)
+      })
+    return () => {
+      ativo = false
+    }
+  }, [supabase, criadoPor])
+
   // Fase 38: estado local dos campos editáveis inline (mesmo padrão de
   // input controlado + salvar no blur já usado no modal de Pedido).
   const [previsaoFechamentoInput, setPrevisaoFechamentoInput] = useState('')
@@ -237,6 +259,14 @@ export function OportunidadeDetalheModal({
 
           {aba === 'dados' && (
             <div>
+              {nomeCriador && (
+                <p className="mt-4 text-sm text-muted">
+                  Contato feito por <span className="font-medium text-primary">{nomeCriador}</span> em{' '}
+                  {/* criado_em é timestamptz — data no fuso local, não o dia UTC. */}
+                  {new Date(oportunidade.criado_em).toLocaleDateString('pt-BR')}
+                </p>
+              )}
+
               <div className="mt-4 rounded-md border-2 border-accent-primary/50 bg-accent-primary/10 p-3">
                 <h3 className="text-xs font-bold uppercase tracking-wide text-accent-primary">
                   O que o cliente deseja/precisa
