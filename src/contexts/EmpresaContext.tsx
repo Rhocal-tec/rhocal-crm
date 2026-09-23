@@ -25,6 +25,23 @@ interface EmpresaContextValue {
 
 const EmpresaContext = createContext<EmpresaContextValue | undefined>(undefined)
 
+// Versão escura da cor de destaque (usada no hover dos botões principais,
+// hover:bg-accent-primary-dark), derivada da cor da empresa ativa. O fator
+// 0,835 reproduz a relação do par original da RHOCAL (#F1592A → #C94A22);
+// na MATSEG, #F9C304 → #D0A303. Retorna null se a cor não for um hex válido.
+function escurecerHex(hex: string, fator = 0.835): string | null {
+  let valor = hex.trim().replace(/^#/, '')
+  if (/^[0-9a-f]{3}$/i.test(valor)) {
+    valor = valor
+      .split('')
+      .map((c) => c + c)
+      .join('')
+  }
+  if (!/^[0-9a-f]{6}$/i.test(valor)) return null
+  const canais = [0, 2, 4].map((i) => Math.round(parseInt(valor.slice(i, i + 2), 16) * fator))
+  return `#${canais.map((c) => c.toString(16).padStart(2, '0')).join('')}`
+}
+
 export function EmpresaProvider({ children }: { children: ReactNode }) {
   const [supabase] = useState(() => createClient())
   const [empresas, setEmpresas] = useState<Empresa[]>([])
@@ -77,6 +94,15 @@ export function EmpresaProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!empresaAtiva) return
     document.documentElement.style.setProperty('--accent-primary', empresaAtiva.cor_primaria)
+    // Sem isso, o hover dos botões principais ficava sempre laranja escuro
+    // (padrão do globals.css), mesmo com a MATSEG ativa. Cor inválida:
+    // remove o override e vale o padrão.
+    const corEscura = escurecerHex(empresaAtiva.cor_primaria)
+    if (corEscura) {
+      document.documentElement.style.setProperty('--accent-primary-dark', corEscura)
+    } else {
+      document.documentElement.style.removeProperty('--accent-primary-dark')
+    }
     if (empresaAtiva.cor_secundaria) {
       document.documentElement.style.setProperty('--accent-secondary', empresaAtiva.cor_secundaria)
     } else {
