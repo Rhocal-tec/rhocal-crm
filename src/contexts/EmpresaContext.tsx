@@ -25,6 +25,23 @@ interface EmpresaContextValue {
 
 const EmpresaContext = createContext<EmpresaContextValue | undefined>(undefined)
 
+// '#F9C304' (ou '#FC0') -> '249 195 4' — formato "R G B" das variáveis
+// --*-rgb do globals.css. Retorna null se não for um hex válido.
+export function hexParaCanaisRgb(hex: string): string | null {
+  let valor = hex.trim().replace(/^#/, '')
+  if (/^[0-9a-f]{3}$/i.test(valor)) {
+    valor = valor
+      .split('')
+      .map((c) => c + c)
+      .join('')
+  }
+  if (!/^[0-9a-f]{6}$/i.test(valor)) return null
+  const r = parseInt(valor.slice(0, 2), 16)
+  const g = parseInt(valor.slice(2, 4), 16)
+  const b = parseInt(valor.slice(4, 6), 16)
+  return `${r} ${g} ${b}`
+}
+
 export function EmpresaProvider({ children }: { children: ReactNode }) {
   const [supabase] = useState(() => createClient())
   const [empresas, setEmpresas] = useState<Empresa[]>([])
@@ -74,9 +91,21 @@ export function EmpresaProvider({ children }: { children: ReactNode }) {
   // Aplica a identidade visual da empresa ativa via CSS custom properties,
   // em vez de classes Tailwind fixas — assim qualquer elemento que já usa
   // bg-accent-primary/text-accent-primary muda de cor automaticamente.
+  //
+  // Além da cor em hex (--accent-primary, usada direto em estilos inline/
+  // gradientes), grava a mesma cor em canais RGB (--accent-primary-rgb),
+  // que é o formato que o tailwind.config.ts usa pras classes com
+  // opacidade (bg-accent-primary/15 etc.). Se a cor cadastrada não for um
+  // hex válido, remove o override e o padrão do globals.css vale.
   useEffect(() => {
     if (!empresaAtiva) return
     document.documentElement.style.setProperty('--accent-primary', empresaAtiva.cor_primaria)
+    const canais = hexParaCanaisRgb(empresaAtiva.cor_primaria)
+    if (canais) {
+      document.documentElement.style.setProperty('--accent-primary-rgb', canais)
+    } else {
+      document.documentElement.style.removeProperty('--accent-primary-rgb')
+    }
     if (empresaAtiva.cor_secundaria) {
       document.documentElement.style.setProperty('--accent-secondary', empresaAtiva.cor_secundaria)
     } else {

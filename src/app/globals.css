@@ -19,6 +19,26 @@
   --text-primary: #e8ebed;
   --text-muted: #8a939b;
 
+  /* Mesmas cores acima, em canais RGB separados por espaço ("R G B"). É o
+     formato que o tailwind.config.ts usa (rgb(var(--x-rgb) / <alpha-value>))
+     pra que modificadores de opacidade como bg-accent-success/10 gerem CSS —
+     com a cor em hex dentro de var(), o Tailwind simplesmente não gerava
+     essas classes. As versões em hex continuam existindo porque são usadas
+     direto em estilos inline, gradientes e color-mix. Manter os dois pares
+     em sincronia; --accent-primary(-rgb) é sobrescrito em tempo de execução
+     pelo EmpresaContext. */
+  --bg-base-rgb: 18 24 28;
+  --bg-surface-rgb: 28 36 42;
+  --bg-surface-alt-rgb: 35 44 51;
+  --accent-primary-rgb: 241 89 42;
+  --accent-primary-dark-rgb: 201 74 34;
+  --accent-compras-rgb: 59 125 216;
+  --accent-success-rgb: 47 174 102;
+  --accent-alert-rgb: 244 180 0;
+  --accent-danger-rgb: 229 72 77;
+  --text-primary-rgb: 232 235 237;
+  --text-muted-rgb: 138 147 155;
+
   /* Diz ao navegador para usar a variante escura da UI nativa (inputs,
      seletor de data, scrollbar) em vez do branco padrão — sem isso, o
      fundo de <input>/<select> renderiza claro mesmo com classes de cor
