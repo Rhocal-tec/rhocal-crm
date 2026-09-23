@@ -1026,33 +1026,25 @@ export default function AnaliticoPorFuncionario({
               {linhasVisiveis.map((l) => {
                 const comAtividade = metricasVisiveis.some((m) => m.principal(l) > 0)
                 const detalheAberto = metricaAberta && aberto?.funcionarioId === l.id ? metricaAberta : null
-                // "Não atribuído" ganha um tom âmbar discreto (accent-alert) —
-                // costuma indicar dado sem responsável definido. A célula fixa
-                // do nome precisa de fundo opaco (bg-surface) por causa do
-                // scroll horizontal, então lá o aviso vai numa borda à esquerda.
-                const semAtribuicao = l.id === SEM_ATRIBUICAO_ID
                 return (
                   <Fragment key={l.id}>
                     <tr
                       className={`border-t border-white/10 transition-colors ${
-                        semAtribuicao
-                          ? 'bg-[color:color-mix(in_srgb,var(--accent-alert)_8%,transparent)]'
-                          : comAtividade
-                            ? 'bg-white/[0.03]'
-                            : ''
-                      } ${comAtividade ? '' : 'opacity-40'}`}
+                        comAtividade ? 'bg-white/[0.03]' : 'opacity-40'
+                      }`}
                     >
-                      <td
-                        className={`sticky left-0 z-10 whitespace-nowrap bg-surface px-4 py-3.5 font-semibold ${
-                          semAtribuicao ? 'border-l-4 border-accent-alert text-accent-alert' : 'text-primary'
-                        }`}
-                      >
+                      <td className="sticky left-0 z-10 whitespace-nowrap bg-surface px-4 py-3.5 font-semibold text-primary">
                         {l.nome}
                         {!l.ativo && <span className="ml-1.5 font-normal text-muted">(inativo)</span>}
                       </td>
                       {metricasVisiveis.map((m) => {
                         const valor = m.principal(l)
                         const selecionada = detalheAberto?.key === m.key
+                        // Célula com valor: cinza claro + contorno (bem mais
+                        // claro que o fundo #1C242A da tabela, pra aparecer no
+                        // tema escuro). Zerada: sem fundo, número em
+                        // text-muted. Aberta no drill-down: tom da marca, pra
+                        // não se confundir com as ativas.
                         return (
                           <td key={m.key} className="border-l border-white/10 px-2 py-2 text-center">
                             <button
@@ -1060,16 +1052,18 @@ export default function AnaliticoPorFuncionario({
                               onClick={() => alternarCelula(l.id, m.key)}
                               aria-expanded={selecionada}
                               aria-label={`${m.label} de ${l.nome}: ${valor}. Ver registros`}
-                              className={`w-full min-w-[5.5rem] rounded-md px-3 py-2.5 transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary ${
+                              className={`w-full min-w-[5.5rem] rounded-md px-3 py-2.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary ${
                                 selecionada
                                   ? 'bg-[color:color-mix(in_srgb,var(--accent-primary)_20%,transparent)] ring-2 ring-accent-primary'
                                   : valor > 0
-                                    ? 'bg-white/[0.07]'
-                                    : ''
-                              } ${valor === 0 ? 'opacity-30' : ''}`}
+                                    ? 'bg-white/[0.16] ring-1 ring-inset ring-white/25 hover:bg-white/[0.22]'
+                                    : 'hover:bg-white/10'
+                              }`}
                             >
                               <span
-                                className={`block font-mono text-base text-primary ${valor > 0 ? 'font-semibold' : ''}`}
+                                className={`block font-mono text-base ${
+                                  valor > 0 ? 'font-semibold text-primary' : 'text-muted'
+                                }`}
                               >
                                 {valor}
                               </span>
