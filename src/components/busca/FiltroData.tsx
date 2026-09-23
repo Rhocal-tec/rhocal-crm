@@ -31,6 +31,7 @@ export function FiltroData({
           className="input-field mt-1 rounded-md px-2 py-1.5 text-sm"
         >
           <option value="nenhum">Sem filtro</option>
+          <option value="mes_atual">Mês atual</option>
           <option value="especifica">Data específica</option>
           <option value="intervalo">Intervalo (de/até)</option>
         </select>

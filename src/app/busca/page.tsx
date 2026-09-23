@@ -11,7 +11,7 @@ import { PedidoDetalheModal } from '@/components/kanban/PedidoDetalheModal'
 import { STATUS_LABELS } from '@/lib/kanban/status'
 import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
 import { cotacaoVencida } from '@/lib/kanban/cotacao-vencida'
-import { proximoDia, type ModoFiltroData } from '@/lib/kanban/filtro-data'
+import { proximoDia, resolverFiltroData, type ModoFiltroData } from '@/lib/kanban/filtro-data'
 import type { Database, PedidoStatus } from '@/types/database'
 
 type HistoricoCA = Database['public']['Views']['vw_historico_ca']['Row']
@@ -112,14 +112,9 @@ function BuscaPageConteudo() {
 
     if (numero !== null) query = query.eq('numero', numero)
 
-    if (modoData === 'especifica' && dataEspecifica) {
-      query = query
-        .gte('criado_em', `${dataEspecifica}T00:00:00`)
-        .lt('criado_em', `${proximoDia(dataEspecifica)}T00:00:00`)
-    } else if (modoData === 'intervalo') {
-      if (dataDe) query = query.gte('criado_em', `${dataDe}T00:00:00`)
-      if (dataAte) query = query.lt('criado_em', `${proximoDia(dataAte)}T00:00:00`)
-    }
+    const filtroData = resolverFiltroData(modoData, dataEspecifica, dataDe, dataAte)
+    if (filtroData?.inicio) query = query.gte('criado_em', `${filtroData.inicio}T00:00:00`)
+    if (filtroData?.fim) query = query.lt('criado_em', `${proximoDia(filtroData.fim)}T00:00:00`)
 
     const { data, error } = await query
     setBuscandoPedido(false)
@@ -184,12 +179,10 @@ function BuscaPageConteudo() {
 
     if (termo) query = query.eq('ca', termo)
 
-    if (modoData === 'especifica' && dataEspecifica) {
-      query = query.eq('data_cotacao', dataEspecifica)
-    } else if (modoData === 'intervalo') {
-      if (dataDe) query = query.gte('data_cotacao', dataDe)
-      if (dataAte) query = query.lte('data_cotacao', dataAte)
-    }
+    // data_cotacao é `date` (sem hora) — comparação direta, inclusiva.
+    const filtroData = resolverFiltroData(modoData, dataEspecifica, dataDe, dataAte)
+    if (filtroData?.inicio) query = query.gte('data_cotacao', filtroData.inicio)
+    if (filtroData?.fim) query = query.lte('data_cotacao', filtroData.fim)
 
     const { data, error } = await query
     setBuscandoCa(false)

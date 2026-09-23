@@ -34,7 +34,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { RangePeriodo } from '@/lib/kanban/periodo'
-import { proximoDia, type ModoFiltroData } from '@/lib/kanban/filtro-data'
+import { proximoDia, resolverFiltroData, type ModoFiltroData } from '@/lib/kanban/filtro-data'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
 import { STATUS_LABELS } from '@/lib/kanban/status'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
@@ -546,18 +546,10 @@ export default function AnaliticoPorFuncionario({
     if (preferenciaCarregada.current) salvarMetricas(metricasAtivas)
   }, [metricasAtivas])
 
-  const usandoPeriodoPainel =
-    !(modoData === 'especifica' && dataEspecifica) && !(modoData === 'intervalo' && (dataDe || dataAte))
-  const inicioEfetivo = usandoPeriodoPainel
-    ? range.inicio
-    : modoData === 'especifica'
-      ? dataEspecifica
-      : dataDe || null
-  const fimEfetivo = usandoPeriodoPainel
-    ? range.fim
-    : modoData === 'especifica'
-      ? dataEspecifica
-      : dataAte || null
+  const filtroProprio = resolverFiltroData(modoData, dataEspecifica, dataDe, dataAte)
+  const usandoPeriodoPainel = filtroProprio === null
+  const inicioEfetivo = filtroProprio ? filtroProprio.inicio : range.inicio
+  const fimEfetivo = filtroProprio ? filtroProprio.fim : range.fim
 
   useEffect(() => {
     let ativo = true

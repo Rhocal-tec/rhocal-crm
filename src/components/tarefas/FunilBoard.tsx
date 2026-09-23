@@ -10,7 +10,7 @@ import { situacaoTerminal } from '@/lib/tarefas/situacao'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
 import { useConclusaoTarefa } from '@/lib/tarefas/useConclusaoTarefa'
 import { FiltroData } from '@/components/busca/FiltroData'
-import type { ModoFiltroData } from '@/lib/kanban/filtro-data'
+import { resolverFiltroData, type ModoFiltroData } from '@/lib/kanban/filtro-data'
 import { TarefaColuna } from './TarefaColuna'
 import { EncadearTarefaModal } from './EncadearTarefaModal'
 import { TarefaModal } from './TarefaModal'
@@ -277,12 +277,12 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
   // string 'YYYY-MM-DD' (sem passar por Date), mesmo cuidado de fuso horário
   // já documentado em classificarPrazo/formatarDataSomente.
   function dentroDoFiltroData(dataIso: string | null): boolean {
-    if (modoData === 'nenhum') return true
+    const filtro = resolverFiltroData(modoData, dataEspecifica, dataDe, dataAte)
+    if (!filtro) return true
     if (!dataIso) return false
     const data = dataIso.slice(0, 10)
-    if (modoData === 'especifica') return !dataEspecifica || data === dataEspecifica
-    if (dataDe && data < dataDe) return false
-    if (dataAte && data > dataAte) return false
+    if (filtro.inicio && data < filtro.inicio) return false
+    if (filtro.fim && data > filtro.fim) return false
     return true
   }
 

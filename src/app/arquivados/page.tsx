@@ -8,7 +8,7 @@ import { AppHeader } from '@/components/layout/AppHeader'
 import { FiltroData } from '@/components/busca/FiltroData'
 import { PedidoDetalheModal } from '@/components/kanban/PedidoDetalheModal'
 import { MOTIVO_ARQUIVAMENTO_LABELS } from '@/lib/kanban/status'
-import { proximoDia, type ModoFiltroData } from '@/lib/kanban/filtro-data'
+import { proximoDia, resolverFiltroData, type ModoFiltroData } from '@/lib/kanban/filtro-data'
 import type { ArquivoMotivo, PedidoStatus } from '@/types/database'
 
 interface PedidoArquivadoResumo {
@@ -79,14 +79,9 @@ export default function ArquivadosPage() {
       query = query.or(condicoes.join(','))
     }
 
-    if (modoData === 'especifica' && dataEspecifica) {
-      query = query
-        .gte('criado_em', `${dataEspecifica}T00:00:00`)
-        .lt('criado_em', `${proximoDia(dataEspecifica)}T00:00:00`)
-    } else if (modoData === 'intervalo') {
-      if (dataDe) query = query.gte('criado_em', `${dataDe}T00:00:00`)
-      if (dataAte) query = query.lt('criado_em', `${proximoDia(dataAte)}T00:00:00`)
-    }
+    const filtroData = resolverFiltroData(modoData, dataEspecifica, dataDe, dataAte)
+    if (filtroData?.inicio) query = query.gte('criado_em', `${filtroData.inicio}T00:00:00`)
+    if (filtroData?.fim) query = query.lt('criado_em', `${proximoDia(filtroData.fim)}T00:00:00`)
 
     const { data, error } = await query
     setCarregando(false)
