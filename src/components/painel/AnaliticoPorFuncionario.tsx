@@ -294,6 +294,7 @@ type MetricaKey =
   | 'aprovados'
   | 'arquivados'
   | 'perdidos'
+  | 'efetividade'
   | 'tarefas'
   | 'interacoes'
   | 'chamadas'
@@ -316,6 +317,27 @@ interface MetricaDef {
   secundario?: { valor: (l: AgregadoFuncionario) => number; formatar: (n: number) => string }
   quebra?: (l: AgregadoFuncionario) => QuebraItem[]
   detalhe: (l: AgregadoFuncionario) => React.ReactNode[]
+  // Métrica derivada (razão entre outras métricas, ex: Efetividade): a
+  // célula mostra `texto` em vez do número de `principal` (que aí passa a
+  // ser só o "tem dado?" — usado no destaque da célula/linha), a linha
+  // TOTAL usa `textoTotal` sobre os totais agregados (não soma nem média de
+  // porcentagens) e não há drill-down — os registros já estão nas colunas de
+  // origem.
+  derivada?: {
+    texto: (l: AgregadoFuncionario) => string
+    textoTotal: (linhas: AgregadoFuncionario[]) => string
+  }
+}
+
+// Efetividade = pedidos efetuados ÷ orçamentos (diretos + normais), em %.
+// Denominador 0 vira "—" (nem 0% nem 100%, que seriam enganosos).
+function formatarEfetividade(efetuados: number, orcamentos: number): string {
+  if (orcamentos === 0) return '—'
+  return `${Math.round((efetuados / orcamentos) * 100)}%`
+}
+
+function totalOrcamentos(l: AgregadoFuncionario): number {
+  return l.orcDiretos.total + l.orcNormais.total
 }
 
 // Quebra por status dentro de uma fatia de pedidos (ex: orçamentos normais
@@ -383,6 +405,21 @@ const METRICAS: MetricaDef[] = [
   metricaPedido('aprovados', 'Pedidos Aprovados', (l) => l.aprovados),
   metricaPedido('arquivados', 'Arquivados', (l) => l.arquivados),
   metricaPedido('perdidos', 'Perdidos', (l) => l.perdidos, { mostrarMotivo: true }),
+  {
+    key: 'efetividade',
+    label: 'Efetividade',
+    dataRef: 'Pedidos efetuados ÷ (Orç. Diretos + Orç. Normais) — pela data de criação do pedido',
+    principal: totalOrcamentos,
+    detalhe: () => [],
+    derivada: {
+      texto: (l) => formatarEfetividade(l.efetuados.total, totalOrcamentos(l)),
+      textoTotal: (linhas) =>
+        formatarEfetividade(
+          linhas.reduce((acc, l) => acc + l.efetuados.total, 0),
+          linhas.reduce((acc, l) => acc + totalOrcamentos(l), 0),
+        ),
+    },
+  },
   {
     key: 'tarefas',
     label: 'Tarefas',
@@ -485,15 +522,23 @@ const TODAS_METRICAS: MetricaKey[] = METRICAS.map((m) => m.key)
 
 // Seleção de pills lembrada por navegador — conveniência do gestor, não
 // estado crítico: qualquer falha de leitura/escrita cai no padrão (todas).
+// Guarda também quais métricas existiam quando a seleção foi salva: métrica
+// nova (ainda desconhecida pra aquela seleção) aparece ligada, em vez de
+// nascer escondida pra quem já tinha uma seleção salva.
 const STORAGE_KEY_METRICAS = 'rhocal:analitico-funcionario:metricas'
+
+// Formato antigo (só o array de ligadas) foi salvo antes da Efetividade existir.
+const METRICAS_ANTES_DA_EFETIVIDADE = TODAS_METRICAS.filter((k) => k !== 'efetividade')
 
 function lerMetricasSalvas(): Set<MetricaKey> | null {
   try {
     const bruto = window.localStorage.getItem(STORAGE_KEY_METRICAS)
     if (!bruto) return null
-    const lista = JSON.parse(bruto)
-    if (!Array.isArray(lista)) return null
-    return new Set(lista.filter((k): k is MetricaKey => TODAS_METRICAS.includes(k)))
+    const salvo = JSON.parse(bruto)
+    const ativas: unknown = Array.isArray(salvo) ? salvo : salvo?.ativas
+    const conhecidas: unknown = Array.isArray(salvo) ? METRICAS_ANTES_DA_EFETIVIDADE : salvo?.conhecidas
+    if (!Array.isArray(ativas) || !Array.isArray(conhecidas)) return null
+    return new Set(TODAS_METRICAS.filter((k) => ativas.includes(k) || !conhecidas.includes(k)))
   } catch {
     return null
   }
@@ -501,7 +546,10 @@ function lerMetricasSalvas(): Set<MetricaKey> | null {
 
 function salvarMetricas(selecao: Set<MetricaKey>) {
   try {
-    window.localStorage.setItem(STORAGE_KEY_METRICAS, JSON.stringify(Array.from(selecao)))
+    window.localStorage.setItem(
+      STORAGE_KEY_METRICAS,
+      JSON.stringify({ ativas: Array.from(selecao), conhecidas: TODAS_METRICAS }),
+    )
   } catch {
     // Sem storage disponível (aba anônima, bloqueio) — segue sem lembrar.
   }
@@ -1037,6 +1085,28 @@ export default function AnaliticoPorFuncionario({
                         // tema escuro). Zerada: sem fundo, número em
                         // text-muted. Aberta no drill-down: tom da marca, pra
                         // não se confundir com as ativas.
+                        if (m.derivada) {
+                          // Métrica derivada: mesmo visual de célula ativa
+                          // quando há dado no denominador, mas sem botão —
+                          // não tem drill-down próprio.
+                          return (
+                            <td key={m.key} className="border-l border-white/10 px-2 py-2 text-center">
+                              <div
+                                className={`w-full min-w-[5.5rem] rounded-md px-3 py-2.5 ${
+                                  valor > 0 ? 'bg-white/[0.16] ring-1 ring-inset ring-white/25' : ''
+                                }`}
+                              >
+                                <span
+                                  className={`block font-mono text-base ${
+                                    valor > 0 ? 'font-semibold text-primary' : 'text-muted'
+                                  }`}
+                                >
+                                  {m.derivada.texto(l)}
+                                </span>
+                              </div>
+                            </td>
+                          )
+                        }
                         return (
                           <td key={m.key} className="border-l border-white/10 px-2 py-2 text-center">
                             <button
@@ -1102,6 +1172,15 @@ export default function AnaliticoPorFuncionario({
                   Total
                 </td>
                 {metricasVisiveis.map((m) => {
+                  if (m.derivada) {
+                    return (
+                      <td key={m.key} className="border-l border-white/10 px-4 py-3.5 text-center">
+                        <span className="block font-mono text-lg font-bold text-primary">
+                          {m.derivada.textoTotal(linhasVisiveis)}
+                        </span>
+                      </td>
+                    )
+                  }
                   const total = linhasVisiveis.reduce((acc, l) => acc + m.principal(l), 0)
                   const totalSecundario = m.secundario
                     ? linhasVisiveis.reduce((acc, l) => acc + m.secundario!.valor(l), 0)
