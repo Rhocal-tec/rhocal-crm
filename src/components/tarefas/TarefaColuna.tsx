@@ -16,6 +16,7 @@ export function TarefaColuna({
   onCancelar,
   onReabrir,
   onExcluir,
+  onAbrirOportunidade,
 }: {
   bucket: PrazoBucket
   tarefas: Tarefa[]
@@ -26,6 +27,7 @@ export function TarefaColuna({
   onCancelar: (tarefa: Tarefa) => void
   onReabrir: (tarefa: Tarefa) => void
   onExcluir: (tarefa: Tarefa) => void
+  onAbrirOportunidade?: (oportunidadeId: string) => void
 }) {
   const stripeVar = PRAZO_STRIPE_VAR[bucket]
 
@@ -59,6 +61,7 @@ export function TarefaColuna({
             onCancelar={onCancelar}
             onReabrir={onReabrir}
             onExcluir={onExcluir}
+            onAbrirOportunidade={onAbrirOportunidade}
           />
         ))}
         {tarefas.length === 0 && (

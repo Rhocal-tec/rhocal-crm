@@ -6,7 +6,7 @@ export const TAREFA_TIPO_OPCOES = ['Ligação', 'WhatsApp', 'E-mail', 'Reunião'
 // Subconjunto de TAREFA_TIPO_OPCOES considerado "tentativa de contato" para o
 // contador da fase 33 — mesma lista de TIPO_INTERACAO_OPCOES, mas mantida
 // separada porque tarefas também tem tipos que não são contato (ex: "Outro").
-export const TAREFA_TIPOS_CONTATO: string[] = ['Ligação', 'WhatsApp', 'E-mail', 'Reunião']
+export const TAREFA_TIPOS_CONTATO: string[] = ['Ligação', 'WhatsApp', 'E-mail', 'Reunião', 'Visita']
 
 export const TAREFA_SITUACAO_OPCOES = ['Pendente', 'Em Execução', 'Realizada', 'Cancelada'] as const
 

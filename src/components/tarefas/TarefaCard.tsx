@@ -18,6 +18,7 @@ export function TarefaCard({
   onCancelar,
   onReabrir,
   onExcluir,
+  onAbrirOportunidade,
 }: {
   tarefa: Tarefa
   clienteLabel: string | null
@@ -28,6 +29,10 @@ export function TarefaCard({
   onCancelar: (tarefa: Tarefa) => void
   onReabrir: (tarefa: Tarefa) => void
   onExcluir: (tarefa: Tarefa) => void
+  // Abre o modal de detalhe da oportunidade vinculada — necessário porque
+  // oportunidade com tarefa aberta sai da coluna "Oportunidades" do
+  // FunilBoard, e o card da tarefa passa a ser o único caminho até ela.
+  onAbrirOportunidade?: (oportunidadeId: string) => void
 }) {
   const terminal = situacaoTerminal(tarefa.situacao)
   const badge = badgeSituacao(tarefa.situacao)
@@ -60,9 +65,19 @@ export function TarefaCard({
         )}
       </div>
 
-      {clienteLabel && (
-        <p className="mt-1 truncate text-xs text-primary/70">{clienteLabel}</p>
-      )}
+      {clienteLabel &&
+        (tarefa.oportunidade_id && onAbrirOportunidade ? (
+          <button
+            type="button"
+            onClick={() => onAbrirOportunidade(tarefa.oportunidade_id as string)}
+            title="Abrir oportunidade"
+            className="mt-1 block max-w-full truncate text-left text-xs text-primary/70 underline decoration-white/20 underline-offset-2 transition-colors hover:text-accent-primary hover:decoration-accent-primary"
+          >
+            {clienteLabel}
+          </button>
+        ) : (
+          <p className="mt-1 truncate text-xs text-primary/70">{clienteLabel}</p>
+        ))}
       {contatoDetalhes && (
         <p className="mt-0.5 truncate text-[11px] text-muted">{contatoDetalhes}</p>
       )}

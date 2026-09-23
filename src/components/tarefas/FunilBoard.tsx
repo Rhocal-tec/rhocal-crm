@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { PRAZO_COLUNAS, PRAZO_LABELS, classificarPrazo, type PrazoBucket } from '@/lib/tarefas/prazo'
 import { contatoDaTarefa } from '@/lib/tarefas/contato'
+import { situacaoTerminal } from '@/lib/tarefas/situacao'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
 import { useConclusaoTarefa } from '@/lib/tarefas/useConclusaoTarefa'
 import { FiltroData } from '@/components/busca/FiltroData'
@@ -97,7 +98,8 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     confirmarVirouOportunidade,
     confirmarAgendar,
     confirmarSemInteresse,
-    marcarRealizada,
+    confirmarSoRegistrarContato,
+    concluirAposEncadear,
   } = useConclusaoTarefa({
     supabase,
     userId: user?.id,
@@ -307,16 +309,47 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tarefasVisiveis, colunasVisiveis, buscaCliente, clienteLabelPorTarefa, modoData, dataEspecifica, dataDe, dataAte])
 
-  const oportunidadesFiltradas = useMemo(() => {
-    if (!colunasVisiveis.has('OPORTUNIDADES')) return []
+  // Oportunidade com tarefa ainda aberta (Pendente/Em Execução, qualquer
+  // prazo — Atrasadas, Hoje ou Futuras) já está representada no quadro pela
+  // própria tarefa, então sai da coluna "Oportunidades" pra não aparecer
+  // duas vezes esperando a mesma ação. Regra só de exibição, recalculada em
+  // tempo real: quando a tarefa é concluída/cancelada/excluída, a
+  // oportunidade volta sozinha. Usa `tarefas` (não `tarefasVisiveis`) pra não
+  // depender do toggle "Minha fila".
+  const oportunidadesComTarefaAberta = useMemo(
+    () =>
+      new Set(
+        tarefas
+          .filter((t) => t.oportunidade_id && !situacaoTerminal(t.situacao))
+          .map((t) => t.oportunidade_id as string),
+      ),
+    [tarefas],
+  )
+
+  const { oportunidadesFiltradas, ocultasComTarefa } = useMemo(() => {
+    if (!colunasVisiveis.has('OPORTUNIDADES')) return { oportunidadesFiltradas: [], ocultasComTarefa: 0 }
     const termo = buscaCliente.trim().toLowerCase()
-    return oportunidades.filter((oportunidade) => {
+    const correspondentes = oportunidades.filter((oportunidade) => {
       if (termo && !oportunidade.cliente_nome.toLowerCase().includes(termo)) return false
       if (!dentroDoFiltroData(oportunidade.criado_em)) return false
       return true
     })
+    const visiveis = correspondentes.filter((o) => !oportunidadesComTarefaAberta.has(o.id))
+    return {
+      oportunidadesFiltradas: visiveis,
+      ocultasComTarefa: correspondentes.length - visiveis.length,
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [oportunidades, colunasVisiveis, buscaCliente, modoData, dataEspecifica, dataDe, dataAte])
+  }, [
+    oportunidades,
+    oportunidadesComTarefaAberta,
+    colunasVisiveis,
+    buscaCliente,
+    modoData,
+    dataEspecifica,
+    dataDe,
+    dataAte,
+  ])
 
   async function alterarSituacao(tarefa: Tarefa, novaSituacao: string) {
     const atualizada = { ...tarefa, situacao: novaSituacao }
@@ -543,6 +576,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
             onCancelar={(t) => alterarSituacao(t, 'Cancelada')}
             onReabrir={(t) => alterarSituacao(t, 'Pendente')}
             onExcluir={excluirTarefa}
+            onAbrirOportunidade={setOportunidadeAbertaId}
           />
         ))}
 
@@ -551,6 +585,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
             titulo="Oportunidades"
             corVar="--accent-primary"
             oportunidades={oportunidadesFiltradas}
+            ocultasComTarefa={ocultasComTarefa}
             onAbrir={setOportunidadeAbertaId}
             nomesPorId={nomesPorId}
           />
@@ -561,7 +596,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         tarefaConcluida={tarefaEncadeando}
         onClose={fecharEncadear}
         onCriada={(nova) => setTarefas((atual) => (atual.some((t) => t.id === nova.id) ? atual : [...atual, nova]))}
-        onConcluirTarefaOriginal={marcarRealizada}
+        onConcluirTarefaOriginal={concluirAposEncadear}
       />
 
       {novaTarefaAberta && (
@@ -579,6 +614,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         onVirouOportunidade={confirmarVirouOportunidade}
         onAgendarNovoContato={confirmarAgendar}
         onSemInteresse={confirmarSemInteresse}
+        onSoRegistrarContato={confirmarSoRegistrarContato}
         salvando={salvandoConclusao}
         erro={erroConclusao}
       />

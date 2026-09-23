@@ -4,12 +4,20 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { contatoDaTarefa } from '@/lib/tarefas/contato'
 import { DadosContatoFields, DADOS_CONTATO_VAZIO, type DadosContato } from '@/components/tarefas/DadosContatoFields'
-import type { DadosNovaOportunidade } from '@/lib/tarefas/useConclusaoTarefa'
+import { TIPO_INTERACAO_OPCOES } from '@/lib/interacoes/opcoes'
+import type { CanalContato, DadosNovaOportunidade } from '@/lib/tarefas/useConclusaoTarefa'
 import type { Database } from '@/types/database'
 
 type Tarefa = Database['public']['Tables']['tarefas']['Row']
 
-type View = 'opcoes' | 'semInteresse' | 'oportunidade'
+type View = 'opcoes' | 'semInteresse' | 'oportunidade' | 'registrarContato'
+
+// Pré-seleciona o canal a partir do tipo planejado da tarefa, quando ele é
+// um dos canais da lista (tipos vindos do Omie, como códigos numéricos, ou
+// "Outro" ficam sem pré-seleção).
+function canalInicial(tipo: string | null): CanalContato | null {
+  return (TIPO_INTERACAO_OPCOES as readonly string[]).includes(tipo ?? '') ? (tipo as CanalContato) : null
+}
 
 // Ao concluir uma tarefa, em vez de só marcar "Realizada" sem rastro,
 // registra explicitamente o que aconteceu — fecha o loop entre tarefa
@@ -23,6 +31,10 @@ type View = 'opcoes' | 'semInteresse' | 'oportunidade'
 // só quando a tarefa ainda não tem oportunidade vinculada (jaTemOportunidade
 // continua sendo um atalho direto, sem formulário, já que nesse caso não há
 // nada novo a criar).
+//
+// "Como foi o contato?" (canal: Ligação/WhatsApp/E-mail/Reunião/Visita) fica
+// no topo e é obrigatório pras 4 conclusões — cada uma grava uma linha em
+// `interacoes` com esse canal (ver useConclusaoTarefa).
 export function ConcluirTarefaModal({
   tarefa,
   onClose,
@@ -30,15 +42,17 @@ export function ConcluirTarefaModal({
   onVirouOportunidade,
   onAgendarNovoContato,
   onSemInteresse,
+  onSoRegistrarContato,
   salvando,
   erro,
 }: {
   tarefa: Tarefa | null
   onClose: () => void
   onPrepararOportunidade: (tarefa: Tarefa) => Promise<DadosNovaOportunidade>
-  onVirouOportunidade: (tarefa: Tarefa, dados?: DadosNovaOportunidade) => void
-  onAgendarNovoContato: (tarefa: Tarefa) => void
-  onSemInteresse: (tarefa: Tarefa, motivo: string | null) => void
+  onVirouOportunidade: (tarefa: Tarefa, canal: CanalContato, dados?: DadosNovaOportunidade) => void
+  onAgendarNovoContato: (tarefa: Tarefa, canal: CanalContato) => void
+  onSemInteresse: (tarefa: Tarefa, canal: CanalContato, motivo: string | null) => void
+  onSoRegistrarContato: (tarefa: Tarefa, canal: CanalContato, observacao: string | null) => void
   salvando?: boolean
   erro?: string | null
 }) {
@@ -48,6 +62,8 @@ export function ConcluirTarefaModal({
   const [dadosOportunidade, setDadosOportunidade] = useState<DadosContato>(DADOS_CONTATO_VAZIO)
   const [necessidadeCliente, setNecessidadeCliente] = useState('')
   const [historicoConversa, setHistoricoConversa] = useState('')
+  const [canal, setCanal] = useState<CanalContato | null>(null)
+  const [observacaoRegistro, setObservacaoRegistro] = useState('')
 
   // Reseta só quando a tarefa em edição muda de fato (id diferente) — não a
   // cada patch de campo nela (ex: quando o hook atualiza tarefaConcluindo com
@@ -60,6 +76,8 @@ export function ConcluirTarefaModal({
       setDadosOportunidade(DADOS_CONTATO_VAZIO)
       setNecessidadeCliente('')
       setHistoricoConversa('')
+      setCanal(canalInicial(tarefa.tipo))
+      setObservacaoRegistro('')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tarefa?.id])
@@ -69,10 +87,12 @@ export function ConcluirTarefaModal({
   const jaTemOportunidade = tarefa.oportunidade_id !== null
   const contato = contatoDaTarefa(tarefa)
 
+  const semCanal = canal === null
+
   async function abrirFormularioOportunidade() {
-    if (!tarefa) return
+    if (!tarefa || !canal) return
     if (jaTemOportunidade) {
-      onVirouOportunidade(tarefa)
+      onVirouOportunidade(tarefa, canal)
       return
     }
 
@@ -86,8 +106,8 @@ export function ConcluirTarefaModal({
   }
 
   function confirmarCriarOportunidade() {
-    if (!tarefa) return
-    onVirouOportunidade(tarefa, { ...dadosOportunidade, necessidadeCliente, historicoConversa })
+    if (!tarefa || !canal) return
+    onVirouOportunidade(tarefa, canal, { ...dadosOportunidade, necessidadeCliente, historicoConversa })
   }
 
   const podeConfirmarOportunidade =
@@ -110,11 +130,35 @@ export function ConcluirTarefaModal({
         </div>
       )}
 
+      <div className="mb-4">
+        <p className="text-xs text-muted">Como foi o contato?</p>
+        <div role="radiogroup" aria-label="Como foi o contato?" className="mt-1.5 flex flex-wrap gap-1.5">
+          {TIPO_INTERACAO_OPCOES.map((opcao) => (
+            <button
+              key={opcao}
+              type="button"
+              role="radio"
+              aria-checked={canal === opcao}
+              disabled={salvando}
+              onClick={() => setCanal(opcao)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                canal === opcao
+                  ? 'bg-accent-primary text-white'
+                  : 'bg-white/5 text-muted hover:bg-white/10 hover:text-primary'
+              }`}
+            >
+              {opcao}
+            </button>
+          ))}
+        </div>
+        {semCanal && <p className="mt-1.5 text-[11px] text-muted/80">Selecione o canal para concluir.</p>}
+      </div>
+
       {view === 'opcoes' && (
         <div className="flex flex-col gap-2.5">
           <button
             type="button"
-            disabled={salvando || carregandoFormulario}
+            disabled={salvando || carregandoFormulario || semCanal}
             onClick={abrirFormularioOportunidade}
             className="flex flex-col items-start gap-0.5 rounded-md border border-accent-success/40 bg-accent-success/10 px-4 py-3 text-left transition-colors hover:bg-accent-success/20 disabled:opacity-50"
           >
@@ -130,8 +174,8 @@ export function ConcluirTarefaModal({
 
           <button
             type="button"
-            disabled={salvando || carregandoFormulario}
-            onClick={() => onAgendarNovoContato(tarefa)}
+            disabled={salvando || carregandoFormulario || semCanal}
+            onClick={() => canal && onAgendarNovoContato(tarefa, canal)}
             className="flex flex-col items-start gap-0.5 rounded-md border border-accent-compras/40 bg-accent-compras/10 px-4 py-3 text-left transition-colors hover:bg-accent-compras/20 disabled:opacity-50"
           >
             <span className="text-sm font-medium text-accent-compras">Agendar novo contato</span>
@@ -140,7 +184,19 @@ export function ConcluirTarefaModal({
 
           <button
             type="button"
-            disabled={salvando || carregandoFormulario}
+            disabled={salvando || carregandoFormulario || semCanal}
+            onClick={() => setView('registrarContato')}
+            className="flex flex-col items-start gap-0.5 rounded-md border border-accent-alert/40 bg-accent-alert/10 px-4 py-3 text-left transition-colors hover:bg-accent-alert/20 disabled:opacity-50"
+          >
+            <span className="text-sm font-medium text-accent-alert">Só registrar contato</span>
+            <span className="text-xs text-muted">
+              Ex: enviou um e-mail e ainda não teve retorno. Conclui a tarefa sem criar nada novo.
+            </span>
+          </button>
+
+          <button
+            type="button"
+            disabled={salvando || carregandoFormulario || semCanal}
             onClick={() => setView('semInteresse')}
             className="flex flex-col items-start gap-0.5 rounded-md border border-white/15 px-4 py-3 text-left transition-colors hover:bg-white/5 disabled:opacity-50"
           >
@@ -177,11 +233,46 @@ export function ConcluirTarefaModal({
             </button>
             <button
               type="button"
-              onClick={() => onSemInteresse(tarefa, motivo.trim() || null)}
-              disabled={salvando}
+              onClick={() => canal && onSemInteresse(tarefa, canal, motivo.trim() || null)}
+              disabled={salvando || semCanal}
               className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-dark disabled:opacity-50"
             >
               {salvando ? 'Salvando…' : 'Confirmar'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {view === 'registrarContato' && (
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className="block text-sm font-medium text-primary/80">Observação (opcional)</label>
+            <input
+              type="text"
+              value={observacaoRegistro}
+              onChange={(e) => setObservacaoRegistro(e.target.value)}
+              className="input-field mt-1 w-full rounded-md px-3 py-2 text-sm"
+              placeholder="Ex: Enviado catálogo de luvas por e-mail"
+              disabled={salvando}
+              autoFocus
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setView('opcoes')}
+              disabled={salvando}
+              className="rounded-md border border-white/15 px-4 py-2 text-sm text-primary/80 hover:bg-white/5"
+            >
+              Voltar
+            </button>
+            <button
+              type="button"
+              onClick={() => canal && onSoRegistrarContato(tarefa, canal, observacaoRegistro.trim() || null)}
+              disabled={salvando || semCanal}
+              className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-dark disabled:opacity-50"
+            >
+              {salvando ? 'Salvando…' : 'Registrar e concluir'}
             </button>
           </div>
         </div>
@@ -232,7 +323,7 @@ export function ConcluirTarefaModal({
             <button
               type="button"
               onClick={confirmarCriarOportunidade}
-              disabled={salvando || !podeConfirmarOportunidade}
+              disabled={salvando || semCanal || !podeConfirmarOportunidade}
               className="rounded-md bg-accent-success px-4 py-2 text-sm font-medium text-white transition-colors hover:brightness-110 disabled:opacity-50"
             >
               {salvando ? 'Criando…' : 'Criar Oportunidade'}

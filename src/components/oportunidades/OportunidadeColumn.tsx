@@ -18,12 +18,16 @@ export function OportunidadeColumn({
   oportunidades,
   onAbrir,
   nomesPorId,
+  ocultasComTarefa = 0,
 }: {
   titulo: string
   corVar: string
   oportunidades: Oportunidade[]
   onAbrir: (id: string) => void
   nomesPorId: Record<string, string>
+  // Quantas oportunidades ficaram fora da coluna por já terem tarefa aberta
+  // vinculada (ver oportunidadesComTarefaAberta no FunilBoard).
+  ocultasComTarefa?: number
 }) {
   // Fase 37.2: soma do valor_estimado da coluna, ao lado do contador — omite
   // quando dá zero (cobre tanto "nenhuma tem valor" quanto "soma é zero").
@@ -47,6 +51,11 @@ export function OportunidadeColumn({
           {valorTotalColuna > 0 && ` · ${formatarMoeda(valorTotalColuna)}`}
         </span>
       </div>
+      {ocultasComTarefa > 0 && (
+        <p className="bg-surface-alt px-3 pb-2 text-[11px] text-muted">
+          +{ocultasComTarefa} com tarefa agendada
+        </p>
+      )}
       <div className="flex min-h-[200px] flex-1 flex-col gap-2 p-2">
         {oportunidades.map((oportunidade) => (
           <OportunidadeCard

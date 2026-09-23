@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { createClient } from '@/lib/supabase/client'
 import { sincronizarTarefaComOmie } from '@/lib/tarefas/sincronizar'
+import { RESULTADO_INTERACAO_OPCOES, TIPO_INTERACAO_OPCOES } from '@/lib/interacoes/opcoes'
 import { DADOS_CONTATO_VAZIO, type DadosContato } from '@/components/tarefas/DadosContatoFields'
 import type { Database } from '@/types/database'
 
@@ -19,8 +20,18 @@ export interface DadosNovaOportunidade extends DadosContato {
   historicoConversa: string
 }
 
-// Lógica compartilhada do fluxo de conclusão de tarefa com 3 opções (virou
-// oportunidade / agendar novo contato / sem interesse) — usada tanto pelo
+// Canal do contato escolhido em "Como foi o contato?" no topo do
+// ConcluirTarefaModal — mesma lista do log de interações (fase 32.1).
+export type CanalContato = (typeof TIPO_INTERACAO_OPCOES)[number]
+
+// Resultado gravado em `interacoes` pra cada forma de concluir a tarefa.
+// "Só registrar contato" (ex: mandou um e-mail e ainda não teve retorno) não
+// tem um resultado específico na lista fixa — cai em "Outro".
+type ResultadoConclusao = (typeof RESULTADO_INTERACAO_OPCOES)[number]
+
+// Lógica compartilhada do fluxo de conclusão de tarefa com 4 opções (virou
+// oportunidade / agendar novo contato / sem interesse / só registrar
+// contato) — usada tanto pelo
 // kanban único /tarefas (FunilBoard) quanto pela aba Tarefas embutida em
 // oportunidade/pedido (TarefasTab), pra não duplicar os 3 branches nos dois
 // lugares. `onAbrirOportunidade` é opcional: só faz sentido em contextos que
@@ -50,6 +61,10 @@ export function useConclusaoTarefa({
   const [tarefaEncadeando, setTarefaEncadeando] = useState<Tarefa | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+  // Canal escolhido no ConcluirTarefaModal quando a opção é "Agendar novo
+  // contato" — guardado até a tarefa original ser de fato concluída pelo
+  // EncadearTarefaModal (ver concluirAposEncadear).
+  const [canalAgendamento, setCanalAgendamento] = useState<CanalContato | null>(null)
 
   function abrirConcluir(tarefa: Tarefa) {
     setErro(null)
@@ -70,6 +85,36 @@ export function useConclusaoTarefa({
     }
 
     return { data, error }
+  }
+
+  // Tarefa solta (sem oportunidade nem pedido) não tem onde pendurar uma
+  // linha em `interacoes` — o painel escopa interações por empresa através da
+  // oportunidade/pedido, então ela seria descartada. Nesse caso o canal fica
+  // registrado em `tarefas.tipo`, junto da conclusão.
+  function extraCanal(tarefa: Tarefa, canal: CanalContato): Partial<Tarefa> {
+    return tarefa.oportunidade_id || tarefa.pedido_id ? {} : { tipo: canal }
+  }
+
+  // Grava o contato que acabou de acontecer no log de interações (fase
+  // 32.1), alimentando o Histórico de contato, o Painel e a Inteligência
+  // Comercial. Best-effort: a tarefa já foi concluída nesse ponto, então uma
+  // falha aqui só vai pro console, sem travar o fluxo.
+  async function registrarInteracao(
+    vinculo: { oportunidadeId: string | null; pedidoId: string | null },
+    canal: CanalContato,
+    resultado: ResultadoConclusao,
+    observacao: string | null,
+  ) {
+    if (!userId || (!vinculo.oportunidadeId && !vinculo.pedidoId)) return
+    const { error } = await supabase.from('interacoes').insert({
+      oportunidade_id: vinculo.oportunidadeId,
+      pedido_id: vinculo.pedidoId,
+      tipo: canal,
+      resultado,
+      observacao: observacao?.trim() || null,
+      registrado_por: userId,
+    })
+    if (error) console.error('Erro ao registrar interação da conclusão:', error.message)
   }
 
   // Monta o preenchimento inicial do formulário de "Criar Oportunidade"
@@ -113,17 +158,29 @@ export function useConclusaoTarefa({
     }
   }
 
-  async function confirmarVirouOportunidade(tarefa: Tarefa, dados?: DadosNovaOportunidade) {
+  async function confirmarVirouOportunidade(
+    tarefa: Tarefa,
+    canal: CanalContato,
+    dados?: DadosNovaOportunidade,
+  ) {
     if (tarefa.oportunidade_id) {
       setErro(null)
       setSalvando(true)
       const { error } = await marcarRealizada(tarefa)
-      setSalvando(false)
 
       if (error) {
+        setSalvando(false)
         setErro('Não foi possível concluir a tarefa. Tente novamente.')
         return
       }
+
+      await registrarInteracao(
+        { oportunidadeId: tarefa.oportunidade_id, pedidoId: tarefa.pedido_id },
+        canal,
+        'Atendeu',
+        tarefa.historico_conversa,
+      )
+      setSalvando(false)
 
       setTarefaConcluindo(null)
       onAbrirOportunidade?.(tarefa.oportunidade_id)
@@ -206,9 +263,8 @@ export function useConclusaoTarefa({
       historico_conversa: historicoConversa,
     })
 
-    setSalvando(false)
-
     if (erroVinculo) {
+      setSalvando(false)
       // A oportunidade já foi criada nesse ponto — só o vínculo/conclusão da
       // tarefa falhou. Mantém o modal aberto (não fecha como se tivesse dado
       // tudo certo) pra não perder o vínculo em silêncio. Atualiza a tarefa
@@ -221,6 +277,14 @@ export function useConclusaoTarefa({
       return
     }
 
+    await registrarInteracao(
+      { oportunidadeId: novaOportunidade.id, pedidoId: tarefa.pedido_id },
+      canal,
+      'Atendeu',
+      historicoConversa,
+    )
+    setSalvando(false)
+
     setTarefaConcluindo(null)
     onOportunidadeCriada?.()
   }
@@ -231,14 +295,72 @@ export function useConclusaoTarefa({
   // `marcarRealizada`, exposto abaixo), pra nunca deixar a original presa
   // como "concluída" sem nenhuma tarefa nova em seu lugar caso o usuário
   // cancele o formulário de agendamento ou o insert falhe.
-  function confirmarAgendar(tarefa: Tarefa) {
+  function confirmarAgendar(tarefa: Tarefa, canal: CanalContato) {
+    setCanalAgendamento(canal)
     setTarefaConcluindo(null)
     setTarefaEncadeando(tarefa)
   }
 
-  async function confirmarSemInteresse(tarefa: Tarefa, motivo: string | null) {
+  // Chamado pelo EncadearTarefaModal depois (e só depois) de a próxima
+  // tarefa ser criada — conclui a original e registra o contato com o canal
+  // guardado em confirmarAgendar.
+  async function concluirAposEncadear(tarefa: Tarefa) {
+    const canal = canalAgendamento
+    const resultado = await marcarRealizada(tarefa, canal ? extraCanal(tarefa, canal) : undefined)
+    if (!resultado.error && canal) {
+      await registrarInteracao(
+        { oportunidadeId: tarefa.oportunidade_id, pedidoId: tarefa.pedido_id },
+        canal,
+        'Agendou retorno',
+        tarefa.historico_conversa,
+      )
+    }
+    return resultado
+  }
+
+  async function confirmarSemInteresse(tarefa: Tarefa, canal: CanalContato, motivo: string | null) {
+    setErro(null)
     setSalvando(true)
-    await marcarRealizada(tarefa, { motivo_conclusao: motivo })
+    const { error } = await marcarRealizada(tarefa, { motivo_conclusao: motivo, ...extraCanal(tarefa, canal) })
+    if (error) {
+      setSalvando(false)
+      setErro('Não foi possível concluir a tarefa. Tente novamente.')
+      return
+    }
+    await registrarInteracao(
+      { oportunidadeId: tarefa.oportunidade_id, pedidoId: tarefa.pedido_id },
+      canal,
+      'Recusou',
+      motivo,
+    )
+    setSalvando(false)
+    setTarefaConcluindo(null)
+  }
+
+  // "Só registrar contato": o contato aconteceu (ex: mandou um e-mail), mas
+  // não virou oportunidade, não tem próximo passo agendado nem foi recusado.
+  // Conclui a tarefa sem criar nada novo — a observação fica também em
+  // motivo_conclusao, pra tarefa solta (sem interação gravada) não perder o
+  // registro. Se a tarefa era de uma oportunidade, ela volta a aparecer na
+  // coluna "Oportunidades" do FunilBoard, aguardando o próximo passo.
+  async function confirmarSoRegistrarContato(tarefa: Tarefa, canal: CanalContato, observacao: string | null) {
+    setErro(null)
+    setSalvando(true)
+    const { error } = await marcarRealizada(tarefa, {
+      motivo_conclusao: observacao,
+      ...extraCanal(tarefa, canal),
+    })
+    if (error) {
+      setSalvando(false)
+      setErro('Não foi possível concluir a tarefa. Tente novamente.')
+      return
+    }
+    await registrarInteracao(
+      { oportunidadeId: tarefa.oportunidade_id, pedidoId: tarefa.pedido_id },
+      canal,
+      'Outro',
+      observacao,
+    )
     setSalvando(false)
     setTarefaConcluindo(null)
   }
@@ -250,13 +372,17 @@ export function useConclusaoTarefa({
     erro,
     abrirConcluir,
     fecharConcluir: () => setTarefaConcluindo(null),
-    fecharEncadear: () => setTarefaEncadeando(null),
+    fecharEncadear: () => {
+      setCanalAgendamento(null)
+      setTarefaEncadeando(null)
+    },
     prepararDadosOportunidade,
     confirmarVirouOportunidade,
     confirmarAgendar,
     confirmarSemInteresse,
+    confirmarSoRegistrarContato,
     // Exposto pra EncadearTarefaModal chamar depois (e só depois) de criar a
     // próxima tarefa com sucesso — ver comentário em confirmarAgendar.
-    marcarRealizada,
+    concluirAposEncadear,
   }
 }
