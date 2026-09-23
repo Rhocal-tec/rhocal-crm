@@ -22,7 +22,12 @@ import { ehStatusTerminal } from '@/lib/kanban/status-terminais'
 import { estaParado } from '@/lib/kanban/dias-parado'
 import { formatarMoeda } from '@/lib/kanban/formatacao'
 import { proximoDia } from '@/lib/kanban/filtro-data'
-import { calcularRangePeriodo, type PeriodoPreset, type RangePeriodo } from '@/lib/kanban/periodo'
+import {
+  calcularRangePeriodo,
+  PERIODO_PRESET_LABELS,
+  type PeriodoPreset,
+  type RangePeriodo,
+} from '@/lib/kanban/periodo'
 import {
   OPORTUNIDADE_FUNIL_ORDEM,
   OPORTUNIDADE_STATUS_LABELS,
@@ -101,6 +106,16 @@ export default function PainelPage() {
   function aplicarPersonalizado() {
     setRange({ inicio: personalizadoDe || null, fim: personalizadoAte || null })
   }
+
+  // Texto do período ativo, repassado pro Analítico por funcionário mostrar
+  // "Usando período do Painel: …" quando não tem filtro de data próprio.
+  // No personalizado, descreve o range de fato aplicado (datas 'YYYY-MM-DD'
+  // formatadas sem passar por Date, pra não sofrer com fuso).
+  const formatarDiaRange = (data: string | null) => (data ? data.split('-').reverse().join('/') : '…')
+  const periodoLabel =
+    preset === 'personalizado'
+      ? `${PERIODO_PRESET_LABELS.personalizado} (${formatarDiaRange(range.inicio)} a ${formatarDiaRange(range.fim)})`
+      : PERIODO_PRESET_LABELS[preset]
 
   useEffect(() => {
     if (!ehGestor || !empresaAtiva) return
@@ -666,7 +681,7 @@ export default function PainelPage() {
               Analítico por funcionário
             </h2>
             <div className="mt-4">
-              <AnaliticoPorFuncionario range={range} empresaId={empresaAtiva.id} />
+              <AnaliticoPorFuncionario range={range} periodoLabel={periodoLabel} empresaId={empresaAtiva.id} />
             </div>
           </>
         )}

@@ -3,6 +3,13 @@
 // filtro-data.ts) para não sofrer off-by-one por causa do fuso local.
 export type PeriodoPreset = 'mes_atual' | '30d' | '90d' | 'personalizado'
 
+export const PERIODO_PRESET_LABELS: Record<PeriodoPreset, string> = {
+  mes_atual: 'Mês atual',
+  '30d': 'Últimos 30 dias',
+  '90d': 'Últimos 90 dias',
+  personalizado: 'Personalizado',
+}
+
 export interface RangePeriodo {
   inicio: string | null
   fim: string | null

@@ -1,13 +1,10 @@
 'use client'
 
-import type { PeriodoPreset } from '@/lib/kanban/periodo'
+import { PERIODO_PRESET_LABELS, type PeriodoPreset } from '@/lib/kanban/periodo'
 
-const OPCOES: { valor: PeriodoPreset; label: string }[] = [
-  { valor: 'mes_atual', label: 'Mês atual' },
-  { valor: '30d', label: 'Últimos 30 dias' },
-  { valor: '90d', label: 'Últimos 90 dias' },
-  { valor: 'personalizado', label: 'Personalizado' },
-]
+const OPCOES: { valor: PeriodoPreset; label: string }[] = (
+  ['mes_atual', '30d', '90d', 'personalizado'] as const
+).map((valor) => ({ valor, label: PERIODO_PRESET_LABELS[valor] }))
 
 export function FiltroPeriodo({
   preset,
