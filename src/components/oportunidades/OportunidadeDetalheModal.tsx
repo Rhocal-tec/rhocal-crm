@@ -54,27 +54,32 @@ export function OportunidadeDetalheModal({
   // oportunidade — nunca sobrescreve o que já está salvo nela.
   const [tarefaOrigem, setTarefaOrigem] = useState<Tarefa | null>(null)
 
-  // Nome de quem criou a oportunidade (criado_por) — mesmo dado exibido como
-  // "Contato feito por" no card do FunilBoard.
-  const [nomeCriador, setNomeCriador] = useState<string | null>(null)
+  // Nomes de quem criou a oportunidade (criado_por — mesmo dado exibido como
+  // "Contato feito por" no card do FunilBoard) e do responsável pela tarefa
+  // de origem, quando a oportunidade nasceu da conclusão de uma tarefa.
+  // Os dois podem diferir: criado_por é quem clicou em "Criar Oportunidade".
+  const [nomesPorId, setNomesPorId] = useState<Record<string, string>>({})
   const criadoPor = oportunidade?.criado_por ?? null
+  const responsavelOrigem = tarefaOrigem?.responsavel ?? null
+  const nomeCriador = criadoPor ? nomesPorId[criadoPor] ?? null : null
+  const nomeResponsavelOrigem = responsavelOrigem ? nomesPorId[responsavelOrigem] ?? null : null
 
   useEffect(() => {
-    setNomeCriador(null)
-    if (!criadoPor) return
+    setNomesPorId({})
+    const ids = Array.from(new Set([criadoPor, responsavelOrigem].filter((id): id is string => id !== null)))
+    if (ids.length === 0) return
     let ativo = true
     supabase
       .from('profiles')
-      .select('nome')
-      .eq('id', criadoPor)
-      .single()
+      .select('id, nome')
+      .in('id', ids)
       .then(({ data }) => {
-        if (ativo) setNomeCriador(data?.nome ?? null)
+        if (ativo && data) setNomesPorId(Object.fromEntries(data.map((p) => [p.id, p.nome])))
       })
     return () => {
       ativo = false
     }
-  }, [supabase, criadoPor])
+  }, [supabase, criadoPor, responsavelOrigem])
 
   // Fase 38: estado local dos campos editáveis inline (mesmo padrão de
   // input controlado + salvar no blur já usado no modal de Pedido).
@@ -264,6 +269,16 @@ export function OportunidadeDetalheModal({
                   Contato feito por <span className="font-medium text-primary">{nomeCriador}</span> em{' '}
                   {/* criado_em é timestamptz — data no fuso local, não o dia UTC. */}
                   {new Date(oportunidade.criado_em).toLocaleDateString('pt-BR')}
+                </p>
+              )}
+              {tarefaOrigem && (
+                <p className="mt-1 text-sm text-muted">
+                  Responsável pela tarefa de origem:{' '}
+                  {nomeResponsavelOrigem ? (
+                    <span className="font-medium text-primary">{nomeResponsavelOrigem}</span>
+                  ) : (
+                    'sem responsável definido'
+                  )}
                 </p>
               )}
 
