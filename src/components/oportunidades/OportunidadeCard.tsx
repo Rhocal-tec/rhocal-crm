@@ -89,7 +89,7 @@ export function OportunidadeCard({
       )}
       {nomeResponsavel && (
         <p className="mt-1 truncate text-[11px] text-muted/80">
-          Responsável: {nomeResponsavel}
+          Contato feito por: {nomeResponsavel}
         </p>
       )}
       {nomeUltimoResponsavel && (
