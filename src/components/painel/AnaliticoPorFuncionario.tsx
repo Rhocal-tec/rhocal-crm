@@ -1007,15 +1007,15 @@ export default function AnaliticoPorFuncionario({
 
       {!carregando && !erro && metricasVisiveis.length > 0 && linhasVisiveis.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-white/10">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-surface-alt text-xs uppercase tracking-wide text-muted">
+          <table className="w-full text-left text-base">
+            <thead className="border-b-2 border-white/15 bg-surface-alt text-sm uppercase tracking-wide text-primary/80">
               <tr>
-                <th className="sticky left-0 z-10 bg-surface-alt px-3 py-2 font-medium">Funcionário</th>
+                <th className="sticky left-0 z-10 bg-surface-alt px-4 py-3 font-semibold">Funcionário</th>
                 {metricasVisiveis.map((m) => (
                   <th
                     key={m.key}
                     title={m.dataRef}
-                    className="whitespace-nowrap border-l border-white/10 px-2 py-2 text-center font-medium"
+                    className="whitespace-nowrap border-l border-white/10 px-4 py-3 text-center font-semibold"
                   >
                     {m.label}
                   </th>
@@ -1026,14 +1026,27 @@ export default function AnaliticoPorFuncionario({
               {linhasVisiveis.map((l) => {
                 const comAtividade = metricasVisiveis.some((m) => m.principal(l) > 0)
                 const detalheAberto = metricaAberta && aberto?.funcionarioId === l.id ? metricaAberta : null
+                // "Não atribuído" ganha um tom âmbar discreto (accent-alert) —
+                // costuma indicar dado sem responsável definido. A célula fixa
+                // do nome precisa de fundo opaco (bg-surface) por causa do
+                // scroll horizontal, então lá o aviso vai numa borda à esquerda.
+                const semAtribuicao = l.id === SEM_ATRIBUICAO_ID
                 return (
                   <Fragment key={l.id}>
                     <tr
-                      className={`border-t border-white/5 transition-colors ${
-                        comAtividade ? 'bg-white/[0.04]' : 'opacity-50'
-                      }`}
+                      className={`border-t border-white/10 transition-colors ${
+                        semAtribuicao
+                          ? 'bg-[color:color-mix(in_srgb,var(--accent-alert)_8%,transparent)]'
+                          : comAtividade
+                            ? 'bg-white/[0.03]'
+                            : ''
+                      } ${comAtividade ? '' : 'opacity-40'}`}
                     >
-                      <td className="sticky left-0 z-10 whitespace-nowrap bg-surface px-3 py-2 font-medium text-primary">
+                      <td
+                        className={`sticky left-0 z-10 whitespace-nowrap bg-surface px-4 py-3.5 font-semibold ${
+                          semAtribuicao ? 'border-l-4 border-accent-alert text-accent-alert' : 'text-primary'
+                        }`}
+                      >
                         {l.nome}
                         {!l.ativo && <span className="ml-1.5 font-normal text-muted">(inativo)</span>}
                       </td>
@@ -1041,19 +1054,27 @@ export default function AnaliticoPorFuncionario({
                         const valor = m.principal(l)
                         const selecionada = detalheAberto?.key === m.key
                         return (
-                          <td key={m.key} className="border-l border-white/5 p-1 text-center">
+                          <td key={m.key} className="border-l border-white/10 px-2 py-2 text-center">
                             <button
                               type="button"
                               onClick={() => alternarCelula(l.id, m.key)}
                               aria-expanded={selecionada}
                               aria-label={`${m.label} de ${l.nome}: ${valor}. Ver registros`}
-                              className={`w-full rounded-md px-2 py-1.5 transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary ${
-                                selecionada ? 'bg-accent-primary/15 ring-1 ring-accent-primary/50' : ''
-                              } ${valor === 0 ? 'opacity-40' : ''}`}
+                              className={`w-full min-w-[5.5rem] rounded-md px-3 py-2.5 transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary ${
+                                selecionada
+                                  ? 'bg-[color:color-mix(in_srgb,var(--accent-primary)_20%,transparent)] ring-2 ring-accent-primary'
+                                  : valor > 0
+                                    ? 'bg-white/[0.07]'
+                                    : ''
+                              } ${valor === 0 ? 'opacity-30' : ''}`}
                             >
-                              <span className="block font-mono text-primary">{valor}</span>
+                              <span
+                                className={`block font-mono text-base text-primary ${valor > 0 ? 'font-semibold' : ''}`}
+                              >
+                                {valor}
+                              </span>
                               {m.secundario && valor > 0 && (
-                                <span className="block whitespace-nowrap font-mono text-[11px] text-muted">
+                                <span className="mt-0.5 block whitespace-nowrap font-mono text-xs text-muted">
                                   {m.secundario.formatar(m.secundario.valor(l))}
                                 </span>
                               )}
@@ -1080,9 +1101,9 @@ export default function AnaliticoPorFuncionario({
                 )
               })}
             </tbody>
-            <tfoot className="border-t border-white/15 bg-surface-alt text-xs">
+            <tfoot className="border-t-2 border-accent-primary bg-surface-alt text-sm">
               <tr>
-                <td className="sticky left-0 z-10 bg-surface-alt px-3 py-2 font-semibold uppercase tracking-wide text-muted">
+                <td className="sticky left-0 z-10 bg-surface-alt px-4 py-3.5 font-bold uppercase tracking-wide text-primary">
                   Total
                 </td>
                 {metricasVisiveis.map((m) => {
@@ -1091,10 +1112,10 @@ export default function AnaliticoPorFuncionario({
                     ? linhasVisiveis.reduce((acc, l) => acc + m.secundario!.valor(l), 0)
                     : 0
                   return (
-                    <td key={m.key} className="border-l border-white/10 px-2 py-2 text-center">
-                      <span className="block font-mono text-sm font-semibold text-primary">{total}</span>
+                    <td key={m.key} className="border-l border-white/10 px-4 py-3.5 text-center">
+                      <span className="block font-mono text-lg font-bold text-primary">{total}</span>
                       {m.secundario && total > 0 && (
-                        <span className="block whitespace-nowrap font-mono text-[11px] text-muted">
+                        <span className="mt-0.5 block whitespace-nowrap font-mono text-xs font-semibold text-primary/70">
                           {m.secundario.formatar(totalSecundario)}
                         </span>
                       )}
