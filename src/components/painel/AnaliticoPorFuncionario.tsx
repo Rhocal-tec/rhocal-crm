@@ -1118,7 +1118,9 @@ export default function AnaliticoPorFuncionario({
                     <td key={m.key} className="border-l border-white/10 px-4 py-3.5 text-center">
                       <span className="block font-mono text-lg font-bold text-primary">{total}</span>
                       {m.secundario && total > 0 && (
-                        <span className="mt-0.5 block whitespace-nowrap font-mono text-xs font-semibold text-primary/70">
+                        // text-white/70 em vez de text-primary/70: cor do
+                        // tema em var() com /opacidade não gera CSS.
+                        <span className="mt-0.5 block whitespace-nowrap font-mono text-xs font-semibold text-white/70">
                           {m.secundario.formatar(totalSecundario)}
                         </span>
                       )}
