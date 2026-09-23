@@ -303,7 +303,6 @@ type MetricaKey =
 interface QuebraItem {
   label: string
   valor: string | number
-  cor?: string
 }
 
 interface MetricaDef {
@@ -353,12 +352,12 @@ function quebraPorStatus(lista: PedidoLinha[]): QuebraItem[] {
 
 function linhasPedido(lista: PedidoLinha[], { mostrarMotivo = false } = {}): React.ReactNode[] {
   return lista.map((p) => (
-    <div key={p.id} className="text-xs text-primary/80">
+    <div key={p.id} className="text-xs text-white/80">
       <span className="font-mono">#{p.numero}</span> — {p.clienteNome} · {statusPedidoLabel(p.status)}
-      {p.orcamentoDireto && <span className="text-accent-compras"> · DIRETO</span>} ·{' '}
+      {p.orcamentoDireto && <span className="font-semibold text-white"> · DIRETO</span>} ·{' '}
       <span className="font-mono">{formatarMoeda(p.valor)}</span> · {formatarData(p.criadoEm)}
       {mostrarMotivo && p.motivoPerda && (
-        <span className="block text-muted/80">Motivo: {p.motivoPerda}</span>
+        <span className="block text-white/60">Motivo: {p.motivoPerda}</span>
       )}
     </div>
   ))
@@ -396,7 +395,7 @@ const METRICAS: MetricaDef[] = [
     secundario: { valor: (l) => l.entregas.valorTotal, formatar: formatarMoeda },
     detalhe: (l) =>
       l.entregas.lista.map((e) => (
-        <div key={e.id} className="text-xs text-primary/80">
+        <div key={e.id} className="text-xs text-white/80">
           <span className="font-mono">#{e.numero}</span> — {e.clienteNome} ·{' '}
           <span className="font-mono">{formatarMoeda(e.valor)}</span> · entregue em {formatarData(e.entregueEm)}
         </div>
@@ -434,7 +433,7 @@ const METRICAS: MetricaDef[] = [
     ],
     detalhe: (l) =>
       l.tarefas.lista.map((t) => (
-        <div key={t.id} className="text-xs text-primary/80">
+        <div key={t.id} className="text-xs text-white/80">
           {t.descricao || '(sem descrição)'}
           {t.tipo && ` · ${t.tipo}`} · {t.situacao}
           {t.refLabel && ` · ${t.refLabel}`} · {formatarData(t.dataPrevista ?? t.criadoEm)}
@@ -457,10 +456,10 @@ const METRICAS: MetricaDef[] = [
     },
     detalhe: (l) =>
       l.interacoes.lista.map((i) => (
-        <div key={i.id} className="text-xs text-primary/80">
+        <div key={i.id} className="text-xs text-white/80">
           {i.tipo} · {i.resultado}
           {i.refLabel && ` · ${i.refLabel}`} · {formatarData(i.criadoEm)}
-          {i.observacao && <span className="block text-muted/80">&ldquo;{i.observacao}&rdquo;</span>}
+          {i.observacao && <span className="block text-white/60">&ldquo;{i.observacao}&rdquo;</span>}
         </div>
       )),
   },
@@ -471,20 +470,20 @@ const METRICAS: MetricaDef[] = [
     principal: (l) => l.chamadas.total,
     secundario: { valor: (l) => l.chamadas.duracaoTotalSegundos, formatar: formatarDuracao },
     quebra: (l) => [
-      { label: 'Atendidas', valor: l.chamadas.atendidas, cor: '#2FAE66' },
-      { label: 'Não atendidas', valor: l.chamadas.naoAtendidas, cor: '#F4B400' },
-      { label: 'Em andamento', valor: l.chamadas.emAndamento, cor: '#3B7DD8' },
-      { label: 'Falhas', valor: l.chamadas.falhas, cor: '#E5484D' },
+      { label: 'Atendidas', valor: l.chamadas.atendidas },
+      { label: 'Não atendidas', valor: l.chamadas.naoAtendidas },
+      { label: 'Em andamento', valor: l.chamadas.emAndamento },
+      { label: 'Falhas', valor: l.chamadas.falhas },
       { label: 'Duração total', valor: formatarDuracao(l.chamadas.duracaoTotalSegundos) },
     ],
     detalhe: (l) =>
       l.chamadas.lista.map((c) => (
-        <div key={c.id} className="text-xs text-primary/80">
+        <div key={c.id} className="text-xs text-white/80">
           {c.direcao === 'saida' ? '📤' : '📥'} {c.numero ?? '—'}
           {c.clienteNome && ` — ${c.clienteNome}`} · {chamadaStatusLabel(c.status)} ·{' '}
           {c.duracaoSegundos ? formatarDuracao(c.duracaoSegundos) : '—'} · {formatarDataHoraChamada(c.iniciadaEm)}
           {!c.empresaId && (
-            <span className="ml-1.5 rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] text-muted">
+            <span className="ml-1.5 rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] text-white/60">
               empresa não identificada
             </span>
           )}
@@ -508,7 +507,7 @@ const METRICAS: MetricaDef[] = [
     },
     detalhe: (l) =>
       l.oportunidades.lista.map((o) => (
-        <div key={o.id} className="text-xs text-primary/80">
+        <div key={o.id} className="text-xs text-white/80">
           <span className="font-mono">#{o.numero}</span> — {o.clienteNome}
           {o.clienteTelefone && <span className="font-mono"> · {o.clienteTelefone}</span>} ·{' '}
           {OPORTUNIDADE_STATUS_LABELS[o.status as keyof typeof OPORTUNIDADE_STATUS_LABELS] ?? o.status} ·{' '}
@@ -1048,7 +1047,7 @@ export default function AnaliticoPorFuncionario({
       {!carregando && !erro && metricasVisiveis.length > 0 && linhasVisiveis.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-white/10">
           <table className="w-full text-left text-base">
-            <thead className="border-b-2 border-white/15 bg-surface-alt text-sm uppercase tracking-wide text-red-400">
+            <thead className="border-b-2 border-white/15 bg-surface-alt text-sm uppercase tracking-wide text-white/80">
               <tr>
                 <th className="sticky left-0 z-10 bg-surface-alt px-4 py-3 font-semibold">Funcionário</th>
                 {metricasVisiveis.map((m) => (
@@ -1073,9 +1072,9 @@ export default function AnaliticoPorFuncionario({
                         comAtividade ? 'bg-white/[0.03]' : 'opacity-40'
                       }`}
                     >
-                      <td className="sticky left-0 z-10 whitespace-nowrap bg-surface px-4 py-3.5 font-semibold text-primary">
+                      <td className="sticky left-0 z-10 whitespace-nowrap bg-surface px-4 py-3.5 font-semibold text-white">
                         {l.nome}
-                        {!l.ativo && <span className="ml-1.5 font-normal text-muted">(inativo)</span>}
+                        {!l.ativo && <span className="ml-1.5 font-normal text-white/50">(inativo)</span>}
                       </td>
                       {metricasVisiveis.map((m) => {
                         const valor = m.principal(l)
@@ -1083,7 +1082,7 @@ export default function AnaliticoPorFuncionario({
                         // Célula com valor: cinza claro + contorno (bem mais
                         // claro que o fundo #1C242A da tabela, pra aparecer no
                         // tema escuro). Zerada: sem fundo, número em
-                        // text-muted. Aberta no drill-down: tom da marca, pra
+                        // text-white/50. Aberta no drill-down: tom da marca, pra
                         // não se confundir com as ativas.
                         if (m.derivada) {
                           // Métrica derivada: mesmo visual de célula ativa
@@ -1098,7 +1097,7 @@ export default function AnaliticoPorFuncionario({
                               >
                                 <span
                                   className={`block font-mono text-base ${
-                                    valor > 0 ? 'font-semibold text-primary' : 'text-muted'
+                                    valor > 0 ? 'font-semibold text-white' : 'text-white/50'
                                   }`}
                                 >
                                   {m.derivada.texto(l)}
@@ -1124,22 +1123,18 @@ export default function AnaliticoPorFuncionario({
                             >
                               <span
                                 className={`block font-mono text-base ${
-                                  valor > 0 ? 'font-semibold text-primary' : 'text-muted'
+                                  valor > 0 ? 'font-semibold text-white' : 'text-white/50'
                                 }`}
                               >
                                 {valor}
                               </span>
                               {m.secundario && valor > 0 && (
-                                // Sobre o cinza da célula ativa, text-muted
-                                // (#8A939B) fica em ~2,8:1 — text-white/70 dá
-                                // ~5,2:1. Branco com opacidade é gerado
-                                // normalmente pelo Tailwind (diferente das
-                                // cores do tema em var(), com /opacidade).
-                                <span
-                                  className={`mt-0.5 block whitespace-nowrap font-mono text-xs ${
-                                    selecionada ? 'text-muted' : 'text-white/70'
-                                  }`}
-                                >
+                                // Todo texto da tabela é branco com opacidade
+                                // (text-white/NN): contraste garantido sobre os
+                                // fundos escuros e gerado normalmente pelo
+                                // Tailwind — diferente das cores do tema em
+                                // var() com /opacidade, que não geram CSS.
+                                <span className="mt-0.5 block whitespace-nowrap font-mono text-xs text-white/70">
                                   {m.secundario.formatar(m.secundario.valor(l))}
                                 </span>
                               )}
@@ -1168,14 +1163,14 @@ export default function AnaliticoPorFuncionario({
             </tbody>
             <tfoot className="border-t-2 border-accent-primary bg-surface-alt text-sm">
               <tr>
-                <td className="sticky left-0 z-10 bg-surface-alt px-4 py-3.5 font-bold uppercase tracking-wide text-primary">
+                <td className="sticky left-0 z-10 bg-surface-alt px-4 py-3.5 font-bold uppercase tracking-wide text-white">
                   Total
                 </td>
                 {metricasVisiveis.map((m) => {
                   if (m.derivada) {
                     return (
                       <td key={m.key} className="border-l border-white/10 px-4 py-3.5 text-center">
-                        <span className="block font-mono text-lg font-bold text-primary">
+                        <span className="block font-mono text-lg font-bold text-white">
                           {m.derivada.textoTotal(linhasVisiveis)}
                         </span>
                       </td>
@@ -1187,7 +1182,7 @@ export default function AnaliticoPorFuncionario({
                     : 0
                   return (
                     <td key={m.key} className="border-l border-white/10 px-4 py-3.5 text-center">
-                      <span className="block font-mono text-lg font-bold text-primary">{total}</span>
+                      <span className="block font-mono text-lg font-bold text-white">{total}</span>
                       {m.secundario && total > 0 && (
                         // text-white/70 em vez de text-primary/70: cor do
                         // tema em var() com /opacidade não gera CSS.
@@ -1226,14 +1221,14 @@ function DetalheMetrica({
   return (
     <div>
       <div className="mb-2 flex items-start justify-between gap-3">
-        <p className="text-sm font-medium text-primary">
-          {titulo} <span className="font-mono text-muted">({total})</span>
+        <p className="text-sm font-medium text-white">
+          {titulo} <span className="font-mono text-white/60">({total})</span>
         </p>
         <button
           type="button"
           onClick={onFechar}
           aria-label="Fechar detalhe"
-          className="no-print rounded-md px-2 py-0.5 text-muted transition-colors hover:bg-white/10 hover:text-primary"
+          className="no-print rounded-md px-2 py-0.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
         >
           ×
         </button>
@@ -1244,10 +1239,10 @@ function DetalheMetrica({
           {quebra.map((q) => (
             <span
               key={q.label}
-              className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-muted"
+              className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-white/70"
             >
               {q.label}:
-              <span className="font-mono font-medium" style={{ color: q.cor ?? 'var(--text-primary)' }}>
+              <span className="font-mono font-medium text-white">
                 {q.valor}
               </span>
             </span>
@@ -1262,7 +1257,7 @@ function DetalheMetrica({
 
 function ListaDetalhe({ itens }: { itens: React.ReactNode[] }) {
   if (itens.length === 0) {
-    return <p className="text-xs text-muted/70">Nenhum registro no período.</p>
+    return <p className="text-xs text-white/50">Nenhum registro no período.</p>
   }
   return <div className="print-scroll-livre max-h-64 space-y-1.5 overflow-y-auto pr-1">{itens}</div>
 }
