@@ -1000,7 +1000,7 @@ export default function AnaliticoPorFuncionario({
       {!carregando && !erro && metricasVisiveis.length > 0 && linhasVisiveis.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-white/10">
           <table className="w-full text-left text-base">
-            <thead className="border-b-2 border-white/15 bg-surface-alt text-sm uppercase tracking-wide text-primary/80">
+            <thead className="border-b-2 border-white/15 bg-surface-alt text-sm uppercase tracking-wide text-red-400">
               <tr>
                 <th className="sticky left-0 z-10 bg-surface-alt px-4 py-3 font-semibold">Funcionário</th>
                 {metricasVisiveis.map((m) => (
