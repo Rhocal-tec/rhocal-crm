@@ -8,25 +8,20 @@ const config: Config = {
   ],
   theme: {
     extend: {
-      // Canais RGB ("R G B", definidos em globals.css) + <alpha-value>: é o
-      // que permite modificadores de opacidade (bg-accent-success/10,
-      // text-primary/80…). Com var(--x) em hex, o Tailwind não gerava essas
-      // classes. `secondary` fica em var() puro — o padrão dela é
-      // `transparent`, que não tem canais RGB, e ela não é usada com opacidade.
       colors: {
-        base: "rgb(var(--bg-base-rgb) / <alpha-value>)",
-        surface: "rgb(var(--bg-surface-rgb) / <alpha-value>)",
-        "surface-alt": "rgb(var(--bg-surface-alt-rgb) / <alpha-value>)",
-        primary: "rgb(var(--text-primary-rgb) / <alpha-value>)",
-        muted: "rgb(var(--text-muted-rgb) / <alpha-value>)",
+        base: "var(--bg-base)",
+        surface: "var(--bg-surface)",
+        "surface-alt": "var(--bg-surface-alt)",
+        primary: "var(--text-primary)",
+        muted: "var(--text-muted)",
         accent: {
-          primary: "rgb(var(--accent-primary-rgb) / <alpha-value>)",
-          "primary-dark": "rgb(var(--accent-primary-dark-rgb) / <alpha-value>)",
+          primary: "var(--accent-primary)",
+          "primary-dark": "var(--accent-primary-dark)",
           secondary: "var(--accent-secondary)",
-          compras: "rgb(var(--accent-compras-rgb) / <alpha-value>)",
-          success: "rgb(var(--accent-success-rgb) / <alpha-value>)",
-          alert: "rgb(var(--accent-alert-rgb) / <alpha-value>)",
-          danger: "rgb(var(--accent-danger-rgb) / <alpha-value>)",
+          compras: "var(--accent-compras)",
+          success: "var(--accent-success)",
+          alert: "var(--accent-alert)",
+          danger: "var(--accent-danger)",
         },
       },
       fontFamily: {
