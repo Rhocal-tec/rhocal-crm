@@ -254,3 +254,132 @@ body {
     text-align: right;
   }
 }
+
+/* Variante "relatorio" da folha (Produtividade): pouco conteúdo numa A4
+   paisagem, então tudo maior — fonte, números, respiro entre seções e
+   dentro das células — e diagramado pra largura da paisagem numa grade
+   2×2 (em cima: indicadores da empresa | metas por vendedora; embaixo: os
+   dois grupos de contadores), pra folha ficar com cara de relatório, sem
+   bloco espremido no topo e metade da página em branco. Tamanhos
+   calibrados pra, no caso real (até ~3 vendedoras), a grade inteira caber
+   numa página cheia. A variante "compacta" (Analítico, até 13 colunas)
+   continua com os tamanhos acima. */
+@media print {
+  .folha-impressao--relatorio {
+    font-size: 14pt;
+  }
+  .folha-impressao--relatorio .folha-impressao-cabecalho {
+    margin-bottom: 4mm;
+    padding-bottom: 2.5mm;
+  }
+  .folha-impressao--relatorio .folha-impressao-logo {
+    width: 52px;
+    height: 52px;
+  }
+  .folha-impressao--relatorio .folha-impressao-cabecalho h1 {
+    font-size: 21pt;
+  }
+  .folha-impressao--relatorio .folha-impressao-cabecalho p {
+    font-size: 13pt;
+  }
+
+  /* Seção solta (grupos empilhados, com muitas vendedoras): respiro e
+     título nunca sozinho no pé da página. Dentro da grade, o espaço vem do
+     gap/margem da própria grade. */
+  .folha-impressao--relatorio .folha-impressao-secao {
+    margin-bottom: 6mm;
+  }
+  .relatorio-duas-colunas > .folha-impressao-secao {
+    margin-bottom: 0;
+  }
+  .folha-impressao--relatorio .folha-impressao-secao h2 {
+    break-after: avoid;
+    font-size: 15pt;
+    margin-bottom: 2.5mm;
+    padding-left: 2.5mm;
+    border-left: 4px solid #111;
+  }
+
+  .folha-impressao--relatorio .folha-impressao-tabela th {
+    font-size: 13pt;
+    padding: 1.3mm 1.5mm;
+  }
+  .folha-impressao--relatorio .folha-impressao-tabela td {
+    padding: 1.2mm 1.5mm;
+  }
+  .folha-impressao--relatorio .folha-impressao-tabela .folha-impressao-nome {
+    width: 30%;
+    font-size: 13.5pt;
+    padding-left: 2.5mm;
+  }
+  .folha-impressao--relatorio .folha-impressao-principal {
+    font-size: 18pt;
+    line-height: 1.1;
+  }
+  .folha-impressao--relatorio .folha-impressao-rodape {
+    margin-top: 2mm;
+    font-size: 10.5pt;
+  }
+  /* O último bloco não leva margem embaixo: com a folha cheia, esses
+     milímetros empurravam o rodapé repetido pra uma 2ª página em branco. */
+  .folha-impressao--relatorio .folha-impressao-moldura > tbody > tr > td > :last-child {
+    margin-bottom: 0;
+  }
+
+  /* Grade 2×2: cada faixa (linha da grade) é um bloco que nunca é cortado —
+     se a faixa de baixo não couber, vai inteira pra próxima página, com o
+     cabeçalho repetido. */
+  .relatorio-duas-colunas {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6mm;
+    align-items: start;
+    break-inside: avoid;
+    margin-bottom: 6mm;
+  }
+  /* Faixa de cima: indicadores mais estreitos, metas com mais espaço pros
+     valores em R$. */
+  .relatorio-topo {
+    grid-template-columns: 34% 1fr;
+  }
+
+  /* Resultado da empresa: indicadores 2×2. */
+  .relatorio-indicadores {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3mm;
+  }
+  .relatorio-indicador {
+    border: 1px solid #999;
+    border-top: 3px solid #111;
+    background: #f6f6f6;
+    padding: 2mm 3mm 2.2mm;
+  }
+  .relatorio-indicador-rotulo {
+    display: block;
+    font-size: 12.5pt;
+    font-weight: 600;
+    color: #444;
+  }
+  .relatorio-indicador-valor {
+    display: block;
+    margin-top: 0.8mm;
+    font-family: var(--font-barlow-condensed), 'Arial Narrow', Arial, sans-serif;
+    font-size: 22pt;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #111;
+  }
+
+  /* Grupos de contadores transpostos (um contador por linha, uma
+     vendedora por coluna). */
+  .relatorio-transposta .folha-impressao-tabela .folha-impressao-nome {
+    width: 40%;
+  }
+  /* Grupos empilhados (muitas vendedoras, uma por linha, largura total):
+     coluna do nome mais estreita pra sobrar espaço pros 7 rótulos de
+     contador sem quebrar palavra ao meio. */
+  .relatorio-empilhada .folha-impressao-tabela .folha-impressao-nome {
+    width: 20%;
+  }
+}

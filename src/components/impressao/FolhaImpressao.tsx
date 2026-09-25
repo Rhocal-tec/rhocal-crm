@@ -47,12 +47,17 @@ export function FolhaImpressao({
   empresaNome,
   logoPath,
   subtitulos,
+  variante = 'compacta',
   children,
 }: {
   titulo: string
   empresaNome: string
   logoPath: string
   subtitulos: string[]
+  // "compacta" (padrão, Analítico): tabela larga com muitas colunas, fonte
+  // no mínimo legível pra caber na largura. "relatorio" (Produtividade):
+  // pouco conteúdo, então fonte e espaçamentos maiores pra preencher a folha.
+  variante?: 'compacta' | 'relatorio'
   children: ReactNode
 }) {
   const [montado, setMontado] = useState(false)
@@ -72,7 +77,7 @@ export function FolhaImpressao({
   if (!montado) return null
 
   return createPortal(
-    <div className="folha-impressao">
+    <div className={variante === 'relatorio' ? 'folha-impressao folha-impressao--relatorio' : 'folha-impressao'}>
       <table className="folha-impressao-moldura">
         <thead>
           <tr>
@@ -129,14 +134,26 @@ export function TabelaImpressao({
   colunas,
   linhas,
   total,
+  larguras,
 }: {
   colunaNome: string
   colunas: string[]
   linhas: LinhaImpressao[]
   total?: { rotulo: string; celulas: CelulaImpressao[] } | null
+  // Largura de cada coluna (incluindo a do nome, na mesma ordem), ex:
+  // ['24%', '23%', ...]. Sem isso, as colunas de métrica dividem o espaço
+  // por igual — o que quebra valores em R$ ao meio em tabelas mistas.
+  larguras?: string[]
 }) {
   return (
     <table className="folha-impressao-tabela">
+      {larguras && (
+        <colgroup>
+          {larguras.map((largura, i) => (
+            <col key={i} style={{ width: largura }} />
+          ))}
+        </colgroup>
+      )}
       <thead>
         <tr>
           <th className="folha-impressao-nome">{colunaNome}</th>
