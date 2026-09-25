@@ -1036,6 +1036,16 @@ export interface Database {
         Args: { p_empresa_id: string }
         Returns: { pedido_id: string; efetuado_em: string }[]
       }
+      fn_pedidos_marcos: {
+        Args: { p_empresa_id: string }
+        Returns: {
+          pedido_id: string
+          cotado_em: string | null
+          aprovado_em: string | null
+          efetuado_em: string | null
+          entregue_em: string | null
+        }[]
+      }
     }
     Enums: {
       setor_tipo: SetorTipo

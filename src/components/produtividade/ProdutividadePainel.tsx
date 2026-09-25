@@ -16,17 +16,21 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
 import {
-  agregarOportunidades,
   agregarProdutividade,
+  agregarTarefasOportunidades,
   cancelados,
+  dataISO,
   limitesDoMes,
   novasMetricas,
-  novasMetricasOportunidades,
+  novasMetricasTarefas,
   taxaConversao,
-  type MetricasOportunidades,
+  temMarcoNoMes,
+  type MarcosPedido,
   type MetricasProdutividade,
+  type MetricasTarefas,
+  type OportunidadeProdutividade,
   type PedidoProdutividade,
-  type TarefaOportunidade,
+  type TarefaProdutividade,
 } from '@/lib/produtividade/calculo'
 import { faltaMigracao, MENSAGEM_FALTA_MIGRACAO } from '@/lib/produtividade/erros'
 import { calcularDiasUteisMes, type DiasUteisMes } from '@/lib/produtividade/dias-uteis'
@@ -74,8 +78,33 @@ function emLotes<T>(lista: T[]): T[][] {
   return lotes
 }
 
-function dataISO(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// Marcos do funil por pedido (fn_pedidos_marcos, migração 0033). Enquanto a
+// 0033 não roda, cai pra fn_pedidos_efetuados (0032) — Faturado e Efetuados
+// continuam certos, só Cotados/Aprovados/Entregues ficam "—".
+async function buscarMarcos(
+  supabase: ReturnType<typeof createClient>,
+  empresaId: string,
+): Promise<{ mapa: Map<string, MarcosPedido>; completos: boolean }> {
+  try {
+    const linhas = await paginar<{ pedido_id: string } & MarcosPedido>((de, ate) =>
+      supabase.rpc('fn_pedidos_marcos', { p_empresa_id: empresaId }).range(de, ate),
+    )
+    return { mapa: new Map(linhas.map(({ pedido_id, ...m }) => [pedido_id, m])), completos: true }
+  } catch (err) {
+    if (!faltaMigracao(err)) throw err
+    const linhas = await paginar<{ pedido_id: string; efetuado_em: string }>((de, ate) =>
+      supabase.rpc('fn_pedidos_efetuados', { p_empresa_id: empresaId }).range(de, ate),
+    )
+    return {
+      mapa: new Map(
+        linhas.map((l) => [
+          l.pedido_id,
+          { cotado_em: null, aprovado_em: null, efetuado_em: l.efetuado_em, entregue_em: null },
+        ]),
+      ),
+      completos: false,
+    }
+  }
 }
 
 function pct(valor: number, meta: number): number | null {
@@ -149,49 +178,60 @@ function Somatoria({ m }: { m: MetricasProdutividade }) {
   )
 }
 
-function BlocoOportunidades({
-  o,
-  nomeOportunidade,
+function Contadores({
+  itens,
 }: {
-  o: MetricasOportunidades
-  nomeOportunidade: Map<string, string>
+  itens: { rotulo: string; valor: number | null; destaque?: boolean; dica?: string }[]
 }) {
-  const itens = [
-    { rotulo: 'Oportunidades trabalhadas', valor: o.oportunidades, destaque: false },
-    { rotulo: 'Tarefas feitas', valor: o.feitas, destaque: false },
-    { rotulo: 'Não feitas', valor: o.naoFeitas, destaque: false },
-    { rotulo: 'Atrasadas', valor: o.atrasadas, destaque: o.atrasadas > 0 },
-  ]
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+      {itens.map((i) => (
+        <div
+          key={i.rotulo}
+          title={i.dica}
+          className={`rounded-md px-3 py-2.5 ${
+            i.destaque ? 'bg-accent-danger/15 ring-1 ring-inset ring-accent-danger/40' : 'bg-surface-alt'
+          }`}
+        >
+          <p className="text-xs text-muted">{i.rotulo}</p>
+          <p className={`mt-1 font-mono text-lg font-semibold ${i.destaque ? 'text-accent-danger' : 'text-primary'}`}>
+            {i.valor === null ? '—' : i.valor}
+          </p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Grupo 1 — Tarefas e Oportunidades (critérios em calculo.ts).
+function GrupoTarefas({ t }: { t: MetricasTarefas }) {
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {itens.map((i) => (
-          <div
-            key={i.rotulo}
-            className={`rounded-md px-3 py-2.5 ${
-              i.destaque ? 'bg-accent-danger/15 ring-1 ring-inset ring-accent-danger/40' : 'bg-surface-alt'
-            }`}
-          >
-            <p className="text-xs text-muted">{i.rotulo}</p>
-            <p className={`mt-1 font-mono text-lg font-semibold ${i.destaque ? 'text-accent-danger' : 'text-primary'}`}>
-              {i.valor}
-            </p>
-          </div>
-        ))}
-      </div>
-      {o.naoFeitasLista.length > 0 && (
+      <Contadores
+        itens={[
+          { rotulo: 'Nova Tarefa', valor: t.novaTarefa, dica: 'Tarefas criadas no mês' },
+          { rotulo: 'Hoje', valor: t.hoje },
+          { rotulo: 'Tarefas Futuras', valor: t.futuras },
+          { rotulo: 'Concluídas', valor: t.concluidas, dica: 'Só Realizada — Cancelada não conta' },
+          { rotulo: 'Atrasadas', valor: t.atrasadas, destaque: t.atrasadas > 0 },
+          { rotulo: 'Oportunidades', valor: t.oportunidades, dica: 'Oportunidades com atividade no mês' },
+          {
+            rotulo: 'Oport. Concluídas',
+            valor: t.oportunidadesConcluidas,
+            dica: 'Viraram GANHO (Convertida em Orçamento) no mês',
+          },
+        ]}
+      />
+      {t.atrasadasLista.length > 0 && (
         <details className="mt-2 text-sm">
           <summary className="cursor-pointer text-xs text-muted hover:text-primary">
-            Ver tarefas não feitas ({o.naoFeitasLista.length})
+            Ver tarefas atrasadas ({t.atrasadasLista.length})
           </summary>
           <ul className="mt-2 flex flex-col gap-1">
-            {o.naoFeitasLista.map((t) => (
-              <li key={t.id} className="text-xs text-primary/80">
-                <span className={`font-mono ${t.atrasada ? 'text-accent-danger' : ''}`}>
-                  {formatarDataSomente(t.dataPrevista)}
-                </span>{' '}
-                — {nomeOportunidade.get(t.oportunidadeId) ?? 'Oportunidade'} · {t.descricao || '(sem descrição)'}
-                {t.atrasada && <span className="text-accent-danger"> · atrasada</span>}
+            {t.atrasadasLista.map((a) => (
+              <li key={a.id} className="text-xs text-primary/80">
+                <span className="font-mono text-accent-danger">{formatarDataSomente(a.dataPrevista)}</span>
+                {a.cliente && <> — {a.cliente}</>} · {a.descricao || '(sem descrição)'}
               </li>
             ))}
           </ul>
@@ -201,22 +241,38 @@ function BlocoOportunidades({
   )
 }
 
+// Grupo 2 — Orçamentos e Pedidos. Sem os marcos completos (migração 0033
+// ainda não rodada), Cotados/Aprovados/Entregues ficam "—" em vez de zero.
+function GrupoPedidos({ m, marcosCompletos }: { m: MetricasProdutividade; marcosCompletos: boolean }) {
+  return (
+    <Contadores
+      itens={[
+        { rotulo: 'Orçamentos', valor: m.propostas, dica: 'Criados no mês (diretos + normais)' },
+        { rotulo: 'Orçamentos Cotados', valor: marcosCompletos ? m.cotados : null },
+        { rotulo: 'Pedidos Aprovados', valor: marcosCompletos ? m.aprovados : null },
+        { rotulo: 'Pedidos Efetuados', valor: m.faturados },
+        { rotulo: 'Pedidos Entregues', valor: marcosCompletos ? m.entregues : null },
+      ]}
+    />
+  )
+}
+
 function CardVendedora({
   nome,
   m,
   metaPessoal,
   metaGlobal,
   dias,
-  o,
-  nomeOportunidade,
+  t,
+  marcosCompletos,
 }: {
   nome: string
   m: MetricasProdutividade
   metaPessoal: number
   metaGlobal: number
   dias: DiasUteisMes
-  o: MetricasOportunidades
-  nomeOportunidade: Map<string, string>
+  t: MetricasTarefas
+  marcosCompletos: boolean
 }) {
   const media = mediaDiaria(m.faturadoValor, dias)
   const necessario = necessarioPorDia(m.faturadoValor, metaPessoal, dias)
@@ -256,9 +312,13 @@ function CardVendedora({
       <div className="mt-4">
         <Somatoria m={m} />
       </div>
-      <h4 className="mt-4 text-xs font-medium uppercase tracking-wide text-muted">Oportunidades no mês</h4>
+      <h4 className="mt-4 text-xs font-medium uppercase tracking-wide text-muted">Tarefas e Oportunidades</h4>
       <div className="mt-2">
-        <BlocoOportunidades o={o} nomeOportunidade={nomeOportunidade} />
+        <GrupoTarefas t={t} />
+      </div>
+      <h4 className="mt-4 text-xs font-medium uppercase tracking-wide text-muted">Orçamentos e Pedidos</h4>
+      <div className="mt-2">
+        <GrupoPedidos m={m} marcosCompletos={marcosCompletos} />
       </div>
     </div>
   )
@@ -278,10 +338,14 @@ export function ProdutividadePainel() {
 
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [pedidos, setPedidos] = useState<PedidoProdutividade[]>([])
-  const [efetuadoEm, setEfetuadoEm] = useState<Map<string, string>>(new Map())
+  const [marcos, setMarcos] = useState<Map<string, MarcosPedido>>(new Map())
+  // false = fn_pedidos_marcos ainda não existe (migração 0033 pendente) e os
+  // marcos vieram só de fn_pedidos_efetuados — sem cotado/aprovado/entregue.
+  const [marcosCompletos, setMarcosCompletos] = useState(true)
   const [valorPorPedido, setValorPorPedido] = useState<Map<string, number>>(new Map())
-  const [tarefasOportunidade, setTarefasOportunidade] = useState<TarefaOportunidade[]>([])
-  const [nomeOportunidade, setNomeOportunidade] = useState<Map<string, string>>(new Map())
+  const [tarefasPeriodo, setTarefasPeriodo] = useState<TarefaProdutividade[]>([])
+  const [tarefasDeOportunidade, setTarefasDeOportunidade] = useState<TarefaProdutividade[]>([])
+  const [oportunidadesEmpresa, setOportunidadesEmpresa] = useState<OportunidadeProdutividade[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -297,8 +361,8 @@ export function ProdutividadePainel() {
     })
   }
 
-  // Vendas do mês: pedidos criados no mês + pedidos efetuados no mês (que
-  // podem ter sido criados antes), valores dos itens e data de efetuação.
+  // Vendas do mês: pedidos criados no mês + pedidos que atingiram algum marco
+  // no mês (podem ter sido criados antes), valores dos itens e marcos.
   useEffect(() => {
     if (!empresaAtiva) return
     const empresaId = empresaAtiva.id
@@ -311,7 +375,7 @@ export function ProdutividadePainel() {
         const { inicio, fim } = limitesDoMes(ano, mes)
         const colunas = 'id, criado_por, criado_em, status'
 
-        const [criadosNoMes, efetuados] = await Promise.all([
+        const [criadosNoMes, { mapa: mapaMarcos, completos }] = await Promise.all([
           paginar<PedidoProdutividade>((de, ate) =>
             supabase
               .from('pedidos')
@@ -322,21 +386,14 @@ export function ProdutividadePainel() {
               .order('id')
               .range(de, ate),
           ),
-          paginar<{ pedido_id: string; efetuado_em: string }>((de, ate) =>
-            supabase.rpc('fn_pedidos_efetuados', { p_empresa_id: empresaId }).range(de, ate),
-          ),
+          buscarMarcos(supabase, empresaId),
         ])
 
-        const mapaEfetuado = new Map(efetuados.map((e) => [e.pedido_id, e.efetuado_em]))
-
-        // Efetuados no mês cujo pedido foi criado em outro mês — busca à parte.
+        // Pedidos criados em outro mês que atingiram algum marco neste — busca à parte.
         const idsCriados = new Set(criadosNoMes.map((p) => p.id))
-        const idsFaltantes = efetuados
-          .filter((e) => {
-            const t = Date.parse(e.efetuado_em)
-            return t >= inicio.getTime() && t < fim.getTime() && !idsCriados.has(e.pedido_id)
-          })
-          .map((e) => e.pedido_id)
+        const idsFaltantes = Array.from(mapaMarcos.entries())
+          .filter(([id, m]) => !idsCriados.has(id) && temMarcoNoMes(m, inicio, fim))
+          .map(([id]) => id)
         const extras: PedidoProdutividade[] = []
         for (const lote of emLotes(idsFaltantes)) {
           const { data, error } = await supabase.from('pedidos').select(colunas).in('id', lote)
@@ -368,7 +425,8 @@ export function ProdutividadePainel() {
 
         if (!ativo) return
         setPedidos(todos)
-        setEfetuadoEm(mapaEfetuado)
+        setMarcos(mapaMarcos)
+        setMarcosCompletos(completos)
         setValorPorPedido(valores)
       } catch (err) {
         console.error('Erro ao carregar produtividade:', err)
@@ -406,9 +464,13 @@ export function ProdutividadePainel() {
     }
   }, [supabase])
 
-  // Oportunidades trabalhadas: tarefas de oportunidade com data prevista no
-  // mês (data_prevista é `date` — compara como texto 'YYYY-MM-DD'). Carga
-  // separada das vendas, pra não depender da migração 0032.
+  // Grupo "Tarefas e Oportunidades": carga separada das vendas, pra não
+  // depender das migrações. Três conjuntos da empresa ativa:
+  //   - tarefas do período: data prevista no mês OU criadas no mês
+  //     (data_prevista é `date` — compara como texto 'YYYY-MM-DD');
+  //   - todas as tarefas de oportunidade, sem recorte (base da atribuição
+  //     de responsável, mesma consulta do "Oport. em Andamento");
+  //   - todas as oportunidades (a atividade no mês é decidida em JS).
   const [erroOportunidades, setErroOportunidades] = useState<string | null>(null)
   useEffect(() => {
     if (!empresaAtiva) return
@@ -419,30 +481,47 @@ export function ProdutividadePainel() {
       setErroOportunidades(null)
       try {
         const { inicio, fim } = limitesDoMes(ano, mes)
-        const tarefas = await paginar<TarefaOportunidade>((de, ate) =>
-          supabase
-            .from('tarefas')
-            .select('id, oportunidade_id, responsavel, situacao, data_prevista, descricao')
-            .eq('empresa_id', empresaId)
-            .eq('excluida', false)
-            .not('oportunidade_id', 'is', null)
-            .gte('data_prevista', dataISO(inicio))
-            .lt('data_prevista', dataISO(fim))
-            .order('id')
-            .range(de, ate),
-        )
-        const nomes = new Map<string, string>()
-        for (const lote of emLotes(Array.from(new Set(tarefas.map((t) => t.oportunidade_id))))) {
-          const { data, error } = await supabase.from('oportunidades').select('id, cliente_nome').in('id', lote)
-          if (error) throw error
-          for (const o of data ?? []) nomes.set(o.id, o.cliente_nome)
-        }
+        const colunasTarefa = 'id, oportunidade_id, responsavel, situacao, data_prevista, criado_em, descricao, cliente_nome'
+        const [periodoMes, deOportunidade, oportunidadesLista] = await Promise.all([
+          paginar<TarefaProdutividade>((de, ate) =>
+            supabase
+              .from('tarefas')
+              .select(colunasTarefa)
+              .eq('empresa_id', empresaId)
+              .eq('excluida', false)
+              .or(
+                `and(data_prevista.gte.${dataISO(inicio)},data_prevista.lt.${dataISO(fim)}),` +
+                  `and(criado_em.gte.${inicio.toISOString()},criado_em.lt.${fim.toISOString()})`,
+              )
+              .order('id')
+              .range(de, ate),
+          ),
+          paginar<TarefaProdutividade>((de, ate) =>
+            supabase
+              .from('tarefas')
+              .select(colunasTarefa)
+              .eq('empresa_id', empresaId)
+              .eq('excluida', false)
+              .not('oportunidade_id', 'is', null)
+              .order('id')
+              .range(de, ate),
+          ),
+          paginar<OportunidadeProdutividade>((de, ate) =>
+            supabase
+              .from('oportunidades')
+              .select('id, criado_por, criado_em, status, ultima_movimentacao, cliente_nome')
+              .eq('empresa_id', empresaId)
+              .order('id')
+              .range(de, ate),
+          ),
+        ])
         if (!ativo) return
-        setTarefasOportunidade(tarefas)
-        setNomeOportunidade(nomes)
+        setTarefasPeriodo(periodoMes)
+        setTarefasDeOportunidade(deOportunidade)
+        setOportunidadesEmpresa(oportunidadesLista)
       } catch (err) {
         console.error('Erro ao carregar oportunidades da produtividade:', err)
-        if (ativo) setErroOportunidades('Não foi possível carregar as oportunidades do mês.')
+        if (ativo) setErroOportunidades('Não foi possível carregar as tarefas e oportunidades do mês.')
       }
     }
 
@@ -487,13 +566,19 @@ export function ProdutividadePainel() {
 
   const { porFuncionario, equipe } = useMemo(() => {
     const { inicio, fim } = limitesDoMes(ano, mes)
-    return agregarProdutividade({ pedidos, efetuadoEm, valorPorPedido, inicio, fim })
-  }, [pedidos, efetuadoEm, valorPorPedido, ano, mes])
+    return agregarProdutividade({ pedidos, marcos, valorPorPedido, inicio, fim })
+  }, [pedidos, marcos, valorPorPedido, ano, mes])
 
-  const oportunidades = useMemo(
-    () => agregarOportunidades(tarefasOportunidade, dataISO(new Date())),
-    [tarefasOportunidade],
-  )
+  const tarefas = useMemo(() => {
+    const { inicio, fim } = limitesDoMes(ano, mes)
+    return agregarTarefasOportunidades({
+      tarefasPeriodo,
+      tarefasDeOportunidade,
+      oportunidades: oportunidadesEmpresa,
+      inicio,
+      fim,
+    })
+  }, [tarefasPeriodo, tarefasDeOportunidade, oportunidadesEmpresa, ano, mes])
 
   const metaGlobalLinha = metas.find((m) => m.funcionario_id === null) ?? null
   const metaGlobal = metaGlobalLinha?.valor_meta ?? 0
@@ -515,16 +600,16 @@ export function ProdutividadePainel() {
           id: p.id,
           nome: p.nome,
           m: porFuncionario.get(p.id) ?? novasMetricas(),
-          o: oportunidades.porFuncionario.get(p.id) ?? novasMetricasOportunidades(),
+          t: tarefas.porFuncionario.get(p.id) ?? novasMetricasTarefas(),
         }))
         .sort((a, b) => b.m.faturadoValor - a.m.faturadoValor || a.nome.localeCompare(b.nome)),
-    [profiles, porFuncionario, oportunidades],
+    [profiles, porFuncionario, tarefas],
   )
 
   const visiveis = ehGestor ? vendedoras : vendedoras.filter((v) => v.id === profile?.id)
   const minhaLinha =
     !ehGestor && profile && visiveis.length === 0
-      ? [{ id: profile.id, nome: profile.nome, m: novasMetricas(), o: novasMetricasOportunidades() }]
+      ? [{ id: profile.id, nome: profile.nome, m: novasMetricas(), t: novasMetricasTarefas() }]
       : []
 
   const comparativo: BarraDado[] = vendedoras.map((v) => ({
@@ -679,12 +764,26 @@ export function ProdutividadePainel() {
           </section>
 
           <section className="mt-6 rounded-lg border border-white/10 bg-surface p-5">
-            <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">Oportunidades da equipe</h2>
-            <p className="mt-1 text-xs text-muted">
-              Tarefas de oportunidade com data prevista no mês (inclui as sem responsável).
-            </p>
+            <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">
+              Tarefas e Oportunidades da equipe
+            </h2>
+            <p className="mt-1 text-xs text-muted">Inclui tarefas e oportunidades sem responsável.</p>
             <div className="mt-3">
-              <BlocoOportunidades o={oportunidades.equipe} nomeOportunidade={nomeOportunidade} />
+              <GrupoTarefas t={tarefas.equipe} />
+            </div>
+          </section>
+
+          <section className="mt-6 rounded-lg border border-white/10 bg-surface p-5">
+            <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">
+              Orçamentos e Pedidos da equipe
+            </h2>
+            {!marcosCompletos && (
+              <p className="mt-1 text-xs text-muted">
+                Cotados, Aprovados e Entregues aparecem depois que a migração 0033 for rodada no Supabase.
+              </p>
+            )}
+            <div className="mt-3">
+              <GrupoPedidos m={equipe} marcosCompletos={marcosCompletos} />
             </div>
           </section>
 
@@ -716,8 +815,8 @@ export function ProdutividadePainel() {
               metaPessoal={metaPessoalPorId.get(v.id) ?? 0}
               metaGlobal={metaGlobal}
               dias={dias}
-              o={v.o}
-              nomeOportunidade={nomeOportunidade}
+              t={v.t}
+              marcosCompletos={marcosCompletos}
             />
           ))}
         </div>
@@ -726,8 +825,9 @@ export function ProdutividadePainel() {
       <p className="mt-8 text-xs text-muted">
         Faturado = pedidos que passaram por Pedido Efetuado no mês (mesmo que depois arquivados). Propostas, não
         faturados, pendentes e cancelados = pedidos criados no mês, pelo status atual. Valores sem frete; atribuídos a
-        quem criou o pedido. Oportunidades = tarefas de oportunidade com data prevista no mês, pelo responsável:
-        feita = Realizada; não feita = Pendente/Em Execução (atrasada se a data já passou); canceladas não contam.
+        quem criou o pedido. Cotados/Aprovados/Efetuados/Entregues = pedidos que chegaram a essa etapa (ou a uma
+        posterior) no mês. Tarefas = pelo responsável, no mês da data prevista (sem data, no de criação); Concluídas =
+        só Realizada. Oportunidades = atribuídas pela tarefa mais recente (ou pelo criador), com atividade no mês.
       </p>
     </main>
   )

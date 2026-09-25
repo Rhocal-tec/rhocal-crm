@@ -1,6 +1,7 @@
 // Agregação da aba Produtividade (mês a mês, por vendedora e da equipe).
-// Tudo automático a partir de `pedidos` + data de efetuação reconstruída do
-// audit_log (fn_pedidos_efetuados) — nada é digitado, exceto as metas.
+// Tudo automático a partir de `pedidos` + marcos do funil reconstruídos do
+// audit_log (fn_pedidos_marcos) + tarefas/oportunidades — nada é digitado,
+// exceto as metas.
 //
 // Critérios (validados com o usuário antes de implementar):
 // - Faturado: pedido que PASSOU por PEDIDO_EFETUADO (ou ENTREGUE), com a
@@ -16,8 +17,15 @@
 // - Conversão (coorte): das propostas criadas no mês, quantas já chegaram a
 //   efetuado (em qualquer data) ÷ total de propostas do mês. Nunca passa de
 //   100% e sobe à medida que os pedidos do mês fecham.
-// - Atribuição por criado_por. Valor = Σ preco_venda × quantidade dos itens
-//   não excluídos, sem frete (mesmo critério do Analítico por funcionário).
+// - Grupo "Orçamentos e Pedidos": Orçamentos = propostas; Cotados /
+//   Aprovados / Efetuados / Entregues = pedidos que CHEGARAM a essa etapa (ou
+//   a uma posterior) com a data da primeira chegada no mês — nunca o status
+//   atual, pro funil não encolher. Efetuados = mesma conta do Faturado.
+// - Atribuição por criado_por (quem vendeu — diferente do "Entregues" do
+//   Analítico, que é de quem operacionalizou). Valor = Σ preco_venda ×
+//   quantidade dos itens não excluídos, sem frete.
+import { atribuirOportunidade } from '@/lib/oportunidades/atribuicao'
+import { classificarPrazo } from '@/lib/tarefas/prazo'
 import type { PedidoStatus } from '@/types/database'
 
 export interface PedidoProdutividade {
@@ -25,6 +33,14 @@ export interface PedidoProdutividade {
   criado_por: string
   criado_em: string
   status: PedidoStatus
+}
+
+// Primeira chegada do pedido a cada etapa (ou posterior) — fn_pedidos_marcos.
+export interface MarcosPedido {
+  cotado_em: string | null
+  aprovado_em: string | null
+  efetuado_em: string | null
+  entregue_em: string | null
 }
 
 export interface MetricasProdutividade {
@@ -40,6 +56,10 @@ export interface MetricasProdutividade {
   arquivadosSemEfetuar: number
   // Propostas do mês que já chegaram a efetuado (numerador da conversão).
   propostasConvertidas: number
+  // Chegaram à etapa (ou posterior) no mês. Efetuados = `faturados`.
+  cotados: number
+  aprovados: number
+  entregues: number
 }
 
 export function novasMetricas(): MetricasProdutividade {
@@ -55,6 +75,9 @@ export function novasMetricas(): MetricasProdutividade {
     perdidos: 0,
     arquivadosSemEfetuar: 0,
     propostasConvertidas: 0,
+    cotados: 0,
+    aprovados: 0,
+    entregues: 0,
   }
 }
 
@@ -77,19 +100,36 @@ export function limitesDoMes(ano: number, mes: number): { inicio: Date; fim: Dat
   return { inicio: new Date(ano, mes - 1, 1), fim: new Date(ano, mes, 1) }
 }
 
-function dentro(iso: string, inicio: Date, fim: Date): boolean {
+function dentro(iso: string | null, inicio: Date, fim: Date): boolean {
+  if (!iso) return false
   const t = Date.parse(iso)
   return t >= inicio.getTime() && t < fim.getTime()
 }
 
+// Data local em 'YYYY-MM-DD' — mesmo formato das colunas `date` (data_prevista).
+export function dataISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Algum marco do pedido cai no mês? (usado pra buscar pedidos criados em
+// outro mês que avançaram de etapa neste.)
+export function temMarcoNoMes(m: MarcosPedido, inicio: Date, fim: Date): boolean {
+  return (
+    dentro(m.cotado_em, inicio, fim) ||
+    dentro(m.aprovado_em, inicio, fim) ||
+    dentro(m.efetuado_em, inicio, fim) ||
+    dentro(m.entregue_em, inicio, fim)
+  )
+}
+
 export function agregarProdutividade(params: {
   pedidos: PedidoProdutividade[]
-  efetuadoEm: Map<string, string>
+  marcos: Map<string, MarcosPedido>
   valorPorPedido: Map<string, number>
   inicio: Date
   fim: Date
 }): { porFuncionario: Map<string, MetricasProdutividade>; equipe: MetricasProdutividade } {
-  const { pedidos, efetuadoEm, valorPorPedido, inicio, fim } = params
+  const { pedidos, marcos, valorPorPedido, inicio, fim } = params
   const porFuncionario = new Map<string, MetricasProdutividade>()
   const equipe = novasMetricas()
 
@@ -105,13 +145,26 @@ export function agregarProdutividade(params: {
 
   for (const p of pedidos) {
     const valor = valorPorPedido.get(p.id) ?? 0
-    const efetuado = efetuadoEm.get(p.id) ?? null
+    const marco = marcos.get(p.id)
+    const efetuado = marco?.efetuado_em ?? null
 
-    if (efetuado && dentro(efetuado, inicio, fim)) {
+    if (dentro(efetuado, inicio, fim)) {
       somar(p.criado_por, (m) => {
         m.faturados += 1
         m.faturadoValor += valor
       })
+    }
+    if (marco) {
+      const cotado = dentro(marco.cotado_em, inicio, fim)
+      const aprovado = dentro(marco.aprovado_em, inicio, fim)
+      const entregue = dentro(marco.entregue_em, inicio, fim)
+      if (cotado || aprovado || entregue) {
+        somar(p.criado_por, (m) => {
+          if (cotado) m.cotados += 1
+          if (aprovado) m.aprovados += 1
+          if (entregue) m.entregues += 1
+        })
+      }
     }
 
     if (!dentro(p.criado_em, inicio, fim)) continue
@@ -140,91 +193,169 @@ export function agregarProdutividade(params: {
   return { porFuncionario, equipe }
 }
 
-// ===== Oportunidades trabalhadas (tarefas feitas × não feitas) =====
-// Por vendedora: tarefas vinculadas a oportunidades, com data prevista no
-// mês e ela como responsável. Feita = Realizada; não feita = Pendente/Em
-// Execução (atrasada quando a data prevista já passou). Canceladas não
-// contam. Ninguém "cria" oportunidade em nome da vendedora (a maioria vem de
-// importação/SDR) — o que liga a vendedora à oportunidade é a tarefa, mesma
-// regra do "Oport. em Andamento" do Analítico.
+// ===== Grupo "Tarefas e Oportunidades" =====
+// Tarefas por responsável (mesmo critério do "Minha fila"), de qualquer
+// vínculo. Mês de referência de uma tarefa = mês da data prevista; sem data
+// prevista, mês de criação. Classificação por prazo = classificarPrazo, a
+// mesma das pills do FunilBoard (Hoje/Futuras/Atrasadas são relativas a
+// hoje — num mês passado, o que ficou pendente aparece como Atrasada).
+// Concluídas = só Realizada (Cancelada não é produtividade e não entra em
+// nenhum contador). Nova Tarefa = criadas no mês (criado_em), com qualquer
+// data prevista.
+//
+// Oportunidades = registros de `oportunidades` (não tarefas), atribuídos
+// pela regra compartilhada de lib/oportunidades/atribuicao.ts, com
+// atividade no mês: criadas ou movimentadas no mês, ou com alguma tarefa
+// (não cancelada) no mês. Concluídas = das atribuídas, as que viraram
+// GANHO no mês (data = ultima_movimentacao — exata só depois da migração
+// 0033; antes dela é aproximação).
 
-export interface TarefaOportunidade {
+export interface TarefaProdutividade {
   id: string
-  oportunidade_id: string
+  oportunidade_id: string | null
   responsavel: string | null
   situacao: string
-  // Sempre preenchida na prática (a query filtra pelo mês), mas o tipo da
-  // coluna é nullable.
   data_prevista: string | null
+  criado_em: string
   descricao: string
+  cliente_nome: string | null
 }
 
-export interface TarefaNaoFeita {
+export interface OportunidadeProdutividade {
   id: string
-  oportunidadeId: string
+  criado_por: string
+  criado_em: string
+  status: string
+  ultima_movimentacao: string
+  cliente_nome: string
+}
+
+export interface TarefaAtrasada {
+  id: string
   descricao: string
+  cliente: string | null
   dataPrevista: string
-  atrasada: boolean
 }
 
-export interface MetricasOportunidades {
-  // Oportunidades distintas com pelo menos uma tarefa no mês.
-  oportunidades: number
-  feitas: number
-  naoFeitas: number
+export interface MetricasTarefas {
+  novaTarefa: number
+  hoje: number
+  futuras: number
+  concluidas: number
   atrasadas: number
-  naoFeitasLista: TarefaNaoFeita[]
+  oportunidades: number
+  oportunidadesConcluidas: number
+  atrasadasLista: TarefaAtrasada[]
 }
 
-export function novasMetricasOportunidades(): MetricasOportunidades {
-  return { oportunidades: 0, feitas: 0, naoFeitas: 0, atrasadas: 0, naoFeitasLista: [] }
+export function novasMetricasTarefas(): MetricasTarefas {
+  return {
+    novaTarefa: 0,
+    hoje: 0,
+    futuras: 0,
+    concluidas: 0,
+    atrasadas: 0,
+    oportunidades: 0,
+    oportunidadesConcluidas: 0,
+    atrasadasLista: [],
+  }
 }
 
-// `hojeISO` = data local de hoje em 'YYYY-MM-DD' (data_prevista é `date`).
-export function agregarOportunidades(
-  tarefas: TarefaOportunidade[],
-  hojeISO: string,
-): { porFuncionario: Map<string, MetricasOportunidades>; equipe: MetricasOportunidades } {
-  const porFuncionario = new Map<string, MetricasOportunidades>()
-  const equipe = novasMetricasOportunidades()
-  const oportunidadesPor = new Map<MetricasOportunidades, Set<string>>()
+export function agregarTarefasOportunidades(params: {
+  // Tarefas com data prevista no mês OU criadas no mês (a query já recorta).
+  tarefasPeriodo: TarefaProdutividade[]
+  // Todas as tarefas vinculadas a oportunidade da empresa, sem recorte —
+  // base da atribuição (foto de quem está tocando cada oportunidade).
+  tarefasDeOportunidade: TarefaProdutividade[]
+  oportunidades: OportunidadeProdutividade[]
+  inicio: Date
+  fim: Date
+}): { porFuncionario: Map<string, MetricasTarefas>; equipe: MetricasTarefas } {
+  const { tarefasPeriodo, tarefasDeOportunidade, oportunidades, inicio, fim } = params
+  const inicioISO = dataISO(inicio)
+  const fimISO = dataISO(fim)
+  const porFuncionario = new Map<string, MetricasTarefas>()
+  const equipe = novasMetricasTarefas()
+  const nomeOportunidade = new Map(oportunidades.map((o) => [o.id, o.cliente_nome]))
 
-  const aplicar = (m: MetricasOportunidades, t: TarefaOportunidade) => {
-    const vistas = oportunidadesPor.get(m) ?? new Set<string>()
-    oportunidadesPor.set(m, vistas)
-    vistas.add(t.oportunidade_id)
-    m.oportunidades = vistas.size
-    if (t.situacao === 'Realizada') {
-      m.feitas += 1
-      return
+  // Soma sempre na equipe; na pessoa só quando há responsável.
+  const somar = (responsavel: string | null, aplicar: (m: MetricasTarefas) => void) => {
+    aplicar(equipe)
+    if (!responsavel) return
+    let m = porFuncionario.get(responsavel)
+    if (!m) {
+      m = novasMetricasTarefas()
+      porFuncionario.set(responsavel, m)
     }
-    const dataPrevista = t.data_prevista ?? ''
-    const atrasada = dataPrevista < hojeISO
-    m.naoFeitas += 1
-    if (atrasada) m.atrasadas += 1
-    m.naoFeitasLista.push({
-      id: t.id,
-      oportunidadeId: t.oportunidade_id,
-      descricao: t.descricao,
-      dataPrevista,
-      atrasada,
+    aplicar(m)
+  }
+
+  const noMes = (t: Pick<TarefaProdutividade, 'data_prevista' | 'criado_em'>) => {
+    const data = t.data_prevista?.slice(0, 10)
+    return data ? data >= inicioISO && data < fimISO : dentro(t.criado_em, inicio, fim)
+  }
+
+  for (const t of tarefasPeriodo) {
+    if (dentro(t.criado_em, inicio, fim)) {
+      somar(t.responsavel, (m) => {
+        m.novaTarefa += 1
+      })
+    }
+    if (t.situacao === 'Cancelada' || !noMes(t)) continue
+    if (t.situacao === 'Realizada') {
+      somar(t.responsavel, (m) => {
+        m.concluidas += 1
+      })
+      continue
+    }
+    const prazo = classificarPrazo(t)
+    if (prazo === 'HOJE') {
+      somar(t.responsavel, (m) => {
+        m.hoje += 1
+      })
+    } else if (prazo === 'FUTURAS') {
+      somar(t.responsavel, (m) => {
+        m.futuras += 1
+      })
+    } else if (prazo === 'ATRASADAS') {
+      const item: TarefaAtrasada = {
+        id: t.id,
+        descricao: t.descricao,
+        cliente: t.cliente_nome ?? (t.oportunidade_id ? nomeOportunidade.get(t.oportunidade_id) ?? null : null),
+        dataPrevista: t.data_prevista?.slice(0, 10) ?? '',
+      }
+      somar(t.responsavel, (m) => {
+        m.atrasadas += 1
+        m.atrasadasLista.push(item)
+      })
+    }
+  }
+
+  const tarefasPorOportunidade = new Map<string, TarefaProdutividade[]>()
+  for (const t of tarefasDeOportunidade) {
+    if (!t.oportunidade_id) continue
+    const lista = tarefasPorOportunidade.get(t.oportunidade_id) ?? []
+    lista.push(t)
+    tarefasPorOportunidade.set(t.oportunidade_id, lista)
+  }
+
+  for (const o of oportunidades) {
+    const tarefas = tarefasPorOportunidade.get(o.id) ?? []
+    const ativa =
+      dentro(o.criado_em, inicio, fim) ||
+      dentro(o.ultima_movimentacao, inicio, fim) ||
+      tarefas.some((t) => t.situacao !== 'Cancelada' && noMes(t))
+    if (!ativa) continue
+    const { responsavel } = atribuirOportunidade(tarefas, o.criado_por)
+    const ganhaNoMes = o.status === 'GANHO' && dentro(o.ultima_movimentacao, inicio, fim)
+    somar(responsavel, (m) => {
+      m.oportunidades += 1
+      if (ganhaNoMes) m.oportunidadesConcluidas += 1
     })
   }
 
-  for (const t of tarefas) {
-    if (t.situacao === 'Cancelada' || !t.data_prevista) continue
-    aplicar(equipe, t)
-    if (!t.responsavel) continue
-    let m = porFuncionario.get(t.responsavel)
-    if (!m) {
-      m = novasMetricasOportunidades()
-      porFuncionario.set(t.responsavel, m)
-    }
-    aplicar(m, t)
-  }
-
   for (const m of Array.from(porFuncionario.values()).concat(equipe)) {
-    m.naoFeitasLista.sort((a, b) => a.dataPrevista.localeCompare(b.dataPrevista))
+    m.atrasadasLista.sort((a, b) => a.dataPrevista.localeCompare(b.dataPrevista))
   }
   return { porFuncionario, equipe }
 }

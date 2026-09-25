@@ -41,6 +41,7 @@ import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { TAREFA_SITUACAO_OPCOES } from '@/lib/tarefas/opcoes'
 import { RESULTADO_INTERACAO_OPCOES } from '@/lib/interacoes/opcoes'
 import { situacaoTerminal } from '@/lib/tarefas/situacao'
+import { atribuirOportunidade, type OrigemAtribuicao } from '@/lib/oportunidades/atribuicao'
 import { FiltroData } from '@/components/busca/FiltroData'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { AnaliticoPorFuncionarioImpressao, type CelulaImpressao } from './AnaliticoPorFuncionarioImpressao'
@@ -146,9 +147,6 @@ interface OportunidadeLinha {
   criadoEm: string
 }
 
-// De onde veio a atribuição de uma oportunidade em andamento — mostrado no
-// drill-down pra deixar os casos de fallback visíveis.
-type OrigemAtribuicao = 'tarefa_aberta' | 'tarefa_concluida' | 'criador'
 
 interface OportunidadeAndamentoLinha {
   id: string
@@ -901,47 +899,26 @@ export default function AnaliticoPorFuncionario({
 
         // 3b) Oport. em Andamento — oportunidades abertas (fora de GANHO/
         // PERDIDO), sem recorte de período, atribuídas a quem está tocando
-        // cada uma agora:
-        //   1. responsável da tarefa ABERTA (Pendente/Em Execução) mais
-        //      recente vinculada — quem deve agir em seguida;
-        //   2. sem tarefa aberta: responsável da última tarefa Realizada
-        //      (Canceladas e excluídas não contam);
-        //   3. tarefa escolhida sem responsável (comum nas importadas do
-        //      Omie): "Não atribuído" — não volta pra uma tarefa mais antiga,
-        //      que poderia apontar alguém que já saiu do caso;
-        //   4. nenhuma tarefa: criado_por (Novo Lead/Cadastro rápido não
-        //      criam tarefa).
+        // cada uma agora (regra compartilhada em lib/oportunidades/
+        // atribuicao.ts: tarefa aberta mais recente → última Realizada →
+        // criador; tarefa escolhida sem responsável = "Não atribuído").
         const tarefasPorOportunidade = new Map<string, TarefaOportunidadeBruta[]>()
         for (const tarefa of (tarefasOportData ?? []) as TarefaOportunidadeBruta[]) {
-          if (!tarefa.oportunidade_id || tarefa.situacao === 'Cancelada') continue
+          if (!tarefa.oportunidade_id) continue
           const lista = tarefasPorOportunidade.get(tarefa.oportunidade_id) ?? []
           lista.push(tarefa)
           tarefasPorOportunidade.set(tarefa.oportunidade_id, lista)
         }
-        const maisRecente = (lista: TarefaOportunidadeBruta[]) =>
-          lista.reduce<TarefaOportunidadeBruta | null>(
-            (atual, t) => (!atual || t.criado_em > atual.criado_em ? t : atual),
-            null,
-          )
 
         for (const oportunidade of oportunidadesTodas) {
           if (oportunidade.status === 'GANHO' || oportunidade.status === 'PERDIDO') continue
 
-          const tarefasDaOportunidade = tarefasPorOportunidade.get(oportunidade.id) ?? []
-          const abertaMaisRecente = maisRecente(tarefasDaOportunidade.filter((t) => !situacaoTerminal(t.situacao)))
-          const concluidaMaisRecente = abertaMaisRecente
-            ? null
-            : maisRecente(tarefasDaOportunidade.filter((t) => t.situacao === 'Realizada'))
-          const tarefaEscolhida = abertaMaisRecente ?? concluidaMaisRecente
-
-          const origem: OrigemAtribuicao = abertaMaisRecente
-            ? 'tarefa_aberta'
-            : concluidaMaisRecente
-              ? 'tarefa_concluida'
-              : 'criador'
-          const chave = tarefaEscolhida
-            ? tarefaEscolhida.responsavel ?? SEM_ATRIBUICAO_ID
-            : oportunidade.criado_por
+          const {
+            responsavel,
+            origem,
+            tarefaAberta: abertaMaisRecente,
+          } = atribuirOportunidade(tarefasPorOportunidade.get(oportunidade.id) ?? [], oportunidade.criado_por)
+          const chave = responsavel ?? SEM_ATRIBUICAO_ID
           const agregado = obterOuCriar(mapa, chave, chave === SEM_ATRIBUICAO_ID ? SEM_ATRIBUICAO_NOME : 'Perfil removido')
           const valorEstimado = Number(oportunidade.valor_estimado ?? 0)
 
