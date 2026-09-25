@@ -8,7 +8,8 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { MoedaInput } from '@/components/ui/MoedaInput'
+import { formatarMoeda, parseMoedaBR } from '@/lib/kanban/formatacao'
+import { mensagemErroSalvarMetas } from '@/lib/produtividade/erros'
 
 export interface MetaLinha {
   id: string
@@ -18,6 +19,46 @@ export interface MetaLinha {
 }
 
 const CLASSE_MOEDA = 'input-field w-40 rounded-md px-2 py-1.5 font-mono text-sm'
+
+// Valor salvo -> texto editável no formato brasileiro ("240.000,00").
+function paraTexto(valor: number): string {
+  return valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+// Campo de moeda em texto livre com parse brasileiro. Não usa o MoedaInput
+// compartilhado (input type="number"): nele, "240.000" digitado vira 240 —
+// o ponto é lido como separador decimal. Aqui "240.000", "240.000,00" e
+// "240000" viram todos 240 mil; fora do foco, mostra "R$ 240.000,00".
+function CampoMoeda({
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  value: string
+  onChange: (valor: string) => void
+  ariaLabel: string
+}) {
+  const [focado, setFocado] = useState(false)
+  const numero = parseMoedaBR(value)
+  const invalido = value.trim() !== '' && numero === null
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      aria-label={ariaLabel}
+      aria-invalid={invalido}
+      value={focado || numero === null ? value : formatarMoeda(numero)}
+      onFocus={() => setFocado(true)}
+      onBlur={() => {
+        setFocado(false)
+        if (numero !== null) onChange(paraTexto(numero))
+      }}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder="R$ 0,00"
+      className={`${CLASSE_MOEDA} ${invalido ? 'ring-1 ring-accent-danger' : ''}`}
+    />
+  )
+}
 
 export function MetasEditor({
   empresaId,
@@ -51,11 +92,11 @@ export function MetasEditor({
   // Recarrega o formulário quando muda o mês ou chegam as metas salvas.
   useEffect(() => {
     const linhaGlobal = metas.find((m) => m.funcionario_id === null)
-    setGlobal(linhaGlobal && linhaGlobal.valor_meta > 0 ? String(linhaGlobal.valor_meta) : '')
+    setGlobal(linhaGlobal && linhaGlobal.valor_meta > 0 ? paraTexto(linhaGlobal.valor_meta) : '')
     setDiasAjuste(linhaGlobal?.dias_uteis_ajuste != null ? String(linhaGlobal.dias_uteis_ajuste) : '')
     const mapa: Record<string, string> = {}
     for (const m of metas) {
-      if (m.funcionario_id && m.valor_meta > 0) mapa[m.funcionario_id] = String(m.valor_meta)
+      if (m.funcionario_id && m.valor_meta > 0) mapa[m.funcionario_id] = paraTexto(m.valor_meta)
     }
     setPessoais(mapa)
   }, [metas])
@@ -67,8 +108,7 @@ export function MetasEditor({
 
   function paraNumero(valor: string): number | null {
     if (valor.trim() === '') return 0
-    const n = Number(valor)
-    return Number.isFinite(n) && n >= 0 ? n : null
+    return parseMoedaBR(valor)
   }
 
   // Grava uma linha (update se já existe, insert se não) — sem upsert, pra
@@ -133,7 +173,7 @@ export function MetasEditor({
       onSalvo()
     } catch (err) {
       console.error('Erro ao salvar metas:', err)
-      setErro('Não foi possível salvar as metas. Tente novamente.')
+      setErro(mensagemErroSalvarMetas(err))
     } finally {
       setSalvando(false)
     }
@@ -147,7 +187,7 @@ export function MetasEditor({
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-muted">Meta da empresa (global)</span>
-          <MoedaInput value={global} onChange={setGlobal} onBlurSalvar={() => {}} className={CLASSE_MOEDA} />
+          <CampoMoeda value={global} onChange={setGlobal} ariaLabel="Meta da empresa (global)" />
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-muted">Dias úteis do mês (ajuste)</span>
@@ -176,11 +216,10 @@ export function MetasEditor({
           {vendedoras.map((v) => (
             <label key={v.id} className="flex flex-col gap-1 text-sm">
               <span className="text-muted">{v.nome}</span>
-              <MoedaInput
+              <CampoMoeda
                 value={pessoais[v.id] ?? ''}
                 onChange={(valor) => setPessoais((atual) => ({ ...atual, [v.id]: valor }))}
-                onBlurSalvar={() => {}}
-                className={CLASSE_MOEDA}
+                ariaLabel={`Meta pessoal de ${v.nome}`}
               />
             </label>
           ))}

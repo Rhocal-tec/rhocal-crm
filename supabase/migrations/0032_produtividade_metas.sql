@@ -8,8 +8,9 @@
 -- Uma linha por empresa + mês + funcionário. funcionario_id nulo = meta
 -- GLOBAL da empresa no mês (é só nela que dias_uteis_ajuste faz sentido —
 -- o ajuste de feriado municipal/emenda vale pro mês da empresa inteira).
--- "nulls not distinct" (Postgres 15+) impede duas metas globais no mesmo
--- mês, que um unique comum deixaria passar por causa do null.
+-- Unicidade em dois índices parciais (global / por funcionário): um unique
+-- comum deixaria passar duas metas globais no mesmo mês por causa do null,
+-- e "nulls not distinct" exigiria Postgres 15+.
 -- Sem policy de delete (regra de ouro): "tirar" uma meta = gravar 0.
 -- =====================================================================
 create table if not exists public.metas_comerciais (
@@ -24,10 +25,15 @@ create table if not exists public.metas_comerciais (
   criado_em timestamptz not null default now(),
   atualizado_em timestamptz not null default now(),
   constraint metas_comerciais_ajuste_so_global
-    check (funcionario_id is null or dias_uteis_ajuste is null),
-  constraint metas_comerciais_unica
-    unique nulls not distinct (empresa_id, funcionario_id, ano, mes)
+    check (funcionario_id is null or dias_uteis_ajuste is null)
 );
+
+create unique index if not exists metas_comerciais_unica_global
+  on public.metas_comerciais (empresa_id, ano, mes)
+  where funcionario_id is null;
+create unique index if not exists metas_comerciais_unica_funcionario
+  on public.metas_comerciais (empresa_id, funcionario_id, ano, mes)
+  where funcionario_id is not null;
 
 create or replace function public.fn_metas_comerciais_atualizado_em()
 returns trigger language plpgsql as $$

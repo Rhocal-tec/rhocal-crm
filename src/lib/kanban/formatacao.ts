@@ -38,6 +38,19 @@ export function formatarMoeda(valor: number | string | null): string {
   return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
+// Converte um valor digitado no formato brasileiro em número: "240.000",
+// "240.000,00", "R$ 240.000,50", "75000", "1250,5". Ponto só é tratado como
+// separador de milhar quando segue o padrão de grupos de 3 dígitos ou vem
+// junto de vírgula — "12.5" continua sendo 12,5. null = inválido.
+export function parseMoedaBR(texto: string): number | null {
+  let t = texto.replace(/R\$|\s/g, '')
+  if (t === '') return null
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.')
+  else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '')
+  const n = Number(t)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
 // Máscara progressiva de telefone brasileiro, aplicada a cada tecla digitada:
 // (XX) XXXX-XXXX (fixo, 10 dígitos) ou (XX) XXXXX-XXXX (celular, 11 dígitos).
 // Só formata dígitos — texto colado com letras/símbolos é limpo antes.

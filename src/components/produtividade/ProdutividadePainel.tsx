@@ -28,6 +28,7 @@ import {
   type PedidoProdutividade,
   type TarefaOportunidade,
 } from '@/lib/produtividade/calculo'
+import { faltaMigracao, MENSAGEM_FALTA_MIGRACAO } from '@/lib/produtividade/erros'
 import { calcularDiasUteisMes, type DiasUteisMes } from '@/lib/produtividade/dias-uteis'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
 import { MetasEditor, type MetaLinha } from './MetasEditor'
@@ -76,16 +77,6 @@ function emLotes<T>(lista: T[]): T[][] {
 function dataISO(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-
-// Tabela/função da migração 0032 ainda não criada no Supabase (PostgREST
-// responde "not found in the schema cache").
-function faltaMigracao(err: unknown): boolean {
-  const codigo = (err as { code?: string } | null)?.code
-  return codigo === 'PGRST202' || codigo === 'PGRST205' || codigo === '42P01' || codigo === '42883'
-}
-
-const MENSAGEM_FALTA_MIGRACAO =
-  'A aba Produtividade ainda não foi ativada no banco: rode a migração supabase/migrations/0032_produtividade_metas.sql no SQL Editor do Supabase e recarregue a página.'
 
 function pct(valor: number, meta: number): number | null {
   if (meta <= 0) return null
