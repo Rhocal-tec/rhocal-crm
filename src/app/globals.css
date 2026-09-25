@@ -71,20 +71,21 @@ body {
   }
 }
 
-/* Impressão do Analítico por Funcionário (Painel executivo) — versão
-   dedicada em AnaliticoPorFuncionarioImpressao.tsx, renderizada via portal
-   direto no <body>. Na tela ela fica escondida; na impressão, é a ÚNICA
-   coisa que aparece (o resto do body some com display:none, sem deixar
-   páginas em branco), em A4 paisagem, papel branco e texto escuro.
-   Tudo condicionado a :has(> .analitico-impressao) e a uma página nomeada
-   (@page analitico): imprimir qualquer outra tela não é afetado. */
-.analitico-impressao {
+/* Folha de impressão (components/impressao/FolhaImpressao.tsx) — base das
+   versões de impressão do Analítico por funcionário e da Produtividade,
+   renderizadas via portal direto no <body>. Na tela ficam escondidas; na
+   impressão, são a ÚNICA coisa que aparece (o resto do body some com
+   display:none, sem deixar páginas em branco), em A4 paisagem, papel branco
+   e texto escuro. Tudo condicionado a :has(> .folha-impressao) e a uma
+   página nomeada (@page folha-a4): imprimir qualquer outra tela não é
+   afetado. */
+.folha-impressao {
   display: none;
 }
 
 /* Margens curtas: com a fonte em tamanho de leitura (12-15pt), o espaço
    horizontal da folha é o que decide se todas as colunas cabem. */
-@page analitico {
+@page folha-a4 {
   size: A4 landscape;
   margin: 8mm 7mm;
 }
@@ -92,29 +93,29 @@ body {
 @media print {
   /* O :root usa color-scheme: dark, que pinta de escuro o fundo da folha
      (inclusive as margens da página) — volta pro esquema claro aqui. */
-  html:has(> body > .analitico-impressao) {
+  html:has(> body > .folha-impressao) {
     color-scheme: light;
     background: #fff !important;
   }
-  body:has(> .analitico-impressao) {
+  body:has(> .folha-impressao) {
     background: #fff !important;
     color: #111 !important;
   }
-  body:has(> .analitico-impressao) > *:not(.analitico-impressao) {
+  body:has(> .folha-impressao) > *:not(.folha-impressao) {
     display: none !important;
   }
 
-  /* Tamanhos em pt, pensados pra leitura no papel. Se a tabela ficasse
+  /* Tamanhos em pt, pensados pra leitura no papel. Se uma tabela ficasse
      mais larga que a folha, o Chrome reduziria a escala da impressão
      inteira pra caber (era o que deixava o texto minúsculo) — por isso
      table-layout: fixed (a largura é sempre a da folha, nunca a do
      conteúdo), nada de white-space: nowrap, e cabeçalhos/números em Barlow
      Condensed (fonte condensada do design system), que cabe em colunas
-     estreitas mesmo com as 13 métricas ligadas. O que não cabe na altura
-     continua em outra página, com o cabeçalho repetido. */
-  .analitico-impressao {
+     estreitas mesmo com muitas métricas. O que não cabe na altura continua
+     em outra página, com cabeçalho repetido — nunca diminuir a fonte. */
+  .folha-impressao {
     display: block;
-    page: analitico;
+    page: folha-a4;
     color: #111;
     font-family: var(--font-inter), Arial, Helvetica, sans-serif;
     font-size: 12.5pt;
@@ -123,7 +124,26 @@ body {
     print-color-adjust: exact;
   }
 
-  .analitico-impressao-cabecalho {
+  /* Moldura: thead (cabeçalho com logo) e tfoot (data/hora) repetidos em
+     toda página. Seletores com ">" pra não vazar pras tabelas internas. */
+  .folha-impressao-moldura {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .folha-impressao-moldura > thead {
+    display: table-header-group;
+  }
+  .folha-impressao-moldura > tfoot {
+    display: table-footer-group;
+  }
+  .folha-impressao-moldura > thead > tr > td,
+  .folha-impressao-moldura > tbody > tr > td,
+  .folha-impressao-moldura > tfoot > tr > td {
+    padding: 0;
+    border: 0;
+  }
+
+  .folha-impressao-cabecalho {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -131,91 +151,103 @@ body {
     padding-bottom: 6px;
     border-bottom: 2px solid #111;
   }
-  .analitico-impressao-logo {
+  .folha-impressao-logo {
     width: 48px;
     height: 48px;
     object-fit: contain;
   }
-  .analitico-impressao-cabecalho h1 {
+  .folha-impressao-cabecalho h1 {
     font-size: 17pt;
     font-weight: 700;
     margin: 0;
   }
-  .analitico-impressao-cabecalho p {
+  .folha-impressao-cabecalho p {
     margin: 1px 0 0;
     font-size: 11.5pt;
     color: #444;
   }
-  .analitico-impressao-cabecalho .analitico-impressao-empresa {
+  .folha-impressao-cabecalho .folha-impressao-empresa {
     color: #111;
     font-weight: 600;
   }
 
-  .analitico-impressao-tabela {
+  /* Seções (várias tabelas na mesma folha, ex: Produtividade): título +
+     tabela ficam juntos — a seção só quebra de página se não couber inteira. */
+  .folha-impressao-secao {
+    break-inside: avoid;
+    margin-bottom: 10px;
+  }
+  .folha-impressao-secao h2 {
+    font-size: 13pt;
+    font-weight: 700;
+    margin: 0 0 4px;
+  }
+
+  .folha-impressao-tabela {
     width: 100%;
     table-layout: fixed;
     border-collapse: collapse;
   }
   /* Cabeçalho da tabela repetido no topo de cada página quando ela quebra. */
-  .analitico-impressao-tabela thead {
+  .folha-impressao-tabela thead {
     display: table-header-group;
   }
-  .analitico-impressao-tabela tfoot {
+  .folha-impressao-tabela tfoot {
     display: table-row-group;
   }
-  .analitico-impressao-tabela tr {
+  .folha-impressao-tabela tr {
     break-inside: avoid;
   }
-  .analitico-impressao-tabela th,
-  .analitico-impressao-tabela td {
+  .folha-impressao-tabela th,
+  .folha-impressao-tabela td {
     border: 1px solid #999;
     padding: 3px 2px;
     text-align: center;
     vertical-align: middle;
     overflow-wrap: break-word;
   }
-  .analitico-impressao-tabela th {
+  .folha-impressao-tabela th {
     background: #e8e8e8;
     font-family: var(--font-barlow-condensed), 'Arial Narrow', Arial, sans-serif;
-    font-size: 11pt;
+    font-size: 11.5pt;
     font-weight: 700;
     line-height: 1.1;
   }
-  .analitico-impressao-tabela .analitico-impressao-nome {
+  .folha-impressao-tabela .folha-impressao-nome {
     width: 13%;
     text-align: left;
     font-family: var(--font-inter), Arial, Helvetica, sans-serif;
     font-size: 12pt;
     font-weight: 700;
   }
-  .analitico-impressao-principal {
+  .folha-impressao-principal {
     display: block;
     font-family: var(--font-barlow-condensed), 'Arial Narrow', Arial, sans-serif;
     font-size: 15pt;
     font-weight: 700;
   }
-  .analitico-impressao-tabela tbody tr:nth-child(even) td {
+  .folha-impressao-tabela tbody tr:nth-child(even) td {
     background: #f6f6f6;
   }
-  .analitico-impressao-tabela tfoot td {
+  .folha-impressao-tabela tfoot td {
     font-weight: 700;
     border-top: 2.5px solid #111;
     background: #e8e8e8;
   }
-  .analitico-impressao-secundario {
+  .folha-impressao-secundario {
     display: block;
     font-family: var(--font-barlow-condensed), 'Arial Narrow', Arial, sans-serif;
     font-size: 11.5pt;
     font-weight: 400;
     color: #444;
   }
-  .analitico-impressao-nome .analitico-impressao-secundario {
+  .folha-impressao-nome .folha-impressao-secundario {
     display: inline;
     font-family: inherit;
     font-size: 10.5pt;
   }
 
-  .analitico-impressao-rodape {
+  .folha-impressao-rodape {
     margin-top: 6px;
     font-size: 10pt;
     color: #555;

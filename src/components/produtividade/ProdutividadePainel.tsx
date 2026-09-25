@@ -36,6 +36,7 @@ import { faltaMigracao, MENSAGEM_FALTA_MIGRACAO } from '@/lib/produtividade/erro
 import { calcularDiasUteisMes, type DiasUteisMes } from '@/lib/produtividade/dias-uteis'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
 import { MetasEditor, type MetaLinha } from './MetasEditor'
+import { ProdutividadeImpressao } from './ProdutividadeImpressao'
 import type { Database } from '@/types/database'
 
 type Profile = Pick<Database['public']['Tables']['profiles']['Row'], 'id' | 'nome' | 'setor' | 'ativo'>
@@ -651,6 +652,13 @@ export function ProdutividadePainel() {
           >
             ›
           </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="ml-2 rounded-md border border-white/15 px-3 py-1.5 text-sm text-primary/80 transition-colors hover:bg-white/10"
+          >
+            🖨️ Imprimir
+          </button>
           {ehGestor && (
             <button
               type="button"
@@ -829,6 +837,28 @@ export function ProdutividadePainel() {
         posterior) no mês. Tarefas = pelo responsável, no mês da data prevista (sem data, no de criação); Concluídas =
         só Realizada. Oportunidades = atribuídas pela tarefa mais recente (ou pelo criador), com atividade no mês.
       </p>
+
+      {/* Versão de impressão (escondida na tela): mesmos números e o mesmo
+          recorte por perfil — gestor imprime a equipe, comercial só o dele. */}
+      {empresaAtiva && (
+        <ProdutividadeImpressao
+          empresaNome={empresaAtiva.nome_fantasia}
+          logoPath={empresaAtiva.logo_path}
+          mesTexto={`${MESES[mes - 1]}/${ano}`}
+          metaGlobal={metaGlobal}
+          equipe={equipe}
+          equipeTarefas={tarefas.equipe}
+          vendedoras={[...visiveis, ...minhaLinha].map((v) => ({
+            id: v.id,
+            nome: v.nome,
+            metaPessoal: metaPessoalPorId.get(v.id) ?? 0,
+            m: v.m,
+            t: v.t,
+          }))}
+          mostrarEquipe={ehGestor}
+          marcosCompletos={marcosCompletos}
+        />
+      )}
     </main>
   )
 }
