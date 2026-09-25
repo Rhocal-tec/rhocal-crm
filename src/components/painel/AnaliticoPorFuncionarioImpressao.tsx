@@ -102,7 +102,7 @@ export function AnaliticoPorFuncionarioImpressao({
               </td>
               {linha.celulas.map((celula, i) => (
                 <td key={colunas[i]}>
-                  {celula.principal}
+                  <span className="analitico-impressao-principal">{celula.principal}</span>
                   {celula.secundario && <span className="analitico-impressao-secundario">{celula.secundario}</span>}
                 </td>
               ))}
@@ -114,7 +114,7 @@ export function AnaliticoPorFuncionarioImpressao({
             <td className="analitico-impressao-nome">TOTAL</td>
             {total.map((celula, i) => (
               <td key={colunas[i]}>
-                {celula.principal}
+                <span className="analitico-impressao-principal">{celula.principal}</span>
                 {celula.secundario && <span className="analitico-impressao-secundario">{celula.secundario}</span>}
               </td>
             ))}

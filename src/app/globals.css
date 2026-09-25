@@ -82,9 +82,11 @@ body {
   display: none;
 }
 
+/* Margens curtas: com a fonte em tamanho de leitura (12-15pt), o espaço
+   horizontal da folha é o que decide se todas as colunas cabem. */
 @page analitico {
   size: A4 landscape;
-  margin: 12mm 10mm;
+  margin: 8mm 7mm;
 }
 
 @media print {
@@ -102,12 +104,21 @@ body {
     display: none !important;
   }
 
+  /* Tamanhos em pt, pensados pra leitura no papel. Se a tabela ficasse
+     mais larga que a folha, o Chrome reduziria a escala da impressão
+     inteira pra caber (era o que deixava o texto minúsculo) — por isso
+     table-layout: fixed (a largura é sempre a da folha, nunca a do
+     conteúdo), nada de white-space: nowrap, e cabeçalhos/números em Barlow
+     Condensed (fonte condensada do design system), que cabe em colunas
+     estreitas mesmo com as 13 métricas ligadas. O que não cabe na altura
+     continua em outra página, com o cabeçalho repetido. */
   .analitico-impressao {
     display: block;
     page: analitico;
     color: #111;
     font-family: var(--font-inter), Arial, Helvetica, sans-serif;
-    font-size: 9.5pt;
+    font-size: 12.5pt;
+    line-height: 1.25;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -116,22 +127,23 @@ body {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 10px;
-    padding-bottom: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
     border-bottom: 2px solid #111;
   }
   .analitico-impressao-logo {
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     object-fit: contain;
   }
   .analitico-impressao-cabecalho h1 {
-    font-size: 15pt;
+    font-size: 17pt;
     font-weight: 700;
     margin: 0;
   }
   .analitico-impressao-cabecalho p {
     margin: 1px 0 0;
+    font-size: 11.5pt;
     color: #444;
   }
   .analitico-impressao-cabecalho .analitico-impressao-empresa {
@@ -141,6 +153,7 @@ body {
 
   .analitico-impressao-tabela {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
   }
   /* Cabeçalho da tabela repetido no topo de cada página quando ela quebra. */
@@ -156,19 +169,30 @@ body {
   .analitico-impressao-tabela th,
   .analitico-impressao-tabela td {
     border: 1px solid #999;
-    padding: 4px 5px;
+    padding: 3px 2px;
     text-align: center;
-    vertical-align: top;
+    vertical-align: middle;
+    overflow-wrap: break-word;
   }
   .analitico-impressao-tabela th {
     background: #e8e8e8;
-    font-size: 8.5pt;
+    font-family: var(--font-barlow-condensed), 'Arial Narrow', Arial, sans-serif;
+    font-size: 11pt;
     font-weight: 700;
-    text-transform: uppercase;
+    line-height: 1.1;
   }
   .analitico-impressao-tabela .analitico-impressao-nome {
+    width: 13%;
     text-align: left;
-    white-space: nowrap;
+    font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+    font-size: 12pt;
+    font-weight: 700;
+  }
+  .analitico-impressao-principal {
+    display: block;
+    font-family: var(--font-barlow-condensed), 'Arial Narrow', Arial, sans-serif;
+    font-size: 15pt;
+    font-weight: 700;
   }
   .analitico-impressao-tabela tbody tr:nth-child(even) td {
     background: #f6f6f6;
@@ -180,19 +204,21 @@ body {
   }
   .analitico-impressao-secundario {
     display: block;
-    white-space: nowrap;
-    font-size: 7.5pt;
+    font-family: var(--font-barlow-condensed), 'Arial Narrow', Arial, sans-serif;
+    font-size: 11.5pt;
     font-weight: 400;
-    color: #555;
+    color: #444;
   }
   .analitico-impressao-nome .analitico-impressao-secundario {
     display: inline;
+    font-family: inherit;
+    font-size: 10.5pt;
   }
 
   .analitico-impressao-rodape {
-    margin-top: 8px;
-    font-size: 8pt;
-    color: #666;
+    margin-top: 6px;
+    font-size: 10pt;
+    color: #555;
     text-align: right;
   }
 }
