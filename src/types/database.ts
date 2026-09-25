@@ -934,6 +934,45 @@ export interface Database {
         }
         Relationships: []
       }
+      metas_comerciais: {
+        Row: {
+          id: string
+          empresa_id: string
+          funcionario_id: string | null
+          ano: number
+          mes: number
+          valor_meta: number
+          dias_uteis_ajuste: number | null
+          criado_por: string
+          criado_em: string
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          empresa_id: string
+          funcionario_id?: string | null
+          ano: number
+          mes: number
+          valor_meta?: number
+          dias_uteis_ajuste?: number | null
+          criado_por: string
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          empresa_id?: string
+          funcionario_id?: string | null
+          ano?: number
+          mes?: number
+          valor_meta?: number
+          dias_uteis_ajuste?: number | null
+          criado_por?: string
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       v_recompra_priorizada: {
@@ -992,6 +1031,10 @@ export interface Database {
       meu_setor: {
         Args: Record<string, never>
         Returns: SetorTipo
+      }
+      fn_pedidos_efetuados: {
+        Args: { p_empresa_id: string }
+        Returns: { pedido_id: string; efetuado_em: string }[]
       }
     }
     Enums: {

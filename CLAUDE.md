@@ -1265,3 +1265,18 @@ Migração ADITIVA sobre a tabela `tarefas` já existente (`supabase/migrations/
 - Toda query de leitura de `tarefas` filtra `.eq('excluida', false)`: `TarefasBoard` (+ handlers de Realtime removem da tela quando `excluida` vira true), `TarefasTab`, `InteligenciaComercial`
 - Card e `TarefasTab`: botão "Excluir" (com `confirm()`), grava `excluida = true` + `excluida_em`/`excluida_por`
 - Importação do Omie (`importar-tarefas`): a deduplicação por `omie_tarefa_id` ignora o flag `excluida` de propósito — tarefa excluída à mão **não** ressuscita num reimport
+
+## Fase 41 — Aba Produtividade (metas do comercial, cálculo automático)
+
+Substitui o painel externo de metas (metas-comercial-rhocal.vercel.app), que dependia de digitação manual. Página `/produtividade`, link no header para **comercial e gestor** (compras não participa). Escopada pela empresa ativa (fase 30) — vale para RHOCAL e MATSEG — e por mês (seletor ‹ Mês/Ano ›).
+
+**Tudo automático a partir dos pedidos, exceto as metas** (`src/lib/produtividade/calculo.ts`). Atribuição por `criado_por`; valor = Σ `preco_venda × quantidade` dos itens não excluídos, **sem frete**:
+- **Faturado**: pedido que **passou** por PEDIDO_EFETUADO (ou ENTREGUE), com a data da **primeira passagem** no mês — reconstruída do `audit_log` pela RPC `fn_pedidos_efetuados(p_empresa_id)` (security definer, porque `audit_log` só é legível por compras/gestor; expõe só `pedido_id`/`efetuado_em`). Nunca pelo status atual: o job de 7 dias arquiva pedidos já efetuados
+- **Propostas montadas**: pedidos criados no mês (orç. diretos + normais; oportunidades não entram)
+- Sobre os pedidos **criados no mês**, pelo status atual: **não faturado** = APROVADO_CLIENTE; **pendente** = PEDIDO/EM_COTACAO/PEDIDO_COTADO; **cancelado** = PERDIDO + ARQUIVADO que nunca foi efetuado
+- **Conversão (coorte)**: propostas do mês que já chegaram a efetuado ÷ propostas do mês
+- **Dias úteis** (`src/lib/produtividade/dias-uteis.ts`): seg–sex menos feriados nacionais (fixos + Sexta-feira Santa e Corpus Christi via Páscoa); o gestor pode sobrescrever o total do mês (`dias_uteis_ajuste`) para feriado municipal/emenda. **Média diária** = faturado ÷ dias úteis decorridos (mês corrente conta hoje; mês fechado usa o total); "necessário por dia" = (meta − faturado) ÷ dias úteis restantes
+
+**Acesso:** gestor vê resultado da empresa, indicadores, somatória, comparativo e todas as vendedoras, e edita as metas; comercial vê só o próprio card e o resultado da empresa (recorte de interface — RLS de `pedidos` é aberto, como no resto do CRM). Vendedoras = perfis comerciais ativos + quem tem meta pessoal no mês + quem teve movimento no mês (nada fixo no código).
+
+**Schema** (`supabase/migrations/0032_produtividade_metas.sql`, rodar no SQL Editor antes do deploy): tabela `metas_comerciais (empresa_id, funcionario_id nullable = meta global, ano, mes, valor_meta, dias_uteis_ajuste só na linha global)`, `unique nulls not distinct (empresa_id, funcionario_id, ano, mes)`, auditada por `fn_audit`, leitura para autenticados, insert/update só `meu_setor() = 'gestor'`, sem delete (tirar meta = gravar 0).

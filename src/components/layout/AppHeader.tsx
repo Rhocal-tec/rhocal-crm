@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { podeAcessarTarefas } from '@/lib/tarefas/permissions'
 import { podeAcessarRecompra } from '@/lib/recompra/permissions'
+import { podeAcessarProdutividade } from '@/lib/produtividade/permissions'
 import type { SetorTipo } from '@/types/database'
 
 const SETOR_LABEL: Record<SetorTipo, string> = {
@@ -25,7 +26,8 @@ const SETOR_BADGE_CLASSES: Record<SetorTipo, string> = {
 
 // Ordem de exibição fixa no header: Kanban, Tarefas (que agora também
 // hospeda o kanban de Oportunidades como aba interna — ver /tarefas),
-// Hora de Recomprar, Clientes, Busca, Arquivados, Painel, Inteligência.
+// Hora de Recomprar, Clientes, Busca, Arquivados, Painel, Produtividade,
+// Inteligência.
 // `check` restringe a visibilidade por perfil; ausência de `check` = visível a todos.
 const NAV_ITEMS: { href: string; label: string; check?: (setor: SetorTipo) => boolean }[] = [
   { href: '/dashboard', label: 'Kanban' },
@@ -35,6 +37,7 @@ const NAV_ITEMS: { href: string; label: string; check?: (setor: SetorTipo) => bo
   { href: '/busca', label: 'Busca' },
   { href: '/arquivados', label: 'Arquivados' },
   { href: '/painel', label: 'Painel', check: (setor) => setor === 'gestor' },
+  { href: '/produtividade', label: 'Produtividade', check: podeAcessarProdutividade },
   {
     href: '/inteligencia',
     label: 'Inteligência',
