@@ -14,15 +14,19 @@ import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
-import { formatarMoeda } from '@/lib/kanban/formatacao'
+import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
 import {
+  agregarOportunidades,
   agregarProdutividade,
   cancelados,
   limitesDoMes,
   novasMetricas,
+  novasMetricasOportunidades,
   taxaConversao,
+  type MetricasOportunidades,
   type MetricasProdutividade,
   type PedidoProdutividade,
+  type TarefaOportunidade,
 } from '@/lib/produtividade/calculo'
 import { calcularDiasUteisMes, type DiasUteisMes } from '@/lib/produtividade/dias-uteis'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
@@ -68,6 +72,20 @@ function emLotes<T>(lista: T[]): T[][] {
   for (let i = 0; i < lista.length; i += TAMANHO_LOTE_IDS) lotes.push(lista.slice(i, i + TAMANHO_LOTE_IDS))
   return lotes
 }
+
+function dataISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Tabela/função da migração 0032 ainda não criada no Supabase (PostgREST
+// responde "not found in the schema cache").
+function faltaMigracao(err: unknown): boolean {
+  const codigo = (err as { code?: string } | null)?.code
+  return codigo === 'PGRST202' || codigo === 'PGRST205' || codigo === '42P01' || codigo === '42883'
+}
+
+const MENSAGEM_FALTA_MIGRACAO =
+  'A aba Produtividade ainda não foi ativada no banco: rode a migração supabase/migrations/0032_produtividade_metas.sql no SQL Editor do Supabase e recarregue a página.'
 
 function pct(valor: number, meta: number): number | null {
   if (meta <= 0) return null
@@ -140,18 +158,74 @@ function Somatoria({ m }: { m: MetricasProdutividade }) {
   )
 }
 
+function BlocoOportunidades({
+  o,
+  nomeOportunidade,
+}: {
+  o: MetricasOportunidades
+  nomeOportunidade: Map<string, string>
+}) {
+  const itens = [
+    { rotulo: 'Oportunidades trabalhadas', valor: o.oportunidades, destaque: false },
+    { rotulo: 'Tarefas feitas', valor: o.feitas, destaque: false },
+    { rotulo: 'Não feitas', valor: o.naoFeitas, destaque: false },
+    { rotulo: 'Atrasadas', valor: o.atrasadas, destaque: o.atrasadas > 0 },
+  ]
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {itens.map((i) => (
+          <div
+            key={i.rotulo}
+            className={`rounded-md px-3 py-2.5 ${
+              i.destaque ? 'bg-accent-danger/15 ring-1 ring-inset ring-accent-danger/40' : 'bg-surface-alt'
+            }`}
+          >
+            <p className="text-xs text-muted">{i.rotulo}</p>
+            <p className={`mt-1 font-mono text-lg font-semibold ${i.destaque ? 'text-accent-danger' : 'text-primary'}`}>
+              {i.valor}
+            </p>
+          </div>
+        ))}
+      </div>
+      {o.naoFeitasLista.length > 0 && (
+        <details className="mt-2 text-sm">
+          <summary className="cursor-pointer text-xs text-muted hover:text-primary">
+            Ver tarefas não feitas ({o.naoFeitasLista.length})
+          </summary>
+          <ul className="mt-2 flex flex-col gap-1">
+            {o.naoFeitasLista.map((t) => (
+              <li key={t.id} className="text-xs text-primary/80">
+                <span className={`font-mono ${t.atrasada ? 'text-accent-danger' : ''}`}>
+                  {formatarDataSomente(t.dataPrevista)}
+                </span>{' '}
+                — {nomeOportunidade.get(t.oportunidadeId) ?? 'Oportunidade'} · {t.descricao || '(sem descrição)'}
+                {t.atrasada && <span className="text-accent-danger"> · atrasada</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  )
+}
+
 function CardVendedora({
   nome,
   m,
   metaPessoal,
   metaGlobal,
   dias,
+  o,
+  nomeOportunidade,
 }: {
   nome: string
   m: MetricasProdutividade
   metaPessoal: number
   metaGlobal: number
   dias: DiasUteisMes
+  o: MetricasOportunidades
+  nomeOportunidade: Map<string, string>
 }) {
   const media = mediaDiaria(m.faturadoValor, dias)
   const necessario = necessarioPorDia(m.faturadoValor, metaPessoal, dias)
@@ -191,6 +265,10 @@ function CardVendedora({
       <div className="mt-4">
         <Somatoria m={m} />
       </div>
+      <h4 className="mt-4 text-xs font-medium uppercase tracking-wide text-muted">Oportunidades no mês</h4>
+      <div className="mt-2">
+        <BlocoOportunidades o={o} nomeOportunidade={nomeOportunidade} />
+      </div>
     </div>
   )
 }
@@ -211,6 +289,8 @@ export function ProdutividadePainel() {
   const [pedidos, setPedidos] = useState<PedidoProdutividade[]>([])
   const [efetuadoEm, setEfetuadoEm] = useState<Map<string, string>>(new Map())
   const [valorPorPedido, setValorPorPedido] = useState<Map<string, number>>(new Map())
+  const [tarefasOportunidade, setTarefasOportunidade] = useState<TarefaOportunidade[]>([])
+  const [nomeOportunidade, setNomeOportunidade] = useState<Map<string, string>>(new Map())
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -240,8 +320,7 @@ export function ProdutividadePainel() {
         const { inicio, fim } = limitesDoMes(ano, mes)
         const colunas = 'id, criado_por, criado_em, status'
 
-        const [profilesResp, criadosNoMes, efetuados] = await Promise.all([
-          supabase.from('profiles').select('id, nome, setor, ativo'),
+        const [criadosNoMes, efetuados] = await Promise.all([
           paginar<PedidoProdutividade>((de, ate) =>
             supabase
               .from('pedidos')
@@ -256,7 +335,6 @@ export function ProdutividadePainel() {
             supabase.rpc('fn_pedidos_efetuados', { p_empresa_id: empresaId }).range(de, ate),
           ),
         ])
-        if (profilesResp.error) throw profilesResp.error
 
         const mapaEfetuado = new Map(efetuados.map((e) => [e.pedido_id, e.efetuado_em]))
 
@@ -298,15 +376,82 @@ export function ProdutividadePainel() {
         }
 
         if (!ativo) return
-        setProfiles((profilesResp.data ?? []) as Profile[])
         setPedidos(todos)
         setEfetuadoEm(mapaEfetuado)
         setValorPorPedido(valores)
       } catch (err) {
         console.error('Erro ao carregar produtividade:', err)
-        if (ativo) setErro('Não foi possível carregar os dados de produtividade. Tente novamente.')
+        if (ativo) {
+          setErro(
+            faltaMigracao(err)
+              ? MENSAGEM_FALTA_MIGRACAO
+              : 'Não foi possível carregar os dados de produtividade. Tente novamente.',
+          )
+        }
       } finally {
         if (ativo) setCarregando(false)
+      }
+    }
+
+    carregar()
+    return () => {
+      ativo = false
+    }
+  }, [supabase, empresaAtiva, ano, mes])
+
+  // Perfis carregados à parte: os nomes aparecem mesmo se a carga de vendas
+  // falhar (ex: migração 0032 ainda não rodada).
+  useEffect(() => {
+    let ativo = true
+    supabase
+      .from('profiles')
+      .select('id, nome, setor, ativo')
+      .then(({ data, error }) => {
+        if (error) console.error('Erro ao carregar perfis:', error)
+        if (ativo) setProfiles((data ?? []) as Profile[])
+      })
+    return () => {
+      ativo = false
+    }
+  }, [supabase])
+
+  // Oportunidades trabalhadas: tarefas de oportunidade com data prevista no
+  // mês (data_prevista é `date` — compara como texto 'YYYY-MM-DD'). Carga
+  // separada das vendas, pra não depender da migração 0032.
+  const [erroOportunidades, setErroOportunidades] = useState<string | null>(null)
+  useEffect(() => {
+    if (!empresaAtiva) return
+    const empresaId = empresaAtiva.id
+    let ativo = true
+
+    async function carregar() {
+      setErroOportunidades(null)
+      try {
+        const { inicio, fim } = limitesDoMes(ano, mes)
+        const tarefas = await paginar<TarefaOportunidade>((de, ate) =>
+          supabase
+            .from('tarefas')
+            .select('id, oportunidade_id, responsavel, situacao, data_prevista, descricao')
+            .eq('empresa_id', empresaId)
+            .eq('excluida', false)
+            .not('oportunidade_id', 'is', null)
+            .gte('data_prevista', dataISO(inicio))
+            .lt('data_prevista', dataISO(fim))
+            .order('id')
+            .range(de, ate),
+        )
+        const nomes = new Map<string, string>()
+        for (const lote of emLotes(Array.from(new Set(tarefas.map((t) => t.oportunidade_id))))) {
+          const { data, error } = await supabase.from('oportunidades').select('id, cliente_nome').in('id', lote)
+          if (error) throw error
+          for (const o of data ?? []) nomes.set(o.id, o.cliente_nome)
+        }
+        if (!ativo) return
+        setTarefasOportunidade(tarefas)
+        setNomeOportunidade(nomes)
+      } catch (err) {
+        console.error('Erro ao carregar oportunidades da produtividade:', err)
+        if (ativo) setErroOportunidades('Não foi possível carregar as oportunidades do mês.')
       }
     }
 
@@ -330,7 +475,8 @@ export function ProdutividadePainel() {
         if (!ativo) return
         if (error) {
           console.error('Erro ao carregar metas:', error)
-          setErroMetas('Não foi possível carregar as metas do mês.')
+          // Falta de migração já aparece no banner principal — não duplica.
+          setErroMetas(faltaMigracao(error) ? null : 'Não foi possível carregar as metas do mês.')
           setMetas([])
           return
         }
@@ -353,6 +499,11 @@ export function ProdutividadePainel() {
     return agregarProdutividade({ pedidos, efetuadoEm, valorPorPedido, inicio, fim })
   }, [pedidos, efetuadoEm, valorPorPedido, ano, mes])
 
+  const oportunidades = useMemo(
+    () => agregarOportunidades(tarefasOportunidade, dataISO(new Date())),
+    [tarefasOportunidade],
+  )
+
   const metaGlobalLinha = metas.find((m) => m.funcionario_id === null) ?? null
   const metaGlobal = metaGlobalLinha?.valor_meta ?? 0
   const metaPessoalPorId = useMemo(
@@ -371,20 +522,22 @@ export function ProdutividadePainel() {
         .filter(([, valor]) => valor > 0)
         .map(([id]) => id),
       ...Array.from(porFuncionario.keys()),
+      ...Array.from(oportunidades.porFuncionario.keys()),
     ])
     return Array.from(ids)
       .map((id) => ({
         id,
         nome: nomePorId.get(id) ?? 'Perfil removido',
         m: porFuncionario.get(id) ?? novasMetricas(),
+        o: oportunidades.porFuncionario.get(id) ?? novasMetricasOportunidades(),
       }))
       .sort((a, b) => b.m.faturadoValor - a.m.faturadoValor || a.nome.localeCompare(b.nome))
-  }, [profiles, metaPessoalPorId, porFuncionario])
+  }, [profiles, metaPessoalPorId, porFuncionario, oportunidades])
 
   const visiveis = ehGestor ? vendedoras : vendedoras.filter((v) => v.id === profile?.id)
   const minhaLinha =
     !ehGestor && profile && visiveis.length === 0
-      ? [{ id: profile.id, nome: profile.nome, m: novasMetricas() }]
+      ? [{ id: profile.id, nome: profile.nome, m: novasMetricas(), o: novasMetricasOportunidades() }]
       : []
 
   const comparativo: BarraDado[] = vendedoras.map((v) => ({
@@ -441,6 +594,11 @@ export function ProdutividadePainel() {
       {erro && (
         <p className="mt-4 rounded-md border border-accent-danger/40 bg-accent-danger/10 px-3 py-2 text-sm text-accent-danger">
           {erro}
+        </p>
+      )}
+      {erroOportunidades && (
+        <p className="mt-4 rounded-md border border-accent-danger/40 bg-accent-danger/10 px-3 py-2 text-sm text-accent-danger">
+          {erroOportunidades}
         </p>
       )}
       {erroMetas && (
@@ -534,6 +692,16 @@ export function ProdutividadePainel() {
           </section>
 
           <section className="mt-6 rounded-lg border border-white/10 bg-surface p-5">
+            <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">Oportunidades da equipe</h2>
+            <p className="mt-1 text-xs text-muted">
+              Tarefas de oportunidade com data prevista no mês (inclui as sem responsável).
+            </p>
+            <div className="mt-3">
+              <BlocoOportunidades o={oportunidades.equipe} nomeOportunidade={nomeOportunidade} />
+            </div>
+          </section>
+
+          <section className="mt-6 rounded-lg border border-white/10 bg-surface p-5">
             <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">
               Comparativo de faturamento
             </h2>
@@ -561,6 +729,8 @@ export function ProdutividadePainel() {
               metaPessoal={metaPessoalPorId.get(v.id) ?? 0}
               metaGlobal={metaGlobal}
               dias={dias}
+              o={v.o}
+              nomeOportunidade={nomeOportunidade}
             />
           ))}
         </div>
@@ -569,7 +739,8 @@ export function ProdutividadePainel() {
       <p className="mt-8 text-xs text-muted">
         Faturado = pedidos que passaram por Pedido Efetuado no mês (mesmo que depois arquivados). Propostas, não
         faturados, pendentes e cancelados = pedidos criados no mês, pelo status atual. Valores sem frete; atribuídos a
-        quem criou o pedido.
+        quem criou o pedido. Oportunidades = tarefas de oportunidade com data prevista no mês, pelo responsável:
+        feita = Realizada; não feita = Pendente/Em Execução (atrasada se a data já passou); canceladas não contam.
       </p>
     </main>
   )

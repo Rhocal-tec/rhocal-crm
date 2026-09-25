@@ -139,3 +139,92 @@ export function agregarProdutividade(params: {
 
   return { porFuncionario, equipe }
 }
+
+// ===== Oportunidades trabalhadas (tarefas feitas × não feitas) =====
+// Por vendedora: tarefas vinculadas a oportunidades, com data prevista no
+// mês e ela como responsável. Feita = Realizada; não feita = Pendente/Em
+// Execução (atrasada quando a data prevista já passou). Canceladas não
+// contam. Ninguém "cria" oportunidade em nome da vendedora (a maioria vem de
+// importação/SDR) — o que liga a vendedora à oportunidade é a tarefa, mesma
+// regra do "Oport. em Andamento" do Analítico.
+
+export interface TarefaOportunidade {
+  id: string
+  oportunidade_id: string
+  responsavel: string | null
+  situacao: string
+  // Sempre preenchida na prática (a query filtra pelo mês), mas o tipo da
+  // coluna é nullable.
+  data_prevista: string | null
+  descricao: string
+}
+
+export interface TarefaNaoFeita {
+  id: string
+  oportunidadeId: string
+  descricao: string
+  dataPrevista: string
+  atrasada: boolean
+}
+
+export interface MetricasOportunidades {
+  // Oportunidades distintas com pelo menos uma tarefa no mês.
+  oportunidades: number
+  feitas: number
+  naoFeitas: number
+  atrasadas: number
+  naoFeitasLista: TarefaNaoFeita[]
+}
+
+export function novasMetricasOportunidades(): MetricasOportunidades {
+  return { oportunidades: 0, feitas: 0, naoFeitas: 0, atrasadas: 0, naoFeitasLista: [] }
+}
+
+// `hojeISO` = data local de hoje em 'YYYY-MM-DD' (data_prevista é `date`).
+export function agregarOportunidades(
+  tarefas: TarefaOportunidade[],
+  hojeISO: string,
+): { porFuncionario: Map<string, MetricasOportunidades>; equipe: MetricasOportunidades } {
+  const porFuncionario = new Map<string, MetricasOportunidades>()
+  const equipe = novasMetricasOportunidades()
+  const oportunidadesPor = new Map<MetricasOportunidades, Set<string>>()
+
+  const aplicar = (m: MetricasOportunidades, t: TarefaOportunidade) => {
+    const vistas = oportunidadesPor.get(m) ?? new Set<string>()
+    oportunidadesPor.set(m, vistas)
+    vistas.add(t.oportunidade_id)
+    m.oportunidades = vistas.size
+    if (t.situacao === 'Realizada') {
+      m.feitas += 1
+      return
+    }
+    const dataPrevista = t.data_prevista ?? ''
+    const atrasada = dataPrevista < hojeISO
+    m.naoFeitas += 1
+    if (atrasada) m.atrasadas += 1
+    m.naoFeitasLista.push({
+      id: t.id,
+      oportunidadeId: t.oportunidade_id,
+      descricao: t.descricao,
+      dataPrevista,
+      atrasada,
+    })
+  }
+
+  for (const t of tarefas) {
+    if (t.situacao === 'Cancelada' || !t.data_prevista) continue
+    aplicar(equipe, t)
+    if (!t.responsavel) continue
+    let m = porFuncionario.get(t.responsavel)
+    if (!m) {
+      m = novasMetricasOportunidades()
+      porFuncionario.set(t.responsavel, m)
+    }
+    aplicar(m, t)
+  }
+
+  for (const m of Array.from(porFuncionario.values()).concat(equipe)) {
+    m.naoFeitasLista.sort((a, b) => a.dataPrevista.localeCompare(b.dataPrevista))
+  }
+  return { porFuncionario, equipe }
+}
