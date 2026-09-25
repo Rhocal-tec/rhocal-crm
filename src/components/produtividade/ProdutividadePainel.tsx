@@ -503,27 +503,23 @@ export function ProdutividadePainel() {
   )
   const dias = calcularDiasUteisMes(ano, mes, metaGlobalLinha?.dias_uteis_ajuste ?? null)
 
-  // Vendedoras: comerciais ativos + quem tem meta pessoal no mês + quem teve
-  // movimento no mês (ex: gestor que criou pedido) — nada fixo no código.
-  const vendedoras = useMemo(() => {
-    const nomePorId = new Map(profiles.map((p) => [p.id, p.nome]))
-    const ids = new Set<string>([
-      ...profiles.filter((p) => p.setor === 'comercial' && p.ativo).map((p) => p.id),
-      ...Array.from(metaPessoalPorId.entries())
-        .filter(([, valor]) => valor > 0)
-        .map(([id]) => id),
-      ...Array.from(porFuncionario.keys()),
-      ...Array.from(oportunidades.porFuncionario.keys()),
-    ])
-    return Array.from(ids)
-      .map((id) => ({
-        id,
-        nome: nomePorId.get(id) ?? 'Perfil removido',
-        m: porFuncionario.get(id) ?? novasMetricas(),
-        o: oportunidades.porFuncionario.get(id) ?? novasMetricasOportunidades(),
-      }))
-      .sort((a, b) => b.m.faturadoValor - a.m.faturadoValor || a.nome.localeCompare(b.nome))
-  }, [profiles, metaPessoalPorId, porFuncionario, oportunidades])
+  // Vendedoras: só perfis do setor comercial e ativos — nunca gestor, compras
+  // ou desativados, mesmo que tenham criado pedido/tarefa no mês (esses
+  // continuam somando no total da equipe/resultado da empresa, só não ganham
+  // card, meta pessoal nem barra no comparativo). Nada fixo no código.
+  const vendedoras = useMemo(
+    () =>
+      profiles
+        .filter((p) => p.setor === 'comercial' && p.ativo)
+        .map((p) => ({
+          id: p.id,
+          nome: p.nome,
+          m: porFuncionario.get(p.id) ?? novasMetricas(),
+          o: oportunidades.porFuncionario.get(p.id) ?? novasMetricasOportunidades(),
+        }))
+        .sort((a, b) => b.m.faturadoValor - a.m.faturadoValor || a.nome.localeCompare(b.nome)),
+    [profiles, porFuncionario, oportunidades],
+  )
 
   const visiveis = ehGestor ? vendedoras : vendedoras.filter((v) => v.id === profile?.id)
   const minhaLinha =
