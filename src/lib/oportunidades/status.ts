@@ -10,6 +10,9 @@ export const OPORTUNIDADE_STATUS_LABELS: Record<OportunidadeStatus, string> = {
   PROPOSTA: 'Proposta Enviada',
   GANHO: 'Convertida em Orçamento',
   PERDIDO: 'Perdida',
+  // Fase 42: parada há 3+ dias sem movimentação, movida automaticamente pra
+  // fora do funil ativo (nunca deletada — regra de ouro do projeto).
+  INATIVA: 'Inativa (esfriada)',
 }
 
 // Colunas visíveis no kanban de Oportunidades, nesta ordem. GANHO e PERDIDO
@@ -60,4 +63,5 @@ export const OPORTUNIDADE_STATUS_STRIPE_VAR: Record<OportunidadeStatus, string> 
   PROPOSTA: '--accent-primary',
   GANHO: '--accent-success',
   PERDIDO: '--accent-danger',
+  INATIVA: '--accent-alert',
 }

@@ -22,6 +22,9 @@ export type EmpresaSlug = 'rhocal' | 'matseg'
 // Etapas do funil de Oportunidades/Prospecção (fase 31). Coluna `status` é
 // `text` no banco (não enum), pois o mapeamento para as Fases do Processo do
 // Omie ainda depende de investigação por conta — ver CLAUDE.md fase 31.
+// INATIVA (fase 42): terminal, igual GANHO/PERDIDO — oportunidade parada há
+// 3+ dias sem movimentação, movida automaticamente pra fora do funil ativo
+// (job fn_oportunidades_inativar_paradas). Nunca deletada (regra de ouro).
 export type OportunidadeStatus =
   | 'NOVO_LEAD'
   | 'EM_CONTATO'
@@ -29,6 +32,7 @@ export type OportunidadeStatus =
   | 'PROPOSTA'
   | 'GANHO'
   | 'PERDIDO'
+  | 'INATIVA'
 
 // `situacao` é text livre no banco (mesmo padrão de AuditAcao). Fase 39
 // adicionou 'Em Execução' (vindo do cEmExecucao do ListarTarefas); fase 40

@@ -391,7 +391,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         .from('oportunidades')
         .select('*')
         .eq('empresa_id', empresaAtiva!.id)
-        .not('status', 'in', '(GANHO,PERDIDO)')
+        .not('status', 'in', '(GANHO,PERDIDO,INATIVA)')
         .order('criado_em', { ascending: true })
 
       if (!ativo) return
@@ -422,7 +422,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         (payload) => {
           const nova = payload.new
           if (nova.empresa_id !== empresaId) return
-          if (nova.status === 'GANHO' || nova.status === 'PERDIDO') return
+          if (nova.status === 'GANHO' || nova.status === 'PERDIDO' || nova.status === 'INATIVA') return
           setOportunidades((atual) => {
             if (atual.some((o) => o.id === nova.id)) return atual
             return [...atual, nova]
@@ -436,7 +436,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
           const atualizada = payload.new
           if (atualizada.empresa_id !== empresaId) return
           setOportunidades((atual) => {
-            if (atualizada.status === 'GANHO' || atualizada.status === 'PERDIDO') {
+            if (atualizada.status === 'GANHO' || atualizada.status === 'PERDIDO' || atualizada.status === 'INATIVA') {
               return atual.filter((o) => o.id !== atualizada.id)
             }
             const existe = atual.some((o) => o.id === atualizada.id)

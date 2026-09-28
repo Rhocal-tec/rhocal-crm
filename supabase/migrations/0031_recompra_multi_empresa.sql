@@ -37,10 +37,10 @@ begin
     and t.relname = p_tabela
     and idx.indisunique
     and (
-      select array_agg(a.attname order by a.attname)
+      select array_agg(a.attname::text order by a.attname::text)
       from unnest(idx.indkey) with ordinality as k(attnum, ord)
       join pg_attribute a on a.attrelid = t.oid and a.attnum = k.attnum
-    ) = (select array_agg(c order by c) from unnest(p_colunas) as c)
+    ) = (select array_agg(c::text order by c::text) from unnest(p_colunas) as c)
   limit 1;
 
   if v_indexname is null then

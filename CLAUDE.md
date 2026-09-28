@@ -1288,3 +1288,31 @@ Substitui o painel externo de metas (metas-comercial-rhocal.vercel.app), que dep
 **Acesso:** gestor vê resultado da empresa, indicadores, somatória, comparativo e todas as vendedoras, e edita as metas; comercial vê só o próprio card e o resultado da empresa (recorte de interface — RLS de `pedidos` é aberto, como no resto do CRM). Vendedoras (cards, metas pessoais, comparativo) = somente perfis com `setor = 'comercial'` e `ativo = true` — gestor/compras nunca entram, mesmo com pedidos no mês; os pedidos deles continuam somando no total da equipe e no resultado da empresa.
 
 **Schema** (`supabase/migrations/0032_produtividade_metas.sql`, rodar no SQL Editor antes do deploy): tabela `metas_comerciais (empresa_id, funcionario_id nullable = meta global, ano, mes, valor_meta, dias_uteis_ajuste só na linha global)`, unicidade por dois índices parciais (uma meta global por empresa/mês; uma por funcionário/empresa/mês), auditada por `fn_audit`, leitura para autenticados, insert/update só `meu_setor() = 'gestor'`, sem delete (tirar meta = gravar 0).
+
+## Fase 42 — Oportunidades: encerrar rápido + arquivamento automático por inatividade (3 dias)
+
+Resolve o que a Fase 31 tinha deixado "a definir" ("mover automaticamente para uma situação esfriada/inativa a definir") e adiciona uma ação rápida de descarte no card, espelhando o botão "Concluir" das tarefas.
+
+**42.1 — Status INATIVA (terminal, nunca deleta)**
+
+- Novo valor de uso `INATIVA` em `oportunidades.status` (continua `text` livre, sem enum — nenhuma migração de tipo). Terminal, igual `GANHO`/`PERDIDO`: sai do funil ativo, nunca aparece nas colunas arrastáveis, mas o registro nunca é apagado (regra de ouro do projeto)
+- Job diário `fn_oportunidades_inativar_paradas()` (`supabase/migrations/0034_oportunidades_inatividade.sql`, `security definer`, agendado via `cron.schedule('oportunidades-inativar-paradas', '0 4 * * *', ...)`): move para `INATIVA` qualquer oportunidade fora de `GANHO`/`PERDIDO`/`INATIVA` com `ultima_movimentacao` há 3+ dias. A própria migração já roda a função uma vez ao ser aplicada, pra limpar de imediato o que já estava parado, sem esperar o primeiro disparo do cron
+- `FunilBoard` exclui `INATIVA` do carregamento da coluna Oportunidades e do Realtime (INSERT/UPDATE), mesmo padrão já usado para `GANHO`/`PERDIDO` — uma oportunidade que vira `INATIVA` some do quadro sozinha, sem recarregar a página
+- Sem página de busca dedicada pra `INATIVA` por enquanto — mesma situação de `GANHO`/`PERDIDO` hoje (não têm uma "arquivados" própria; ficam consultáveis via SQL/Inteligência Comercial). Pode virar backlog se fizer falta
+
+**42.2 — Botão "Encerrar" no card (perdida com um clique)**
+
+- Novo botão "Encerrar" no rodapé do `OportunidadeCard`, abaixo dos badges — clicar expande um mini-formulário inline no próprio card (motivo obrigatório, `MOTIVO_PERDA_OPCOES`, + detalhe opcional), sem precisar abrir o `OportunidadeDetalheModal` inteiro. Mesma ação final do "Marcar como perdida" já existente no modal (fase 13/31): grava `status = 'PERDIDO'` e `motivo_perda`
+- Todo clique dentro do formulário inline usa `stopPropagation` pra não disparar o `onAbrir` do card (que abriria o modal de detalhe por baixo)
+- Sem callback de atualização otimista — o card já desaparece da coluna sozinho pelo mesmo Realtime que trata `GANHO`/`PERDIDO`/`INATIVA` (item 42.1)
+- O "Marcar como perdida" dentro do modal de detalhe (`MarcarOportunidadePerdidaSection`) continua existindo sem mudanças — o botão do card é um atalho a mais, não substitui o fluxo do modal
+
+**42.3 — Botão "Registrar contato" no card (mesmo fluxo do "Como foi o contato?" das tarefas)**
+
+- Segundo botão no rodapé do `OportunidadeCard`, ao lado do "Encerrar" — abre inline no card o mesmo fluxo em duas etapas do `ConcluirTarefaModal` (tarefas): primeiro escolhe o canal (`TIPO_INTERACAO_OPCOES` — Ligação/WhatsApp/E-mail/Reunião/Visita, obrigatório), depois escolhe a saída
+- Duas saídas (sem "Criar Oportunidade" — a oportunidade já existe):
+  - **"Agendar novo contato"**: abre o `TarefaModal` já existente (mesmo componente do botão "+ Nova Tarefa" do modal de detalhe), pré-vinculado a essa oportunidade. Só ao criar a tarefa com sucesso (`onCriada`) é que grava uma linha em `interacoes` (`tipo` = canal escolhido, `resultado` = "Agendou retorno") — nunca antes, pra não logar um agendamento se o usuário cancelar o formulário da tarefa
+  - **"Só registrar contato"**: expande um campo de observação opcional e grava direto em `interacoes` (`resultado` = "Outro"), sem criar tarefa nenhuma — mesmo uso de caso do "mandei e-mail e ainda não teve retorno"
+- Mutuamente exclusivo com o "Encerrar" (42.2) — só um dos dois fica expandido por vez no card
+- Mesmo cuidado de `stopPropagation` em todo clique dentro do formulário e do `TarefaModal` aninhado, pra não disparar o `onAbrir` do card por baixo
+- A aba "Histórico de contato" do modal de detalhe (`HistoricoContatoTab`) continua com seu formulário simples (Tipo/Resultado/Observação) sem mudanças — o botão do card é só mais um caminho pra alimentar a mesma tabela `interacoes`
