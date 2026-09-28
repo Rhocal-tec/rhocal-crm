@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useAuth } from '@/contexts/AuthContext'
 import { MOTIVO_PERDA_OPCOES } from '@/lib/kanban/status'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { diasSemMovimentacao, estaCritico, estaParado } from '@/lib/kanban/dias-parado'
@@ -25,7 +24,6 @@ export function OportunidadeCard({
   onAbrir: (id: string) => void
   nomesPorId: Record<string, string>
 }) {
-  const { user } = useAuth()
   const [supabase] = useState(() => createClient())
 
   // Fase 42.2: "Encerrar" rápido no card, mesmo padrão de motivo obrigatório
