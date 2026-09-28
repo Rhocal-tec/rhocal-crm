@@ -1316,3 +1316,12 @@ Resolve o que a Fase 31 tinha deixado "a definir" ("mover automaticamente para u
 - Mutuamente exclusivo com o "Encerrar" (42.2) — só um dos dois fica expandido por vez no card
 - Mesmo cuidado de `stopPropagation` em todo clique dentro do formulário e do `TarefaModal` aninhado, pra não disparar o `onAbrir` do card por baixo
 - A aba "Histórico de contato" do modal de detalhe (`HistoricoContatoTab`) continua com seu formulário simples (Tipo/Resultado/Observação) sem mudanças — o botão do card é só mais um caminho pra alimentar a mesma tabela `interacoes`
+
+**42.4 — "Sem retorno" (INATIVA manual, sem esperar os 3 dias)**
+
+Léo apontou que o job automático (42.1) só resolve quem esfria sozinho — quando ele já ligou pro cliente e sabe na hora que não vai ter resposta, esperar 3 dias parado não faz sentido, e marcar como `PERDIDO` (42.2) também não é correto: não foi uma decisão de negócio perdido.
+
+- Segundo botão no `OportunidadeCard`, ao lado do "Perdida" (renomeado de "Encerrar" — os dois agora ficam lado a lado, mutuamente exclusivos, mesmo padrão de expandir inline com `stopPropagation`): **"Sem retorno"**. Confirma sem motivo obrigatório (não é uma perda) e grava direto `status = 'INATIVA'` — mesmo destino terminal do job de 3 dias (42.1), só que imediato e manual
+- Mesma ação disponível dentro do `OportunidadeDetalheModal`, como `MarcarOportunidadeInativaSection` (novo componente, ao lado de `MarcarOportunidadePerdidaSection`) — mesmo gate de acesso (`podeAcessarOportunidades`) e mesma condição de status (`OPORTUNIDADE_KANBAN_COLUMNS.includes(status)`, só oportunidades ainda ativas podem virar inativas)
+- Aba Dados do modal: quando `status === 'INATIVA'`, mostra "Sem retorno do cliente — fora do funil ativo, sem contar como perdida" no lugar do bloco de motivo da perda (que só aparece pra `PERDIDO`)
+- `AnaliticoPorFuncionario` ("Oport. em Andamento") passa a excluir `INATIVA` além de `GANHO`/`PERDIDO` — uma oportunidade inativa não é mais "em andamento" pra ninguém

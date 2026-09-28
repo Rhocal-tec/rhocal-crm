@@ -13,6 +13,7 @@ import { HistoricoContatoTab } from '@/components/interacoes/HistoricoContatoTab
 import HistoricoChamadas from '@/components/mobcall/HistoricoChamadas'
 import { ConverterEmOrcamentoSection } from './ConverterEmOrcamentoSection'
 import { MarcarOportunidadePerdidaSection } from './MarcarOportunidadePerdidaSection'
+import { MarcarOportunidadeInativaSection } from './MarcarOportunidadeInativaSection'
 import type { Database, OportunidadeStatus, SetorTipo } from '@/types/database'
 
 type Oportunidade = Database['public']['Tables']['oportunidades']['Row']
@@ -370,6 +371,14 @@ export function OportunidadeDetalheModal({
                     </dd>
                   </div>
                 )}
+                {oportunidade.status === 'INATIVA' && (
+                  <div className="col-span-2">
+                    <dt className="text-muted">Situação</dt>
+                    <dd className="font-medium text-accent-alert">
+                      Sem retorno do cliente — fora do funil ativo, sem contar como perdida
+                    </dd>
+                  </div>
+                )}
               </dl>
 
               <div className="mt-5 border-t border-white/10 pt-4">
@@ -545,6 +554,11 @@ export function OportunidadeDetalheModal({
                 onAtualizada={setOportunidade}
               />
               <MarcarOportunidadePerdidaSection
+                oportunidade={oportunidade}
+                setor={setor}
+                onAtualizada={setOportunidade}
+              />
+              <MarcarOportunidadeInativaSection
                 oportunidade={oportunidade}
                 setor={setor}
                 onAtualizada={setOportunidade}

@@ -911,7 +911,7 @@ export default function AnaliticoPorFuncionario({
         }
 
         for (const oportunidade of oportunidadesTodas) {
-          if (oportunidade.status === 'GANHO' || oportunidade.status === 'PERDIDO') continue
+          if (oportunidade.status === 'GANHO' || oportunidade.status === 'PERDIDO' || oportunidade.status === 'INATIVA') continue
 
           const {
             responsavel,

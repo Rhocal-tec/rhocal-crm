@@ -12,6 +12,10 @@ import type { Database } from '@/types/database'
 
 type Oportunidade = Database['public']['Tables']['oportunidades']['Row']
 
+// Fase 42.4: as duas formas de encerrar uma oportunidade sem virar pedido —
+// mutuamente exclusivas, só uma expandida por vez no card.
+type AcaoEncerramento = 'perdida' | 'inativa'
+
 export function OportunidadeCard({
   oportunidade,
   onAbrir,
@@ -24,13 +28,16 @@ export function OportunidadeCard({
   const { user } = useAuth()
   const [supabase] = useState(() => createClient())
 
-  // Fase 42: "Encerrar" rápido no card, mesmo padrão de motivo obrigatório do
-  // MarcarOportunidadePerdidaSection (fase 13/31), só que inline no card em
-  // vez de dentro do modal de detalhe — pra não precisar abrir o modal
-  // inteiro só pra marcar uma oportunidade como perdida. Atualiza direto no
-  // banco; o card some da coluna sozinho via Realtime (FunilBoard já filtra
-  // GANHO/PERDIDO/INATIVA do estado ativo), sem precisar de callback local.
-  const [encerrarAberto, setEncerrarAberto] = useState(false)
+  // Fase 42.2: "Encerrar" rápido no card, mesmo padrão de motivo obrigatório
+  // do MarcarOportunidadePerdidaSection (fase 13/31), só que inline no card
+  // em vez de dentro do modal de detalhe. Fase 42.4 acrescenta um segundo
+  // caminho ("Sem retorno" → INATIVA) pro caso em que o contato foi feito
+  // mas o cliente parou de responder — não é uma perda de negociação, então
+  // não deve contar como PERDIDO nem exigir motivo de perda. Atualiza direto
+  // no banco; o card some da coluna sozinho via Realtime (FunilBoard já
+  // filtra GANHO/PERDIDO/INATIVA do estado ativo), sem precisar de callback
+  // local.
+  const [acaoAberta, setAcaoAberta] = useState<AcaoEncerramento | null>(null)
   const [motivo, setMotivo] = useState('')
   const [detalhes, setDetalhes] = useState('')
   const [salvando, setSalvando] = useState(false)
@@ -58,15 +65,15 @@ export function OportunidadeCard({
       ? `${oportunidade.produto_servico.slice(0, 40)}…`
       : oportunidade.produto_servico
 
-  function cancelarEncerrar(e: React.MouseEvent) {
+  function cancelarAcao(e: React.MouseEvent) {
     e.stopPropagation()
-    setEncerrarAberto(false)
+    setAcaoAberta(null)
     setMotivo('')
     setDetalhes('')
     setErro(null)
   }
 
-  async function confirmarEncerrar(e: React.MouseEvent) {
+  async function confirmarPerdida(e: React.MouseEvent) {
     e.stopPropagation()
     if (!motivo) {
       setErro('Selecione o motivo.')
@@ -87,6 +94,31 @@ export function OportunidadeCard({
 
     if (error) {
       setErro('Não foi possível encerrar. Tente novamente.')
+      return
+    }
+    // Sem estado local pra limpar — o card some sozinho via Realtime.
+  }
+
+  // Fase 42.4: "Sem retorno" — cliente foi contatado mas parou de responder.
+  // Não é decisão de negócio perdido (sem motivo de perda), só tira a
+  // oportunidade do funil ativo direto pro mesmo status terminal INATIVA que
+  // o job automático de 3 dias usa (0034_oportunidades_inatividade.sql) —
+  // sem precisar esperar os 3 dias quando o vendedor já sabe que esfriou.
+  async function confirmarInativa(e: React.MouseEvent) {
+    e.stopPropagation()
+
+    setSalvando(true)
+    setErro(null)
+
+    const { error } = await supabase
+      .from('oportunidades')
+      .update({ status: 'INATIVA' })
+      .eq('id', oportunidade.id)
+
+    setSalvando(false)
+
+    if (error) {
+      setErro('Não foi possível marcar como inativa. Tente novamente.')
       return
     }
     // Sem estado local pra limpar — o card some sozinho via Realtime.
@@ -151,20 +183,64 @@ export function OportunidadeCard({
         </p>
       )}
 
-      {!encerrarAberto ? (
-        <div className="mt-2.5">
+      {acaoAberta === null && (
+        <div className="mt-2.5 flex gap-2">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              setEncerrarAberto(true)
+              setAcaoAberta('inativa')
             }}
-            className="w-full rounded-md border border-accent-danger/30 py-1.5 text-xs font-medium text-accent-danger/80 transition-colors hover:bg-accent-danger/10 hover:text-accent-danger"
+            className="flex-1 rounded-md border border-accent-alert/30 py-1.5 text-xs font-medium text-accent-alert/90 transition-colors hover:bg-accent-alert/10 hover:text-accent-alert"
           >
-            Encerrar
+            Sem retorno
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setAcaoAberta('perdida')
+            }}
+            className="flex-1 rounded-md border border-accent-danger/30 py-1.5 text-xs font-medium text-accent-danger/80 transition-colors hover:bg-accent-danger/10 hover:text-accent-danger"
+          >
+            Perdida
           </button>
         </div>
-      ) : (
+      )}
+
+      {acaoAberta === 'inativa' && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="mt-2.5 rounded-md border border-accent-alert/30 bg-accent-alert/5 p-2"
+        >
+          <p className="text-xs font-medium text-primary">Marcar como inativa</p>
+          <p className="mt-1 text-[11px] text-muted">
+            Contato foi feito, mas o cliente parou de responder — sai do funil ativo sem contar
+            como negócio perdido.
+          </p>
+          {erro && <p className="mt-1.5 text-[11px] text-accent-danger">{erro}</p>}
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={confirmarInativa}
+              disabled={salvando}
+              className="flex-1 rounded-md bg-accent-alert py-1.5 text-xs font-medium text-black transition-colors hover:bg-accent-alert/90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {salvando ? 'Salvando…' : 'Confirmar'}
+            </button>
+            <button
+              type="button"
+              onClick={cancelarAcao}
+              disabled={salvando}
+              className="rounded-md px-2 py-1.5 text-xs font-medium text-muted hover:text-primary"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {acaoAberta === 'perdida' && (
         <div
           onClick={(e) => e.stopPropagation()}
           className="mt-2.5 rounded-md border border-accent-danger/30 bg-accent-danger/5 p-2"
@@ -195,7 +271,7 @@ export function OportunidadeCard({
           <div className="mt-2 flex gap-2">
             <button
               type="button"
-              onClick={confirmarEncerrar}
+              onClick={confirmarPerdida}
               disabled={salvando}
               className="flex-1 rounded-md bg-accent-danger py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-danger/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -203,7 +279,7 @@ export function OportunidadeCard({
             </button>
             <button
               type="button"
-              onClick={cancelarEncerrar}
+              onClick={cancelarAcao}
               disabled={salvando}
               className="rounded-md px-2 py-1.5 text-xs font-medium text-muted hover:text-primary"
             >
