@@ -1325,3 +1325,19 @@ Léo apontou que o job automático (42.1) só resolve quem esfria sozinho — qu
 - Mesma ação disponível dentro do `OportunidadeDetalheModal`, como `MarcarOportunidadeInativaSection` (novo componente, ao lado de `MarcarOportunidadePerdidaSection`) — mesmo gate de acesso (`podeAcessarOportunidades`) e mesma condição de status (`OPORTUNIDADE_KANBAN_COLUMNS.includes(status)`, só oportunidades ainda ativas podem virar inativas)
 - Aba Dados do modal: quando `status === 'INATIVA'`, mostra "Sem retorno do cliente — fora do funil ativo, sem contar como perdida" no lugar do bloco de motivo da perda (que só aparece pra `PERDIDO`)
 - `AnaliticoPorFuncionario` ("Oport. em Andamento") passa a excluir `INATIVA` além de `GANHO`/`PERDIDO` — uma oportunidade inativa não é mais "em andamento" pra ninguém
+
+## Fase 43 — Custo final independente do preço cotado
+
+Léo apontou dois pontos de fricção no fluxo de Compras corrigindo uma cotação depois do pedido já ter avançado:
+
+**43.1 — Compras já pode voltar pra corrigir (nenhuma mudança necessária)**
+
+Conferido: `podeMoverPara` (`src/lib/kanban/permissions.ts`) já inclui `EM_COTACAO` nos destinos permitidos pra `compras`, independente do status atual do pedido, e o `handleDragEnd` do `KanbanBoard` não tem nenhuma trava de "não pode voltar" — só verifica o destino, nunca a origem. `CotacoesTab` também já permite editar cotações e custo final a qualquer status (fase 22.2). Ou seja, arrastar um pedido de `PEDIDO_COTADO` de volta pra `EM_COTACAO` pra corrigir uma cotação já funcionava; o bloqueio real estava no item 43.2 abaixo.
+
+**43.2 — Corrigir o preço da cotação vencedora não sobrescreve mais o custo final**
+
+Bug real: `salvarCotacao` (`CotacoesTab.tsx`) ressincronizava `pedido_itens.custo_final` toda vez que o preço da cotação **vencedora** era editado — então se Compras já tinha ajustado o custo final pra um valor diferente do preço cotado (frete, arredondamento, negociação com o fornecedor), e depois só corrigia um erro de digitação no preço da cotação, o custo final voltava a ficar igual ao preço da cotação sem aviso, desfazendo o ajuste manual.
+
+- `salvarCotacao` não toca mais em `custo_final` — só salva o campo da cotação que foi editado
+- `marcarVencedora` continua pré-preenchendo `custo_final = preco` da cotação escolhida — é só um ponto de partida no momento da escolha, não uma trava contínua
+- A partir daí, `custo_final` vive só no campo "Custo final" da aba Cotações (`salvarCustoFinal`), que já era e continua sendo editável livremente por compras/gestor, sem nenhuma condição de status — não precisa mais ser igual ao preço de nenhuma cotação

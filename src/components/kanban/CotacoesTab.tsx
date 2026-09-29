@@ -273,29 +273,21 @@ export function CotacoesTab({
   // Cotações continuam totalmente editáveis por compras/gestor a qualquer
   // momento, independente do status atual do pedido (fase 22.2) — nenhuma
   // condição de status bloqueia esta função.
+  //
+  // Fase 43: NÃO ressincroniza mais o custo_final quando o preço da cotação
+  // vencedora é corrigido aqui. Antes, editar o preço da vencedora (ex:
+  // corrigir um erro de digitação depois que compras já tinha ajustado o
+  // custo final pra um valor diferente — frete, arredondamento, negociação)
+  // sobrescrevia esse ajuste manual silenciosamente. custo_final é um campo
+  // com vida própria a partir do momento em que é definido: só marcarVencedora
+  // (abaixo) continua pré-preenchendo com o preço cotado, como sugestão
+  // inicial de ponto de partida — daí em diante, quem manda é o campo "Custo
+  // final" mesmo, editável livremente por compras/gestor em salvarCustoFinal.
   async function salvarCotacao(itemId: string, cotacaoId: string, patch: Partial<Cotacao>) {
     setErro(null)
     const { error } = await supabase.from('cotacoes').update(patch).eq('id', cotacaoId)
     if (error) {
       setErro('Não foi possível salvar a alteração da cotação.')
-      return
-    }
-
-    // Se o preço editado é o da cotação vencedora, mantém o custo final do
-    // item sincronizado com o novo valor.
-    if (patch.preco !== undefined) {
-      const cotacaoAtual = (cotacoesPorItem[itemId] ?? []).find((c) => c.id === cotacaoId)
-      if (cotacaoAtual?.vencedora) {
-        const { error: erroCusto } = await supabase
-          .from('pedido_itens')
-          .update({ custo_final: patch.preco })
-          .eq('id', itemId)
-        if (erroCusto) {
-          setErro('Preço da cotação salvo, mas houve erro ao atualizar o custo final.')
-          return
-        }
-        setCustoFinalPorItem((atual) => ({ ...atual, [itemId]: String(patch.preco) }))
-      }
     }
   }
 
