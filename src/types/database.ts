@@ -771,6 +771,7 @@ export interface Database {
           ca_data_vencimento: string | null
           pedido_id: string | null
           motivo_nao_conversao: string | null
+          motivo_nao_convertido: string | null
           texto_sugerido_ia: string | null
           atualizado_em: string
         }
@@ -801,6 +802,7 @@ export interface Database {
           ca_data_vencimento?: string | null
           pedido_id?: string | null
           motivo_nao_conversao?: string | null
+          motivo_nao_convertido?: string | null
           texto_sugerido_ia?: string | null
           atualizado_em?: string
         }
@@ -831,6 +833,7 @@ export interface Database {
           ca_data_vencimento?: string | null
           pedido_id?: string | null
           motivo_nao_conversao?: string | null
+          motivo_nao_convertido?: string | null
           texto_sugerido_ia?: string | null
           atualizado_em?: string
         }
@@ -1007,6 +1010,7 @@ export interface Database {
           ca_data_vencimento: string | null
           pedido_id: string | null
           motivo_nao_conversao: string | null
+          motivo_nao_convertido: string | null
           texto_sugerido_ia: string | null
           atualizado_em: string
         }

@@ -7,7 +7,6 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
 import { diasAPartirDeHoje } from '@/lib/recompra/prazo'
-import { MOTIVO_PERDA_OPCOES } from '@/lib/kanban/status'
 import { linkWhatsappRecompra } from '@/lib/recompra/whatsapp'
 import type { Database } from '@/types/database'
 
@@ -31,6 +30,18 @@ const CONFIABILIDADE_CLASSES: Record<string, string> = {
 // insere em `pedidos` com os dados do cliente pré-preenchidos, depois marca
 // a origem (aqui, a previsão de recompra) como convertida, vinculando via
 // pedido_id — mesma dupla escrita, mesmo tratamento de erro parcial.
+// Valores aceitos pela trava recompra_previsao_motivo_nao_convertido_check.
+const MOTIVOS_NAO_CONVERTEU: { valor: string; rotulo: string }[] = [
+  { valor: 'nao_tentei_ainda', rotulo: 'Não tentei ainda' },
+  { valor: 'cliente_ainda_tem_estoque', rotulo: 'Cliente ainda tem estoque' },
+  { valor: 'trocou_fornecedor', rotulo: 'Trocou de fornecedor' },
+  { valor: 'nao_usa_mais', rotulo: 'Não usa mais' },
+]
+
+function rotuloMotivo(valor: string | null): string {
+  return MOTIVOS_NAO_CONVERTEU.find((m) => m.valor === valor)?.rotulo ?? valor ?? ''
+}
+
 export function RecompraCard({
   previsao,
   crossSell,
@@ -127,7 +138,7 @@ export function RecompraCard({
 
     const { error } = await supabase
       .from('recompra_previsao')
-      .update({ status: 'nao_converteu', motivo_nao_conversao: motivo })
+      .update({ status: 'nao_converteu', motivo_nao_convertido: motivo })
       .eq('id', previsao.id)
 
     setSalvando(false)
@@ -138,7 +149,7 @@ export function RecompraCard({
       return
     }
 
-    onAtualizada({ ...previsao, status: 'nao_converteu', motivo_nao_conversao: motivo })
+    onAtualizada({ ...previsao, status: 'nao_converteu', motivo_nao_convertido: motivo })
     setMotivoAberto(false)
   }
 
@@ -214,7 +225,7 @@ export function RecompraCard({
         </div>
       ) : previsao.status === 'nao_converteu' ? (
         <div className="mt-3 rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-muted">
-          Não converteu — {previsao.motivo_nao_conversao}
+          Não converteu — {rotuloMotivo(previsao.motivo_nao_convertido)}
         </div>
       ) : (
         emAberto && (
@@ -227,9 +238,9 @@ export function RecompraCard({
                   className="input-field w-full rounded-md px-2 py-1.5 text-xs"
                 >
                   <option value="">Selecione o motivo…</option>
-                  {MOTIVO_PERDA_OPCOES.map((opcao) => (
-                    <option key={opcao} value={opcao}>
-                      {opcao}
+                  {MOTIVOS_NAO_CONVERTEU.map((opcao) => (
+                    <option key={opcao.valor} value={opcao.valor}>
+                      {opcao.rotulo}
                     </option>
                   ))}
                 </select>
