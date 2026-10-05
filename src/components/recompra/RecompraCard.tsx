@@ -65,7 +65,8 @@ export function RecompraCard({
       .eq('id', previsao.id)
     setSalvando(false)
     if (error) {
-      setErro('Não foi possível marcar como contatado. Tente novamente.')
+      console.error('Erro ao marcar previsão como contatada:', error)
+      setErro(`Não foi possível marcar como contatado: ${error.message}`)
       return
     }
     onAtualizada({ ...previsao, status: 'contatado' })
@@ -132,7 +133,8 @@ export function RecompraCard({
     setSalvando(false)
 
     if (error) {
-      setErro('Não foi possível salvar. Tente novamente.')
+      console.error('Erro ao marcar previsão como não convertida:', error)
+      setErro(`Não foi possível salvar: ${error.message}`)
       return
     }
 
