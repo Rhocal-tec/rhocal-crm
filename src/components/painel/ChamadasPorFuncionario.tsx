@@ -96,7 +96,13 @@ export default function ChamadasPorFuncionario({
 
         const porUsuario = new Map<string, LinhaResumo>()
 
+        // Colaboradores desativados (profiles.ativo = false) não entram no resumo.
+        const inativos = new Set(
+          ((profilesData ?? []) as Profile[]).filter((p) => !p.ativo).map((p) => p.id),
+        )
+
         for (const c of (data ?? []) as Chamada[]) {
+          if (c.usuario_id && inativos.has(c.usuario_id)) continue
           const usuarioId = c.usuario_id ?? 'sem-usuario'
           const nome = c.usuario_id ? nomesPorId.get(c.usuario_id) ?? 'Não identificado' : 'Não identificado'
 
