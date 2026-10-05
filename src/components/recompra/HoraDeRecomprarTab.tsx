@@ -123,6 +123,34 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
           if (c.telefone && c.cnpj) porCnpj[c.cnpj.replace(/\D/g, '')] = c.telefone
         }
       }
+
+      // Clientes que não estão no cadastro do CRM (ou sem telefone lá): busca
+      // direto no Omie, só leitura.
+      if (empresaAtiva) {
+        const faltando = previsoes
+          .filter((p) => {
+            if (porOmie[p.cliente_omie_codigo]) return false
+            const doc = p.cliente_cnpj?.replace(/\D/g, '')
+            return !(doc && porCnpj[doc])
+          })
+          .map((p) => p.cliente_omie_codigo)
+        if (faltando.length > 0) {
+          try {
+            const resposta = await fetch('/api/omie/telefones-clientes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ empresaSlug: empresaAtiva.slug, codigos: faltando }),
+            })
+            if (resposta.ok) {
+              const json = (await resposta.json()) as { telefones?: Record<string, string> }
+              Object.assign(porOmie, json.telefones ?? {})
+            }
+          } catch (e) {
+            console.error('Erro ao buscar telefones no Omie:', e)
+          }
+        }
+      }
+
       if (!ativo) return
       setTelefonePorOmie(porOmie)
       setTelefonePorCnpj(porCnpj)
