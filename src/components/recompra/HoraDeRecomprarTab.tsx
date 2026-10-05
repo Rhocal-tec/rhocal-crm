@@ -16,6 +16,10 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
   const [supabase] = useState(() => createClient())
   const [previsoes, setPrevisoes] = useState<RecompraPrevisao[]>([])
   const [crossSellPorItem, setCrossSellPorItem] = useState<Record<string, ItemAssociado[]>>({})
+  // Telefone do cliente (cadastro `clientes`), por código Omie e por CNPJ
+  // (só dígitos) — usado pelo botão "WhatsApp" do card.
+  const [telefonePorOmie, setTelefonePorOmie] = useState<Record<string, string>>({})
+  const [telefonePorCnpj, setTelefonePorCnpj] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [apenasMeus, setApenasMeus] = useState(setor !== 'gestor')
   const [busca, setBusca] = useState('')
@@ -81,6 +85,55 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, empresaAtiva, previsoes.map((p) => p.item_codigo).join(',')])
+
+  // Telefones: o cadastro de clientes é global (sem empresa_id), então busca só
+  // os clientes que estão na tela — primeiro pelo código Omie, e pelo CNPJ
+  // para os que não casaram por código.
+  useEffect(() => {
+    let ativo = true
+    const codigos = Array.from(
+      new Set(previsoes.map((p) => Number(p.cliente_omie_codigo)).filter((n) => Number.isFinite(n))),
+    )
+    const cnpjs = Array.from(
+      new Set(previsoes.map((p) => p.cliente_cnpj).filter((c): c is string => !!c)),
+    )
+    if (codigos.length === 0 && cnpjs.length === 0) return
+
+    async function carregar() {
+      const porOmie: Record<string, string> = {}
+      const porCnpj: Record<string, string> = {}
+
+      if (codigos.length > 0) {
+        const { data } = await supabase
+          .from('clientes')
+          .select('omie_cliente_id, cnpj, telefone')
+          .in('omie_cliente_id', codigos)
+          .not('telefone', 'is', null)
+        for (const c of data ?? []) {
+          if (c.telefone && c.omie_cliente_id !== null) porOmie[String(c.omie_cliente_id)] = c.telefone
+        }
+      }
+      if (cnpjs.length > 0) {
+        const { data } = await supabase
+          .from('clientes')
+          .select('cnpj, telefone')
+          .in('cnpj', cnpjs)
+          .not('telefone', 'is', null)
+        for (const c of data ?? []) {
+          if (c.telefone && c.cnpj) porCnpj[c.cnpj.replace(/\D/g, '')] = c.telefone
+        }
+      }
+      if (!ativo) return
+      setTelefonePorOmie(porOmie)
+      setTelefonePorCnpj(porCnpj)
+    }
+
+    carregar()
+    return () => {
+      ativo = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, previsoes.map((p) => p.id).join(',')])
 
   const previsoesVisiveis = useMemo(() => {
     const buscaNormalizada = busca.trim().toLowerCase()
@@ -156,6 +209,13 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
               key={previsao.id}
               previsao={previsao}
               crossSell={crossSellPorItem[previsao.item_codigo] ?? []}
+              telefone={
+                telefonePorOmie[previsao.cliente_omie_codigo] ??
+                (previsao.cliente_cnpj
+                  ? telefonePorCnpj[previsao.cliente_cnpj.replace(/\D/g, '')]
+                  : undefined) ??
+                null
+              }
               onAtualizada={atualizarPrevisao}
             />
           ))}

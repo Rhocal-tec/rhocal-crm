@@ -8,6 +8,7 @@ import { useEmpresa } from '@/contexts/EmpresaContext'
 import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
 import { diasAPartirDeHoje } from '@/lib/recompra/prazo'
 import { MOTIVO_PERDA_OPCOES } from '@/lib/kanban/status'
+import { linkWhatsappRecompra } from '@/lib/recompra/whatsapp'
 import type { Database } from '@/types/database'
 
 type RecompraPrevisao = Database['public']['Views']['v_recompra_priorizada']['Row']
@@ -33,10 +34,12 @@ const CONFIABILIDADE_CLASSES: Record<string, string> = {
 export function RecompraCard({
   previsao,
   crossSell,
+  telefone,
   onAtualizada,
 }: {
   previsao: RecompraPrevisao
   crossSell: ItemAssociado[]
+  telefone: string | null
   onAtualizada: (previsao: RecompraPrevisao) => void
 }) {
   const { user } = useAuth()
@@ -51,6 +54,7 @@ export function RecompraCard({
   const dias = diasAPartirDeHoje(previsao.data_prevista_recompra)
   const atrasado = dias < 0
   const emAberto = previsao.status === 'pendente' || previsao.status === 'contatado'
+  const linkWhatsapp = linkWhatsappRecompra(previsao, telefone)
 
   async function marcarContatado() {
     setSalvando(true)
@@ -250,6 +254,23 @@ export function RecompraCard({
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
+                {linkWhatsapp ? (
+                  <a
+                    href={linkWhatsapp}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-md border border-accent-success/40 bg-accent-success/10 px-2.5 py-1.5 text-xs font-medium text-accent-success transition-colors hover:bg-accent-success/20"
+                  >
+                    WhatsApp
+                  </a>
+                ) : (
+                  <span
+                    title="Cliente sem telefone cadastrado"
+                    className="cursor-not-allowed rounded-md border border-white/10 px-2.5 py-1.5 text-xs font-medium text-muted/60"
+                  >
+                    Sem telefone
+                  </span>
+                )}
                 {previsao.status === 'pendente' && (
                   <button
                     onClick={marcarContatado}
