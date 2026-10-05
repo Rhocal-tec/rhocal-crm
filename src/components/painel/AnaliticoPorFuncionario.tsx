@@ -1029,6 +1029,9 @@ export default function AnaliticoPorFuncionario({
       if (termo && !l.nome.toLowerCase().includes(termo)) return false
       // "Não atribuído" só aparece se tiver valor em alguma métrica ligada.
       if (l.id === SEM_ATRIBUICAO_ID) return metricasVisiveis.some((m) => m.principal(l) > 0)
+      // Colaborador desativado (profiles.ativo = false) só aparece se teve
+      // atividade no período — senão some da tabela.
+      if (!l.ativo) return metricasVisiveis.some((m) => m.principal(l) > 0)
       return true
     })
   }, [linhas, busca, metricasVisiveis])
