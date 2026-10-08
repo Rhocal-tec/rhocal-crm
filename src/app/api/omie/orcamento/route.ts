@@ -19,6 +19,7 @@ interface ClienteOmie {
   razaoSocial: string
   nomeFantasia: string | null
   cnpjCpf: string | null
+  inativo: boolean
 }
 
 function formatarDataOmie(data: Date): string {
@@ -217,7 +218,7 @@ export async function POST(request: Request) {
           'ListarClientes',
           {
             pagina: 1,
-            registros_por_pagina: 10,
+            registros_por_pagina: 50,
             apenas_importado_api: 'N',
             clientesFiltro: { razao_social: clienteNome },
           },
@@ -241,7 +242,10 @@ export async function POST(request: Request) {
         razaoSocial: c.razao_social as string,
         nomeFantasia: (c.nome_fantasia as string) ?? null,
         cnpjCpf: (c.cnpj_cpf as string) ?? null,
+        inativo: c.inativo === 'S',
       }))
+      // Cadastros ativos primeiro; os inativos aparecem sinalizados na tela.
+      clientes.sort((a, b) => Number(a.inativo) - Number(b.inativo))
 
       return NextResponse.json({ clientes })
     }

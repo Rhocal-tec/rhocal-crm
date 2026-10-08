@@ -20,6 +20,7 @@ interface ClienteOmie {
   razaoSocial: string
   nomeFantasia: string | null
   cnpjCpf: string | null
+  inativo?: boolean
 }
 
 interface ProdutoOmie {
@@ -394,10 +395,15 @@ export function OmieOrcamentoSection({
               {clientes.map((cliente) => (
                 <label
                   key={cliente.codigoClienteOmie}
-                  className="flex cursor-pointer items-center gap-2 rounded-md border border-white/10 bg-base px-3 py-2 text-sm text-primary hover:border-accent-primary/50"
+                  className={`flex items-center gap-2 rounded-md border border-white/10 bg-base px-3 py-2 text-sm text-primary ${
+                    cliente.inativo
+                      ? 'cursor-not-allowed opacity-50'
+                      : 'cursor-pointer hover:border-accent-primary/50'
+                  }`}
                 >
                   <input
                     type="radio"
+                    disabled={cliente.inativo}
                     name="cliente-omie"
                     checked={clienteEscolhido === cliente.codigoClienteOmie}
                     onChange={() => setClienteEscolhido(cliente.codigoClienteOmie)}
@@ -407,6 +413,7 @@ export function OmieOrcamentoSection({
                     {cliente.razaoSocial}
                     {cliente.nomeFantasia ? ` (${cliente.nomeFantasia})` : ''}
                     {cliente.cnpjCpf ? ` — ${cliente.cnpjCpf}` : ''}
+                    {cliente.inativo ? ' — INATIVO no Omie (reative lá para usar)' : ''}
                   </span>
                 </label>
               ))}
