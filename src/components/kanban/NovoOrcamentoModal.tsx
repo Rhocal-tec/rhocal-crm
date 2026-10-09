@@ -375,6 +375,10 @@ export function NovoOrcamentoModal({
         setAvisoCnpj('Cliente encontrado na Receita Federal, mas ainda não está cadastrado no Omie.')
         return
       }
+      if (dados?.erro) {
+        setAvisoCnpj(`${dados.erro} Preencha o nome manualmente.`)
+        return
+      }
     } catch {
       // Rede/timeout: segue para o fallback abaixo sem mostrar erro técnico.
     }

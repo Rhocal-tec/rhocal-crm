@@ -25,9 +25,9 @@ function textoOuNulo(valor: unknown): string | null {
   return typeof valor === 'string' && valor.trim() ? valor.trim() : null
 }
 
-// A BrasilAPI é externa e pode ficar lenta/fora do ar — nunca deixa a
-// requisição pendurada esperando indefinidamente.
-const TIMEOUT_MS = 8000
+// As APIs são externas e podem ficar lentas/fora do ar/bloqueadas — nunca
+// deixa a requisição pendurada esperando indefinidamente.
+const TIMEOUT_MS = 6000
 
 export async function POST(request: Request) {
   const supabase = createClient()
@@ -61,79 +61,118 @@ export async function POST(request: Request) {
     return NextResponse.json({ erro: 'CNPJ inválido.' }, { status: 400 })
   }
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
-
-  let resposta: Response
-  try {
-    // O `fetch` nativo do Node (usado pelas Route Handlers) não envia um
-    // header User-Agent por padrão. A CDN da BrasilAPI (Fastly) trata isso
-    // como sinal de bot e bloqueia/limita a requisição com 403 ou 429 antes
-    // mesmo de chegar na aplicação — confirmado ao vivo (mesma URL/CNPJ
-    // funciona com curl comum, que sempre manda um User-Agent, e falha sem
-    // ele). Um User-Agent explícito evita esse bloqueio.
-    resposta = await fetch(`${BRASILAPI_CNPJ_URL}/${cnpj}`, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'RhocalCRM/1.0 (+https://rhocal.com.br)',
-        Accept: 'application/json',
-      },
-    })
-  } catch {
-    // Cobre tanto falha de rede quanto o abort por timeout — ambos sinalizam
-    // "não deu para consultar agora", tratados da mesma forma pelo client.
-    const mensagem = 'Não foi possível conectar à Receita Federal. Verifique sua conexão e tente novamente.'
-    await registrarErro(supabase, { rota: '/api/cnpj/consultar', mensagem, colaboradorId: user.id })
-    return NextResponse.json({ erro: mensagem }, { status: 502 })
-  } finally {
-    clearTimeout(timeout)
+  const headers = {
+    // Sem User-Agent, algumas CDNs (ex: BrasilAPI/Fastly) bloqueiam o fetch do Node.
+    'User-Agent': 'Mozilla/5.0 (compatible; RhocalCRM/1.0)',
+    Accept: 'application/json',
   }
 
-  // A BrasilAPI responde 404 quando o CNPJ não existe na base da Receita.
-  if (resposta.status === 404) {
+  type Resultado = 'nao_encontrado' | 'falhou' | ClienteReceita
+
+  async function buscarJson(url: string): Promise<{ status: number; dados: Record<string, unknown> | null } | null> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    try {
+      const r = await fetch(url, { signal: controller.signal, headers })
+      const dados = await r.json().catch(() => null)
+      return { status: r.status, dados }
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  function montar(
+    razao: unknown,
+    fantasia: unknown,
+    telefoneDigitos: string,
+    logradouro: unknown,
+    numero: unknown,
+    bairro: unknown,
+    municipio: unknown,
+    uf: unknown,
+    cep: unknown,
+  ): Resultado {
+    const razaoSocial = textoOuNulo(razao)
+    const nomeFantasia = textoOuNulo(fantasia)
+    if (!razaoSocial && !nomeFantasia) return 'nao_encontrado'
+    const ok = telefoneDigitos.length >= 10
+    return {
+      razaoSocial,
+      nomeFantasia,
+      telefone: telefoneDigitos || null,
+      telefoneDdd: ok ? telefoneDigitos.slice(0, 2) : null,
+      telefoneNumero: ok ? telefoneDigitos.slice(2) : null,
+      logradouro: textoOuNulo(logradouro),
+      numero: textoOuNulo(numero),
+      bairro: textoOuNulo(bairro),
+      municipio: textoOuNulo(municipio),
+      uf: textoOuNulo(uf),
+      cep: textoOuNulo(cep),
+    }
+  }
+
+  const soDigitos = (v: unknown) => (typeof v === 'string' ? v.replace(/\D/g, '') : '')
+
+  // Formato BrasilAPI / minhareceita.org (mesmo schema).
+  async function viaBrasilApi(url: string): Promise<Resultado> {
+    const r = await buscarJson(url)
+    if (!r) return 'falhou'
+    if (r.status === 404) return 'nao_encontrado'
+    const d = r.dados
+    if (r.status < 200 || r.status >= 300 || !d) return 'falhou'
+    return montar(d.razao_social, d.nome_fantasia, soDigitos(d.ddd_telefone_1), d.logradouro, d.numero, d.bairro, d.municipio, d.uf, d.cep)
+  }
+
+  async function viaReceitaWs(): Promise<Resultado> {
+    const r = await buscarJson(`https://receitaws.com.br/v1/cnpj/${cnpj}`)
+    const d = r?.dados
+    if (!r || !d || r.status !== 200) return 'falhou'
+    if (d.status === 'ERROR') {
+      return typeof d.message === 'string' && d.message.toLowerCase().includes('inválido') ? 'nao_encontrado' : 'falhou'
+    }
+    return montar(d.nome, d.fantasia, soDigitos(d.telefone).replace(/^(\d{10,11}).*/, '$1'), d.logradouro, d.numero, d.bairro, d.municipio, d.uf, d.cep)
+  }
+
+  async function viaCnpjWs(): Promise<Resultado> {
+    const r = await buscarJson(`https://publica.cnpj.ws/cnpj/${cnpj}`)
+    if (!r) return 'falhou'
+    if (r.status === 404) return 'nao_encontrado'
+    const d = r.dados
+    if (r.status !== 200 || !d) return 'falhou'
+    const e = (d.estabelecimento ?? {}) as Record<string, unknown>
+    const cidade = (e.cidade ?? {}) as Record<string, unknown>
+    const estado = (e.estado ?? {}) as Record<string, unknown>
+    return montar(d.razao_social, e.nome_fantasia, soDigitos(e.ddd1) + soDigitos(e.telefone1), e.logradouro, e.numero, e.bairro, cidade.nome, estado.sigla, e.cep)
+  }
+
+  // Tenta uma API após a outra: se uma estiver fora do ar, lenta ou bloqueando
+  // o servidor (comum em IPs de hospedagem), a próxima assume.
+  const provedores: Array<() => Promise<Resultado>> = [
+    () => viaBrasilApi(`${BRASILAPI_CNPJ_URL}/${cnpj}`),
+    () => viaBrasilApi(`https://minhareceita.org/${cnpj}`),
+    viaReceitaWs,
+    viaCnpjWs,
+  ]
+
+  let algumNaoEncontrado = false
+  for (const provedor of provedores) {
+    const resultado = await provedor()
+    if (resultado === 'falhou') continue
+    if (resultado === 'nao_encontrado') {
+      algumNaoEncontrado = true
+      continue
+    }
+    return NextResponse.json({ encontrado: true, cliente: resultado })
+  }
+
+  if (algumNaoEncontrado) {
     return NextResponse.json({ encontrado: false })
   }
 
-  const dados = await resposta.json().catch(() => null)
-
-  if (!resposta.ok || !dados) {
-    const mensagem = `A Receita Federal retornou um erro inesperado ao consultar este CNPJ (HTTP ${resposta.status}).`
-    await registrarErro(supabase, { rota: '/api/cnpj/consultar', mensagem, colaboradorId: user.id })
-    return NextResponse.json(
-      { erro: 'A Receita Federal retornou um erro inesperado ao consultar este CNPJ.' },
-      { status: 502 },
-    )
-  }
-
-  const razaoSocial = textoOuNulo(dados.razao_social)
-  const nomeFantasia = textoOuNulo(dados.nome_fantasia)
-
-  if (!razaoSocial && !nomeFantasia) {
-    return NextResponse.json({ encontrado: false })
-  }
-
-  // ddd_telefone_1 vem como DDD + número concatenados, sem separador (ex:
-  // "1123847676") — a formatação combinada é usada para preencher o campo de
-  // telefone do pedido; DDD/número separados (fase 24) alimentam o formulário
-  // de cadastro de cliente no Omie, que exige os dois campos à parte.
-  const telefoneDigitos =
-    typeof dados.ddd_telefone_1 === 'string' ? dados.ddd_telefone_1.replace(/\D/g, '') : ''
-  const telefoneDdd = telefoneDigitos.length >= 10 ? telefoneDigitos.slice(0, 2) : null
-  const telefoneNumero = telefoneDigitos.length >= 10 ? telefoneDigitos.slice(2) : null
-
-  const cliente: ClienteReceita = {
-    razaoSocial,
-    nomeFantasia,
-    telefone: telefoneDigitos || null,
-    telefoneDdd,
-    telefoneNumero,
-    logradouro: textoOuNulo(dados.logradouro),
-    numero: textoOuNulo(dados.numero),
-    bairro: textoOuNulo(dados.bairro),
-    municipio: textoOuNulo(dados.municipio),
-    uf: textoOuNulo(dados.uf),
-    cep: textoOuNulo(dados.cep),
-  }
-
-  return NextResponse.json({ encontrado: true, cliente })
+  const mensagem =
+    'Não foi possível consultar a Receita Federal agora (todas as fontes falharam). Tente novamente em instantes.'
+  await registrarErro(supabase, { rota: '/api/cnpj/consultar', mensagem, colaboradorId: user.id })
+  return NextResponse.json({ erro: mensagem }, { status: 502 })
 }
