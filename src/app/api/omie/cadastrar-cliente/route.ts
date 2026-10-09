@@ -58,6 +58,7 @@ export async function POST(request: Request) {
   const cidade = campoTexto(body?.cidade)
   const estado = campoTexto(body?.estado)
   const email = campoTexto(body?.email)
+  const cep = campoTexto(body?.cep).replace(/\D/g, '')
 
   // Presente (fase 34, edição de um cliente já sincronizado) => AlterarCliente
   // em vez de IncluirCliente, mesmo payload de campos de entrada — simetria
@@ -84,6 +85,7 @@ export async function POST(request: Request) {
     bairro,
     cidade,
     estado,
+    ...(cep ? { cep } : {}),
     email,
   }
 

@@ -225,6 +225,7 @@ export function ClienteFormModal({
           bairro: form.bairro.trim(),
           cidade: form.cidade.trim(),
           estado: form.estado.trim(),
+          cep: form.cep.trim(),
           email: form.email.trim(),
           empresaSlug: empresaAtiva?.slug,
           codigoClienteOmie: omieClienteId ?? undefined,

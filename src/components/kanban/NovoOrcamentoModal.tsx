@@ -312,13 +312,9 @@ export function NovoOrcamentoModal({
       })
       const dados = await resposta.json().catch(() => null)
 
-      if (!resposta.ok || !dados || dados.erro) {
-        setClienteOmieId(null)
-        setAvisoCnpj('Não foi possível consultar o Omie agora. Preencha o nome manualmente.')
-        return
-      }
-
-      if (dados.encontrado && dados.cliente) {
+      // Erro ao consultar o Omie (ex: credencial/rede): não desiste — segue
+      // para a Receita Federal, que independe do Omie.
+      if (resposta.ok && dados && !dados.erro && dados.encontrado && dados.cliente) {
         setClienteNome(dados.cliente.razaoSocial)
         setClienteOmieId(dados.cliente.codigoClienteOmie)
         if (dados.cliente.cnpjCpf) setCnpj(dados.cliente.cnpjCpf)
@@ -446,6 +442,7 @@ export function NovoOrcamentoModal({
           bairro: cadastroForm.bairro.trim(),
           cidade: cadastroForm.cidade.trim(),
           estado: cadastroForm.estado.trim(),
+          cep: cadastroForm.cep.trim(),
           email: cadastroForm.email.trim(),
           empresaSlug: empresaAtiva?.slug,
         }),
