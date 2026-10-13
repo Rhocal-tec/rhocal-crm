@@ -10,6 +10,7 @@ export function TarefaColuna({
   bucket,
   tarefas,
   clienteLabelPorTarefa,
+  contatoPorTarefa,
   responsavelPorId,
   onConcluir,
   onIniciar,
@@ -21,6 +22,7 @@ export function TarefaColuna({
   bucket: PrazoBucket
   tarefas: Tarefa[]
   clienteLabelPorTarefa: Record<string, string | null>
+  contatoPorTarefa: Record<string, string | null>
   responsavelPorId: Record<string, string>
   onConcluir: (tarefa: Tarefa) => void
   onIniciar: (tarefa: Tarefa) => void
@@ -54,6 +56,7 @@ export function TarefaColuna({
             key={tarefa.id}
             tarefa={tarefa}
             clienteLabel={clienteLabelPorTarefa[tarefa.id] ?? null}
+            contato={contatoPorTarefa[tarefa.id] ?? null}
             responsavelNome={tarefa.responsavel ? responsavelPorId[tarefa.responsavel] ?? null : null}
             atrasada={bucket === 'ATRASADAS'}
             onConcluir={onConcluir}

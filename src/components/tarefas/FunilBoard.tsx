@@ -54,11 +54,11 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
   const [minhaFila, setMinhaFila] = useState(false)
   const [profilesPorId, setProfilesPorId] = useState<Record<string, string>>({})
   const [oportunidadesPorId, setOportunidadesPorId] = useState<
-    Record<string, { numero: number; cliente_nome: string }>
+    Record<string, { numero: number; cliente_nome: string; contato: string | null }>
   >({})
-  const [pedidosPorId, setPedidosPorId] = useState<Record<string, { numero: number; cliente_nome: string }>>(
-    {},
-  )
+  const [pedidosPorId, setPedidosPorId] = useState<
+    Record<string, { numero: number; cliente_nome: string; contato: string | null }>
+  >({})
   const [novaTarefaAberta, setNovaTarefaAberta] = useState(false)
 
   // ===== Busca/filtro do quadro (tarefas + oportunidades juntas) =====
@@ -174,21 +174,42 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
       if (idsOportunidade.length > 0) {
         const { data } = await supabase
           .from('oportunidades')
-          .select('id, numero, cliente_nome')
+          .select(
+            'id, numero, cliente_nome, cliente_telefone, cliente_contato, contato_nome, contato_cargo, contato_email, contato_telefone, whatsapp_comprador, whatsapp_empresa',
+          )
           .in('id', idsOportunidade)
         if (ativo && data) {
           setOportunidadesPorId((atual) => ({
             ...atual,
-            ...Object.fromEntries(data.map((o) => [o.id, { numero: o.numero, cliente_nome: o.cliente_nome }])),
+            ...Object.fromEntries(
+              data.map((o) => {
+                const nomeCargo = [o.contato_nome ?? o.cliente_contato, o.contato_cargo]
+                  .filter(Boolean)
+                  .join(' — ')
+                const telefone = o.cliente_telefone ?? o.contato_telefone ?? o.whatsapp_comprador ?? o.whatsapp_empresa
+                const contato =
+                  [nomeCargo || null, telefone, o.contato_email].filter(Boolean).join(' · ') || null
+                return [o.id, { numero: o.numero, cliente_nome: o.cliente_nome, contato }]
+              }),
+            ),
           }))
         }
       }
       if (idsPedido.length > 0) {
-        const { data } = await supabase.from('pedidos').select('id, numero, cliente_nome').in('id', idsPedido)
+        const { data } = await supabase
+          .from('pedidos')
+          .select('id, numero, cliente_nome, cliente_telefone, cliente_contato')
+          .in('id', idsPedido)
         if (ativo && data) {
           setPedidosPorId((atual) => ({
             ...atual,
-            ...Object.fromEntries(data.map((p) => [p.id, { numero: p.numero, cliente_nome: p.cliente_nome }])),
+            ...Object.fromEntries(
+              data.map((p) => {
+                const contato =
+                  [p.cliente_contato, p.cliente_telefone].filter(Boolean).join(' · ') || null
+                return [p.id, { numero: p.numero, cliente_nome: p.cliente_nome, contato }]
+              }),
+            ),
           }))
         }
       }
@@ -264,6 +285,22 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         // tarefa (migration 0022), que até aqui ficavam preenchidos no banco
         // sem aparecer em lugar nenhum da interface.
         mapa[tarefa.id] = contatoDaTarefa(tarefa).cliente
+      }
+    }
+    return mapa
+  }, [tarefasVisiveis, oportunidadesPorId, pedidosPorId])
+
+  // Linha de contato (nome · telefone · e-mail) de TODA tarefa: a das soltas
+  // vem dos campos da própria tarefa; a das ligadas, da oportunidade/pedido.
+  const contatoPorTarefa = useMemo(() => {
+    const mapa: Record<string, string | null> = {}
+    for (const tarefa of tarefasVisiveis) {
+      if (tarefa.oportunidade_id) {
+        mapa[tarefa.id] = oportunidadesPorId[tarefa.oportunidade_id]?.contato ?? null
+      } else if (tarefa.pedido_id) {
+        mapa[tarefa.id] = pedidosPorId[tarefa.pedido_id]?.contato ?? null
+      } else {
+        mapa[tarefa.id] = contatoDaTarefa(tarefa).detalhes
       }
     }
     return mapa
@@ -570,6 +607,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
             bucket={bucket}
             tarefas={tarefasFiltradas.filter((t) => classificarPrazo(t) === bucket)}
             clienteLabelPorTarefa={clienteLabelPorTarefa}
+            contatoPorTarefa={contatoPorTarefa}
             responsavelPorId={profilesPorId}
             onConcluir={abrirConcluir}
             onIniciar={(t) => alterarSituacao(t, 'Em Execução')}
