@@ -243,6 +243,7 @@ export function OmieOrcamentoSection({
         omie_orcamento_id: codigoPedido,
         cliente_omie_id: codigoClienteOmie,
       })
+      if (typeof dados.aviso === 'string' && dados.aviso) setErro(dados.aviso)
       setEtapa('sucesso')
     } catch (err) {
       setErro(err instanceof Error ? err.message : 'Erro ao criar orçamento no Omie.')

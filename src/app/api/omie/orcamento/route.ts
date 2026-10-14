@@ -12,6 +12,7 @@ import {
 const OMIE_CLIENTES_URL = 'https://app.omie.com.br/api/v1/geral/clientes/'
 const OMIE_PEDIDO_URL = 'https://app.omie.com.br/api/v1/produtos/pedido/'
 const OMIE_CATEGORIAS_URL = 'https://app.omie.com.br/api/v1/geral/categorias/'
+const OMIE_PARCELAS_URL = 'https://app.omie.com.br/api/v1/geral/parcelas/'
 const OMIE_CONTA_CORRENTE_URL = 'https://app.omie.com.br/api/v1/geral/contacorrente/'
 
 interface ClienteOmie {
@@ -26,6 +27,37 @@ function formatarDataOmie(data: Date): string {
   const dia = String(data.getDate()).padStart(2, '0')
   const mes = String(data.getMonth() + 1).padStart(2, '0')
   return `${dia}/${mes}/${data.getFullYear()}`
+}
+
+// Procura no Omie uma condição de pagamento JÁ CADASTRADA equivalente aos
+// prazos (ex: [30,60,90] -> "30/60/90 dias"; [0] -> "À vista"). Usar o código
+// cadastrado é o que faz o Omie exibir a condição certa no orçamento (o
+// parcelamento personalizado "999" pode cair como "à vista"). Devolve null
+// se nada bater — aí o chamador usa o parcelamento personalizado.
+async function buscarCodigoCondicao(
+  credenciais: CredenciaisOmie,
+  prazos: number[],
+): Promise<string | null> {
+  try {
+    const r = await chamarOmie(
+      OMIE_PARCELAS_URL,
+      'ListarParcelas',
+      { pagina: 1, registros_por_pagina: 200 },
+      credenciais,
+    )
+    const lista = Array.isArray(r.cadastros) ? (r.cadastros as Record<string, unknown>[]) : []
+    const alvo = prazos.join('/')
+    const achada = lista.find((c) => {
+      const desc = String(c.cDescricao ?? '').toLowerCase()
+      const nums = (desc.match(/\d+/g) ?? []).join('/')
+      if (prazos.length === 1 && prazos[0] === 0) return /vista/.test(desc)
+      return nums === alvo && /dia/.test(desc) && Number(c.nParcelas ?? prazos.length) === prazos.length
+    })
+    if (!achada || achada.nCodigo === undefined || achada.nCodigo === null) return null
+    return String(achada.nCodigo).padStart(3, '0')
+  } catch {
+    return null
+  }
 }
 
 // Converte o "modo_faturamento" do pedido no CRM (ex: "21 dias", "30/60/90
@@ -406,38 +438,51 @@ export async function POST(request: Request) {
         payloadCompleto.frete = { modalidade: '0', valor_frete: valorFrete }
       }
       const prazos = prazosDoModoFaturamento(pedido.modo_faturamento)
+      const cabecalhoBase = payloadBase.cabecalho as Record<string, unknown>
+
+      // 1ª opção: condição já cadastrada no Omie (exibe certinho no orçamento).
+      // 2ª: parcelamento personalizado ("999" + lista_parcelas).
+      const codigoCondicao = prazos ? await buscarCodigoCondicao(credenciais, prazos) : null
+      const payloadComCondicaoCadastrada: Record<string, unknown> | null = codigoCondicao
+        ? {
+            ...payloadCompleto,
+            cabecalho: { ...cabecalhoBase, codigo_parcela: codigoCondicao },
+          }
+        : null
       const payloadComParcelas: Record<string, unknown> | null = prazos
         ? {
             ...payloadCompleto,
-            cabecalho: {
-              ...(payloadBase.cabecalho as Record<string, unknown>),
-              codigo_parcela: '999',
-              qtde_parcelas: prazos.length,
-            },
+            cabecalho: { ...cabecalhoBase, codigo_parcela: '999', qtde_parcelas: prazos.length },
             lista_parcelas: {
               parcela: montarParcelasOrcamento(prazos, totalItens + valorFrete),
             },
           }
         : null
 
-      let resultado: Record<string, unknown>
-      try {
-        resultado = await chamarOmie(
-          OMIE_PEDIDO_URL,
-          'IncluirPedido',
-          payloadComParcelas ?? payloadCompleto,
-          credenciais,
-        )
-      } catch (err) {
-        // Se o Omie recusar só por causa das parcelas (ex: soma diferente do
-        // total), gera o orçamento mesmo assim com o frete, sem a condição.
-        const msg = err instanceof Error ? err.message.toLowerCase() : ''
-        if (payloadComParcelas && msg.includes('parcela')) {
-          resultado = await chamarOmie(OMIE_PEDIDO_URL, 'IncluirPedido', payloadCompleto, credenciais)
-        } else {
-          throw err
+      const tentativas = [payloadComCondicaoCadastrada, payloadComParcelas, payloadCompleto].filter(
+        (t): t is Record<string, unknown> => t !== null,
+      )
+      let resultado: Record<string, unknown> | null = null
+      let avisoCondicao: string | null = null
+      let ultimoErro: unknown = null
+      for (let i = 0; i < tentativas.length; i++) {
+        try {
+          resultado = await chamarOmie(OMIE_PEDIDO_URL, 'IncluirPedido', tentativas[i], credenciais)
+          // Última tentativa (sem condição) com condição desejada = não subiu.
+          if (prazos && tentativas[i] === payloadCompleto) {
+            avisoCondicao = `A condição "${pedido.modo_faturamento}" não foi aceita pelo Omie${
+              ultimoErro instanceof Error ? ` (${ultimoErro.message})` : ''
+            }. Ajuste a condição de pagamento manualmente no orçamento do Omie.`
+          }
+          break
+        } catch (err) {
+          ultimoErro = err
+          const msg = err instanceof Error ? err.message.toLowerCase() : ''
+          // Só tenta a próxima alternativa quando o problema parece ser a condição.
+          if (i === tentativas.length - 1 || !/parcela|condi/.test(msg)) throw err
         }
       }
+      if (!resultado) throw ultimoErro instanceof Error ? ultimoErro : new Error('Falha ao criar orçamento.')
 
       const codigoPedido = resultado.codigo_pedido as number | undefined
       if (!codigoPedido) {
@@ -447,7 +492,7 @@ export async function POST(request: Request) {
         )
       }
 
-      return NextResponse.json({ codigoPedido })
+      return NextResponse.json({ codigoPedido, aviso: avisoCondicao })
     }
 
     if (body.acao === 'converter_pedido_venda') {
