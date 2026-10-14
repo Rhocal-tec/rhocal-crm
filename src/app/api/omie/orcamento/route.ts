@@ -28,6 +28,44 @@ function formatarDataOmie(data: Date): string {
   return `${dia}/${mes}/${data.getFullYear()}`
 }
 
+// Converte o "modo_faturamento" do pedido no CRM (ex: "21 dias", "30/60/90
+// dias", "PIX", "Cartão") nos prazos em dias de cada parcela. Sem "dias" no
+// texto (PIX/Cartão), vira uma parcela única à vista.
+function prazosDoModoFaturamento(modo: string | null): number[] | null {
+  if (!modo || !modo.trim()) return null
+  if (/dias?/i.test(modo)) {
+    const prazos = (modo.match(/\d+/g) ?? []).map(Number).filter((n) => n > 0 && n <= 365)
+    return prazos.length > 0 ? prazos : null
+  }
+  return [0]
+}
+
+// Monta a lista de parcelas (percentual, valor, vencimento) do orçamento a
+// partir dos prazos; o centavo de arredondamento fica na última parcela.
+function montarParcelasOrcamento(prazos: number[], total: number) {
+  const base = Math.floor((100 / prazos.length) * 100) / 100
+  const hoje = new Date()
+  hoje.setHours(0, 0, 0, 0)
+  let acumulado = 0
+  return prazos.map((dias, i) => {
+    const ultima = i === prazos.length - 1
+    const percentual = ultima ? Math.round((100 - base * (prazos.length - 1)) * 100) / 100 : base
+    const valor = ultima
+      ? Math.round((total - acumulado) * 100) / 100
+      : Math.round(((total * percentual) / 100) * 100) / 100
+    acumulado += valor
+    const venc = new Date(hoje)
+    venc.setDate(venc.getDate() + dias)
+    return {
+      numero_parcela: i + 1,
+      percentual,
+      valor,
+      quantidade_dias: dias,
+      data_vencimento: formatarDataOmie(venc),
+    }
+  })
+}
+
 // A resposta de ConsultarPedido devolve, dentro de cabecalho e de cada
 // det.ide, campos calculados/de auditoria (numero_pedido, sequencial,
 // codigo_item, etc.) que a própria documentação do Omie marca como
@@ -323,44 +361,83 @@ export async function POST(request: Request) {
       const codigoCategoria = await obterCategoriaReceitaPadrao(credenciais)
       const contaCorrente = await obterContaCorrentePadrao(credenciais)
 
-      const resultado = await chamarOmie(
-        OMIE_PEDIDO_URL,
-        'IncluirPedido',
-        {
-          // codigo_parcela/quantidade_parcelas não pertencem a "cabecalho" —
-          // são campos de condição de pagamento (bloco "condicao_pagamento")
-          // e não são necessários para um orçamento simples.
-          cabecalho: {
-            codigo_cliente: codigoClienteOmie ?? 0,
-            data_previsao: formatarDataOmie(new Date()),
-            // "00" = Orçamento (não Pedido de Venda completo).
-            etapa: '00',
-            origem_pedido: 'API',
-            // Identificador único nosso, exigido pelo Omie para rastrear/evitar
-            // duplicidade — não é o codigo_pedido (esse é gerado pelo Omie na resposta).
-            codigo_pedido_integracao: `RHOCAL-CRM-${pedido.numero}`,
-          },
-          det: itens.map((item, index) => ({
-            // Identificador único do item na nossa integração, exigido pelo
-            // Omie — mesmo papel do codigo_pedido_integracao, mas por item.
-            ide: {
-              codigo_item_integracao: `RHOCAL-CRM-${pedido.numero}-${index + 1}`,
-            },
-            produto: {
-              codigo_produto: item.codigo_produto_omie,
-              descricao: item.descricao,
-              quantidade: Number(item.quantidade),
-              valor_unitario: Number(item.preco_venda),
-            },
-          })),
-          informacoes_adicionais: {
-            consumidor_final: 'S',
-            codigo_categoria: codigoCategoria,
-            codigo_conta_corrente: contaCorrente.codigo,
-          },
+      const payloadBase: Record<string, unknown> = {
+        // codigo_parcela/qtde_parcelas (condição de pagamento) entram só em
+        // payloadComParcelas, abaixo, quando o pedido tem modo_faturamento.
+        cabecalho: {
+          codigo_cliente: codigoClienteOmie ?? 0,
+          data_previsao: formatarDataOmie(new Date()),
+          // "00" = Orçamento (não Pedido de Venda completo).
+          etapa: '00',
+          origem_pedido: 'API',
+          // Identificador único nosso, exigido pelo Omie para rastrear/evitar
+          // duplicidade — não é o codigo_pedido (esse é gerado pelo Omie na resposta).
+          codigo_pedido_integracao: `RHOCAL-CRM-${pedido.numero}`,
         },
-        credenciais,
+        det: itens.map((item, index) => ({
+          // Identificador único do item na nossa integração, exigido pelo
+          // Omie — mesmo papel do codigo_pedido_integracao, mas por item.
+          ide: {
+            codigo_item_integracao: `RHOCAL-CRM-${pedido.numero}-${index + 1}`,
+          },
+          produto: {
+            codigo_produto: item.codigo_produto_omie,
+            descricao: item.descricao,
+            quantidade: Number(item.quantidade),
+            valor_unitario: Number(item.preco_venda),
+          },
+        })),
+        informacoes_adicionais: {
+          consumidor_final: 'S',
+          codigo_categoria: codigoCategoria,
+          codigo_conta_corrente: contaCorrente.codigo,
+        },
+      }
+
+      // Frete e condição de pagamento preenchidos no CRM (aba Dados) também
+      // sobem para o Omie.
+      const valorFrete = Number(pedido.valor_frete ?? 0)
+      const totalItens = itens.reduce(
+        (soma, item) => soma + Number(item.quantidade) * Number(item.preco_venda),
+        0,
       )
+      const payloadCompleto: Record<string, unknown> = { ...payloadBase }
+      if (valorFrete > 0) {
+        payloadCompleto.frete = { modalidade: '0', valor_frete: valorFrete }
+      }
+      const prazos = prazosDoModoFaturamento(pedido.modo_faturamento)
+      const payloadComParcelas: Record<string, unknown> | null = prazos
+        ? {
+            ...payloadCompleto,
+            cabecalho: {
+              ...(payloadBase.cabecalho as Record<string, unknown>),
+              codigo_parcela: '999',
+              qtde_parcelas: prazos.length,
+            },
+            lista_parcelas: {
+              parcela: montarParcelasOrcamento(prazos, totalItens + valorFrete),
+            },
+          }
+        : null
+
+      let resultado: Record<string, unknown>
+      try {
+        resultado = await chamarOmie(
+          OMIE_PEDIDO_URL,
+          'IncluirPedido',
+          payloadComParcelas ?? payloadCompleto,
+          credenciais,
+        )
+      } catch (err) {
+        // Se o Omie recusar só por causa das parcelas (ex: soma diferente do
+        // total), gera o orçamento mesmo assim com o frete, sem a condição.
+        const msg = err instanceof Error ? err.message.toLowerCase() : ''
+        if (payloadComParcelas && msg.includes('parcela')) {
+          resultado = await chamarOmie(OMIE_PEDIDO_URL, 'IncluirPedido', payloadCompleto, credenciais)
+        } else {
+          throw err
+        }
+      }
 
       const codigoPedido = resultado.codigo_pedido as number | undefined
       if (!codigoPedido) {
