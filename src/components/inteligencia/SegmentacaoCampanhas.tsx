@@ -14,11 +14,16 @@
 // nas policies "campanhas escrita"/"campanha_clientes escrita" (to
 // authenticated). Mesmo padrão de insert já usado em SalvarCampanhaModal.tsx.
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import type { ClienteInteligencia } from '@/lib/inteligencia/agregar'
 import { SEGMENTOS, type Segmento, type SegmentoId } from '@/lib/inteligencia/segmentos-campanha'
+
+// Quem recebeu mensagem de WhatsApp (em qualquer campanha) nos últimos
+// JANELA_DIAS dias some dos segmentos, para não ser abordado de novo em pouco
+// tempo. Mesma janela da lista de disparo (CampanhaListaDisparo).
+const JANELA_DIAS = 30
 
 export default function SegmentacaoCampanhas({
   clientes,
@@ -43,12 +48,56 @@ export default function SegmentacaoCampanhas({
     setErro(null)
   }
 
+  const [recentes, setRecentes] = useState<
+    { cliente_omie_codigo: string | null; cliente_cnpj: string | null; cliente_nome: string }[]
+  >([])
+  const [mostrarContatados, setMostrarContatados] = useState(false)
+
+  useEffect(() => {
+    let ativo = true
+    const desde = new Date(Date.now() - JANELA_DIAS * 86400000).toISOString()
+    supabase
+      .from('campanha_clientes')
+      .select('cliente_omie_codigo, cliente_cnpj, cliente_nome')
+      .gte('whatsapp_enviado_em', desde)
+      .limit(5000)
+      .then(({ data }) => {
+        if (ativo) setRecentes(data ?? [])
+      })
+    return () => {
+      ativo = false
+    }
+  }, [supabase])
+
+  const contatadoRecentemente = useMemo(() => {
+    const omies = new Set(recentes.map((r) => r.cliente_omie_codigo).filter(Boolean))
+    const cnpjs = new Set(
+      recentes.map((r) => (r.cliente_cnpj ? r.cliente_cnpj.replace(/\D/g, '') : '')).filter(Boolean),
+    )
+    const nomes = new Set(recentes.map((r) => r.cliente_nome.trim().toLowerCase()))
+    return (c: ClienteInteligencia) => {
+      const cnpj = c.cnpj ? c.cnpj.replace(/\D/g, '') : ''
+      return (
+        (c.omieClienteId !== null && omies.has(String(c.omieClienteId))) ||
+        (!!cnpj && cnpjs.has(cnpj)) ||
+        nomes.has(c.nome.trim().toLowerCase())
+      )
+    }
+  }, [recentes])
+
+  const totalOcultos = useMemo(
+    () => new Set(clientes.filter(contatadoRecentemente).map((c) => c.chave)).size,
+    [clientes, contatadoRecentemente],
+  )
+
   const grupos = useMemo(() => {
     return SEGMENTOS.map((seg) => ({
       seg,
-      clientes: clientes.filter(seg.filtro),
+      clientes: clientes
+        .filter(seg.filtro)
+        .filter((c) => mostrarContatados || !contatadoRecentemente(c)),
     }))
-  }, [clientes])
+  }, [clientes, contatadoRecentemente, mostrarContatados])
 
   async function criarCampanha(seg: Segmento, clientesDoSegmento: ClienteInteligencia[]) {
     setErro(null)
@@ -111,6 +160,23 @@ export default function SegmentacaoCampanhas({
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-primary">Segmentação e campanhas sugeridas</h3>
+
+      {totalOcultos > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span>
+            {mostrarContatados
+              ? `Exibindo também ${totalOcultos} cliente(s) que já receberam mensagem nos últimos ${JANELA_DIAS} dias.`
+              : `${totalOcultos} cliente(s) já receberam mensagem nos últimos ${JANELA_DIAS} dias e foram ocultados dos segmentos.`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setMostrarContatados((v) => !v)}
+            className="font-medium text-primary/80 underline underline-offset-2 hover:text-primary"
+          >
+            {mostrarContatados ? 'Ocultar de novo' : 'Mostrar mesmo assim'}
+          </button>
+        </div>
+      )}
 
       {erro && (
         <p className="rounded-md border border-accent-danger/40 bg-accent-danger/10 px-3 py-2 text-sm text-accent-danger">
