@@ -35,6 +35,7 @@ import {
 import { faltaMigracao, MENSAGEM_FALTA_MIGRACAO } from '@/lib/produtividade/erros'
 import { calcularDiasUteisMes, type DiasUteisMes } from '@/lib/produtividade/dias-uteis'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
+import { CampanhasProdutividade } from './CampanhasProdutividade'
 import { MetasEditor, type MetaLinha } from './MetasEditor'
 import { ProdutividadeImpressao } from './ProdutividadeImpressao'
 import type { Database } from '@/types/database'
@@ -794,6 +795,8 @@ export function ProdutividadePainel() {
               <GrupoPedidos m={equipe} marcosCompletos={marcosCompletos} />
             </div>
           </section>
+
+          {empresaAtiva && <CampanhasProdutividade empresaId={empresaAtiva.id} ano={ano} mes={mes} />}
 
           <section className="mt-6 rounded-lg border border-white/10 bg-surface p-5">
             <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">

@@ -916,6 +916,7 @@ export interface Database {
           convertido_em: string | null
           pedido_id: string | null
           whatsapp_enviado_em: string | null
+          whatsapp_enviado_por: string | null
         }
         Insert: {
           id?: string
@@ -927,6 +928,7 @@ export interface Database {
           convertido_em?: string | null
           pedido_id?: string | null
           whatsapp_enviado_em?: string | null
+          whatsapp_enviado_por?: string | null
         }
         Update: {
           id?: string
@@ -938,6 +940,7 @@ export interface Database {
           convertido_em?: string | null
           pedido_id?: string | null
           whatsapp_enviado_em?: string | null
+          whatsapp_enviado_por?: string | null
         }
         Relationships: []
       }

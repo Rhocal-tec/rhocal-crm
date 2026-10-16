@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/contexts/AuthContext'
 import { formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { obterMensagemCampanha } from '@/lib/inteligencia/segmentos-campanha'
 import { montarLinkWhatsapp } from '@/lib/inteligencia/whatsapp'
@@ -37,6 +38,8 @@ function encontrarClienteCorrespondente(
   return clientes.find((c) => c.nome.trim().toLowerCase() === nomeLinha) ?? null
 }
 
+const JANELA_DIAS = 30
+
 // Fase de disparo assistido de WhatsApp: lista os clientes de uma campanha
 // já salva, com telefone resolvido (cadastro > pedido > oportunidade — ver
 // agregar.ts), preview da mensagem do segmento e um link wa.me por cliente.
@@ -45,15 +48,25 @@ function encontrarClienteCorrespondente(
 export function CampanhaListaDisparo({
   campanha,
   clientes,
+  onEnvioAlterado,
 }: {
   campanha: Campanha
   clientes: ClienteInteligencia[]
+  // Avisa o card da campanha para atualizar contadores/lista de enviados.
+  onEnvioAlterado?: () => void
 }) {
+  const { user } = useAuth()
   const [supabase] = useState(() => createClient())
   const [linhas, setLinhas] = useState<CampanhaCliente[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [atualizando, setAtualizando] = useState<string | null>(null)
+  // Contatos que receberam mensagem (em QUALQUER campanha) nos últimos
+  // JANELA_DIAS dias somem da lista, para não repetir o disparo em pouco tempo.
+  const [recentes, setRecentes] = useState<
+    { cliente_omie_codigo: string | null; cliente_cnpj: string | null; cliente_nome: string }[]
+  >([])
+  const [mostrarEnviados, setMostrarEnviados] = useState(false)
 
   useEffect(() => {
     let ativo = true
@@ -76,14 +89,41 @@ export function CampanhaListaDisparo({
     }
   }, [supabase, campanha.id])
 
+  useEffect(() => {
+    let ativo = true
+    const desde = new Date(Date.now() - JANELA_DIAS * 86400000).toISOString()
+    supabase
+      .from('campanha_clientes')
+      .select('cliente_omie_codigo, cliente_cnpj, cliente_nome')
+      .gte('whatsapp_enviado_em', desde)
+      .neq('campanha_id', campanha.id)
+      .limit(5000)
+      .then(({ data }) => {
+        if (ativo) setRecentes(data ?? [])
+      })
+    return () => {
+      ativo = false
+    }
+  }, [supabase, campanha.id])
+
   async function marcarEnviado(linha: CampanhaCliente, enviado: boolean) {
     setAtualizando(linha.id)
     const valor = enviado ? new Date().toISOString() : null
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from('campanha_clientes')
-      .update({ whatsapp_enviado_em: valor })
+      .update({ whatsapp_enviado_em: valor, whatsapp_enviado_por: enviado ? (user?.id ?? null) : null })
       .eq('id', linha.id)
+
+    // Migração 0035 (coluna whatsapp_enviado_por) ainda não rodada: marca o
+    // envio mesmo assim, só sem registrar quem enviou.
+    if (error) {
+      const retry = await supabase
+        .from('campanha_clientes')
+        .update({ whatsapp_enviado_em: valor })
+        .eq('id', linha.id)
+      error = retry.error
+    }
 
     setAtualizando(null)
 
@@ -93,8 +133,13 @@ export function CampanhaListaDisparo({
     }
 
     setLinhas((atual) =>
-      atual.map((l) => (l.id === linha.id ? { ...l, whatsapp_enviado_em: valor } : l)),
+      atual.map((l) =>
+        l.id === linha.id
+          ? { ...l, whatsapp_enviado_em: valor, whatsapp_enviado_por: enviado ? (user?.id ?? null) : null }
+          : l,
+      ),
     )
+    onEnvioAlterado?.()
   }
 
   if (carregando) {
@@ -107,16 +152,56 @@ export function CampanhaListaDisparo({
 
   const totalEnviados = linhas.filter((l) => l.whatsapp_enviado_em).length
 
+  const cnpjsRecentes = new Set(
+    recentes.map((r) => (r.cliente_cnpj ? r.cliente_cnpj.replace(/\D/g, '') : '')).filter(Boolean),
+  )
+  const omiesRecentes = new Set(recentes.map((r) => r.cliente_omie_codigo).filter(Boolean))
+  const nomesRecentes = new Set(recentes.map((r) => r.cliente_nome.trim().toLowerCase()))
+  // Contatado em outra campanha nos últimos dias?
+  function contatadoRecentemente(l: CampanhaCliente): boolean {
+    const cnpj = l.cliente_cnpj ? l.cliente_cnpj.replace(/\D/g, '') : ''
+    return (
+      (!!l.cliente_omie_codigo && omiesRecentes.has(l.cliente_omie_codigo)) ||
+      (!!cnpj && cnpjsRecentes.has(cnpj)) ||
+      nomesRecentes.has(l.cliente_nome.trim().toLowerCase())
+    )
+  }
+  const jaContatados = linhas.filter((l) => !!l.whatsapp_enviado_em || contatadoRecentemente(l))
+  const linhasVisiveis = mostrarEnviados
+    ? linhas
+    : linhas.filter((l) => !l.whatsapp_enviado_em && !contatadoRecentemente(l))
+
   return (
     <div className="mt-3 flex flex-col gap-2 rounded-md border border-white/10 bg-surface-alt p-3">
       <p className="text-xs font-semibold text-primary">
         {totalEnviados} de {linhas.length} enviado(s)
       </p>
 
+      {jaContatados.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span>
+            {mostrarEnviados
+              ? `Exibindo também ${jaContatados.length} já contatado(s).`
+              : `${jaContatados.length} contato(s) já receberam mensagem (últimos ${JANELA_DIAS} dias) e foram ocultados.`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setMostrarEnviados((v) => !v)}
+            className="font-medium text-primary/80 underline underline-offset-2 hover:text-primary"
+          >
+            {mostrarEnviados ? 'Ocultar de novo' : 'Mostrar mesmo assim'}
+          </button>
+        </div>
+      )}
+
+      {linhasVisiveis.length === 0 && (
+        <p className="text-xs text-muted">Todos os contatos desta campanha já foram contatados. ✅</p>
+      )}
+
       {erro && <p className="text-xs text-accent-danger">{erro}</p>}
 
       <div className="flex flex-col gap-2">
-        {linhas.map((linha) => {
+        {linhasVisiveis.map((linha) => {
           const cliente = encontrarClienteCorrespondente(linha, clientes)
           const nome = cliente?.nome ?? linha.cliente_nome
           const telefone = cliente?.telefone ?? null

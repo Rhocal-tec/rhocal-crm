@@ -20,6 +20,12 @@ interface PedidoPosterior {
   criado_em: string
 }
 
+interface EnvioCampanha {
+  nome: string
+  em: string
+  por: string | null
+}
+
 interface ResultadoCampanha {
   total: number
   convertidos: number
@@ -64,6 +70,10 @@ export function CampanhasTab({ clientes }: { clientes: ClienteInteligencia[] }) 
   // Lista de disparo (WhatsApp) fica fechada por padrão — só carrega
   // `campanha_clientes` quando o usuário abre uma campanha específica.
   const [campanhaAberta, setCampanhaAberta] = useState<string | null>(null)
+  // Contatos que já receberam mensagem, por campanha (exibidos no card), e
+  // nome de quem enviou.
+  const [enviadosPorCampanha, setEnviadosPorCampanha] = useState<Record<string, EnvioCampanha[]>>({})
+  const [versaoEnvios, setVersaoEnvios] = useState(0)
 
   useEffect(() => {
     if (!empresaAtiva) return
@@ -89,6 +99,59 @@ export function CampanhasTab({ clientes }: { clientes: ClienteInteligencia[] }) 
       ativo = false
     }
   }, [supabase, empresaAtiva])
+
+  useEffect(() => {
+    if (campanhas.length === 0) return
+    let ativo = true
+    const ids = campanhas.map((c) => c.id)
+
+    async function carregarEnvios() {
+      type Linha = {
+        campanha_id: string
+        cliente_nome: string
+        whatsapp_enviado_em: string | null
+        whatsapp_enviado_por?: string | null
+      }
+      let linhas: Linha[] = []
+      const comPor = await supabase
+        .from('campanha_clientes')
+        .select('campanha_id, cliente_nome, whatsapp_enviado_em, whatsapp_enviado_por')
+        .in('campanha_id', ids)
+        .not('whatsapp_enviado_em', 'is', null)
+        .limit(5000)
+      if (comPor.error) {
+        // Migração 0035 ainda não rodada — segue sem "enviado por".
+        const semPor = await supabase
+          .from('campanha_clientes')
+          .select('campanha_id, cliente_nome, whatsapp_enviado_em')
+          .in('campanha_id', ids)
+          .not('whatsapp_enviado_em', 'is', null)
+          .limit(5000)
+        linhas = (semPor.data ?? []) as Linha[]
+      } else {
+        linhas = (comPor.data ?? []) as Linha[]
+      }
+
+      if (!ativo) return
+
+      const mapa: Record<string, EnvioCampanha[]> = {}
+      for (const l of linhas) {
+        if (!l.whatsapp_enviado_em) continue
+        ;(mapa[l.campanha_id] ??= []).push({
+          nome: l.cliente_nome,
+          em: l.whatsapp_enviado_em,
+          por: l.whatsapp_enviado_por ?? null,
+        })
+      }
+      for (const lista of Object.values(mapa)) lista.sort((a, b) => b.em.localeCompare(a.em))
+      setEnviadosPorCampanha(mapa)
+    }
+
+    carregarEnvios()
+    return () => {
+      ativo = false
+    }
+  }, [supabase, campanhas, versaoEnvios])
 
   async function verResultado(campanha: Campanha) {
     setErro(null)
@@ -201,8 +264,26 @@ export function CampanhasTab({ clientes }: { clientes: ClienteInteligencia[] }) 
               </p>
             )}
 
+            {(() => {
+              const enviados = enviadosPorCampanha[campanha.id] ?? []
+              return (
+                <div className="mt-3 rounded-md border border-white/10 bg-surface-alt px-3 py-2">
+                  <p className="text-xs font-semibold text-primary">
+                    📲 {enviados.length} de {campanha.total_clientes} contato(s) com mensagem enviada
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-muted">
+                    Quem já recebeu some da lista de disparo (por 30 dias). O detalhe de quem enviou e quando está em Produtividade.
+                  </p>
+                </div>
+              )
+            })()}
+
             {campanhaAberta === campanha.id && (
-              <CampanhaListaDisparo campanha={campanha} clientes={clientes} />
+              <CampanhaListaDisparo
+                campanha={campanha}
+                clientes={clientes}
+                onEnvioAlterado={() => setVersaoEnvios((v) => v + 1)}
+              />
             )}
           </div>
         )
