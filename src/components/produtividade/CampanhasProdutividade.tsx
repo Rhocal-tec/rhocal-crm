@@ -140,26 +140,39 @@ export function CampanhasProdutividade({
     return campanhas.filter((c) => criadasNoMes.includes(c) || comEnvio.has(c.id))
   }, [campanhas, criadasNoMes, linhas])
 
-  const porColaborador = useMemo(() => {
-    const mapa = new Map<string, { nome: string; enviados: number; campanhas: Set<string> }>()
-    for (const l of linhas) {
-      const chave = l.whatsapp_enviado_por ?? 'nao-identificado'
-      const nome = l.whatsapp_enviado_por
-        ? (nomePor.get(l.whatsapp_enviado_por) ?? 'Colaborador')
-        : 'Não identificado'
-      const atual = mapa.get(chave) ?? { nome, enviados: 0, campanhas: new Set<string>() }
-      atual.enviados += 1
-      atual.campanhas.add(l.campanha_id)
-      mapa.set(chave, atual)
-    }
-    return Array.from(mapa.values()).sort((a, b) => b.enviados - a.enviados)
-  }, [linhas, nomePor])
+  const nomeCampanha = useMemo(() => new Map(campanhas.map((c) => [c.id, c.nome])), [campanhas])
 
-  const criadoresDoMes = useMemo(() => {
-    const mapa = new Map<string, number>()
-    for (const c of criadasNoMes) mapa.set(c.criado_por, (mapa.get(c.criado_por) ?? 0) + 1)
-    return mapa
-  }, [criadasNoMes])
+  // Um card por colaborador que criou campanha ou enviou mensagem no mês.
+  const cartoes = useMemo(() => {
+    const mapa = new Map<
+      string,
+      { chave: string; nome: string; criadas: string[]; enviados: number; porCampanha: Map<string, number> }
+    >()
+    function obter(id: string | null) {
+      const chave = id ?? 'nao-identificado'
+      let c = mapa.get(chave)
+      if (!c) {
+        c = {
+          chave,
+          nome: id ? (nomePor.get(id) ?? 'Colaborador') : 'Não identificado',
+          criadas: [],
+          enviados: 0,
+          porCampanha: new Map(),
+        }
+        mapa.set(chave, c)
+      }
+      return c
+    }
+    for (const camp of criadasNoMes) obter(camp.criado_por).criadas.push(camp.nome)
+    for (const l of linhas) {
+      const c = obter(l.whatsapp_enviado_por)
+      c.enviados += 1
+      c.porCampanha.set(l.campanha_id, (c.porCampanha.get(l.campanha_id) ?? 0) + 1)
+    }
+    return Array.from(mapa.values()).sort(
+      (a, b) => b.enviados - a.enviados || b.criadas.length - a.criadas.length,
+    )
+  }, [criadasNoMes, linhas, nomePor])
 
   return (
     <section className="mt-6 rounded-lg border border-white/10 bg-surface p-5">
@@ -192,39 +205,33 @@ export function CampanhasProdutividade({
           ) : (
             <>
               <h3 className="mt-5 text-sm font-semibold text-primary">Por colaborador</h3>
-              {porColaborador.length === 0 && criadoresDoMes.size === 0 ? (
-                <p className="mt-1 text-xs text-muted">Nenhum disparo registrado no mês.</p>
+              {cartoes.length === 0 ? (
+                <p className="mt-1 text-xs text-muted">Nenhum disparo ou campanha registrada no mês.</p>
               ) : (
-                <div className="mt-2 overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="text-muted">
-                      <tr>
-                        <th className="py-1 pr-3 font-medium">Colaborador</th>
-                        <th className="py-1 pr-3 font-medium">Campanhas criadas</th>
-                        <th className="py-1 pr-3 font-medium">Contatos enviados</th>
-                        <th className="py-1 font-medium">Campanhas disparadas</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-primary">
-                      {Array.from(
-                        new Set([
-                          ...Array.from(criadoresDoMes.keys()).map((id) => nomePor.get(id) ?? 'Colaborador'),
-                          ...porColaborador.map((p) => p.nome),
-                        ]),
-                      ).map((nome) => {
-                        const idCriador = Array.from(criadoresDoMes.keys()).find((id) => nomePor.get(id) === nome)
-                        const envio = porColaborador.find((p) => p.nome === nome)
-                        return (
-                          <tr key={nome} className="border-t border-white/5">
-                            <td className="py-1.5 pr-3">{nome}</td>
-                            <td className="py-1.5 pr-3 font-mono">{idCriador ? criadoresDoMes.get(idCriador) : 0}</td>
-                            <td className="py-1.5 pr-3 font-mono">{envio?.enviados ?? 0}</td>
-                            <td className="py-1.5 font-mono">{envio?.campanhas.size ?? 0}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {cartoes.map((c) => (
+                    <div key={c.chave} className="rounded-lg border border-white/10 bg-surface-alt p-4">
+                      <p className="font-heading text-base font-semibold text-primary">{c.nome}</p>
+                      <div className="mt-2 grid grid-cols-3 gap-3">
+                        <Indicador rotulo="Campanhas criadas" valor={c.criadas.length} />
+                        <Indicador rotulo="Contatos com mensagem" valor={c.enviados} />
+                        <Indicador rotulo="Campanhas disparadas" valor={c.porCampanha.size} />
+                      </div>
+                      {c.porCampanha.size > 0 && (
+                        <ul className="mt-3 divide-y divide-white/5 text-xs">
+                          {Array.from(c.porCampanha.entries()).map(([idCamp, qtd]) => (
+                            <li key={idCamp} className="flex justify-between gap-2 py-1.5">
+                              <span className="text-primary">{nomeCampanha.get(idCamp) ?? 'Campanha'}</span>
+                              <span className="font-mono text-muted">{qtd} enviado(s)</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {c.criadas.length > 0 && (
+                        <p className="mt-2 text-[11px] text-muted">Criou: {c.criadas.join(', ')}</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
 
