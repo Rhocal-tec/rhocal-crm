@@ -74,6 +74,9 @@ export function CampanhasTab({ clientes }: { clientes: ClienteInteligencia[] }) 
   // nome de quem enviou.
   const [enviadosPorCampanha, setEnviadosPorCampanha] = useState<Record<string, EnvioCampanha[]>>({})
   const [versaoEnvios, setVersaoEnvios] = useState(0)
+  // Renomear campanha já criada.
+  const [renomeando, setRenomeando] = useState<string | null>(null)
+  const [novoNome, setNovoNome] = useState('')
 
   useEffect(() => {
     if (!empresaAtiva) return
@@ -153,6 +156,18 @@ export function CampanhasTab({ clientes }: { clientes: ClienteInteligencia[] }) 
     }
   }, [supabase, campanhas, versaoEnvios])
 
+  async function salvarNome(campanha: Campanha) {
+    const nome = novoNome.trim()
+    if (!nome) return
+    const { error } = await supabase.from('campanhas').update({ nome }).eq('id', campanha.id)
+    if (error) {
+      setErro('Não foi possível renomear a campanha.')
+      return
+    }
+    setCampanhas((atual) => atual.map((c) => (c.id === campanha.id ? { ...c, nome } : c)))
+    setRenomeando(null)
+  }
+
   async function verResultado(campanha: Campanha) {
     setErro(null)
     setCalculando(campanha.id)
@@ -231,7 +246,47 @@ export function CampanhasTab({ clientes }: { clientes: ClienteInteligencia[] }) 
           <div key={campanha.id} className="rounded-lg border border-white/10 bg-surface p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="font-medium text-primary">{campanha.nome}</p>
+                {renomeando === campanha.id ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      value={novoNome}
+                      onChange={(e) => setNovoNome(e.target.value)}
+                      maxLength={120}
+                      autoFocus
+                      className="input-field rounded-md px-2 py-1 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => salvarNome(campanha)}
+                      className="text-xs font-medium text-accent-success hover:underline"
+                    >
+                      Salvar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRenomeando(null)}
+                      className="text-xs text-muted hover:text-primary"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <p className="font-medium text-primary">
+                    {campanha.nome}{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRenomeando(campanha.id)
+                        setNovoNome(campanha.nome)
+                      }}
+                      title="Renomear campanha"
+                      className="ml-1 text-xs font-normal text-muted hover:text-primary"
+                    >
+                      ✏️ Renomear
+                    </button>
+                  </p>
+                )}
                 {campanha.descricao && <p className="mt-0.5 text-xs text-muted">{campanha.descricao}</p>}
                 <p className="mt-1 text-xs text-muted">
                   {formatarDataSomente(campanha.criado_em)} · {campanha.total_clientes} cliente(s)

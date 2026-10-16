@@ -36,6 +36,8 @@ export default function SegmentacaoCampanhas({
   const [supabase] = useState(() => createClient())
   const [segmentoAberto, setSegmentoAberto] = useState<SegmentoId | null>(null)
   const [textoEditado, setTextoEditado] = useState<Record<string, string>>({})
+  // Nome personalizado da campanha por segmento (vazio = nome automático).
+  const [nomeCampanha, setNomeCampanha] = useState<Record<string, string>>({})
   const [criando, setCriando] = useState<SegmentoId | null>(null)
   const [sucesso, setSucesso] = useState<SegmentoId | null>(null)
   const [erro, setErro] = useState<string | null>(null)
@@ -113,7 +115,9 @@ export default function SegmentacaoCampanhas({
       .from('campanhas')
       .insert({
         empresa_id: empresaId,
-        nome: `${seg.titulo.replace(/^[^\s]+\s/, '')} — ${new Date().toLocaleDateString('pt-BR')}`,
+        nome:
+          (nomeCampanha[seg.id] ?? '').trim() ||
+          `${seg.titulo.replace(/^[^\s]+\s/, '')} — ${new Date().toLocaleDateString('pt-BR')}`,
         descricao: seg.descricao,
         filtros_aplicados: { segmento: seg.id },
         total_clientes: clientesDoSegmento.length,
@@ -213,6 +217,18 @@ export default function SegmentacaoCampanhas({
                       {c.cnpj && <span className="text-muted"> — {c.cnpj}</span>}
                     </div>
                   ))}
+                </div>
+
+                <div>
+                  <span className="mb-1 block text-xs font-medium text-muted">Nome da campanha (opcional)</span>
+                  <input
+                    type="text"
+                    value={nomeCampanha[seg.id] ?? ''}
+                    onChange={(e) => setNomeCampanha((prev) => ({ ...prev, [seg.id]: e.target.value }))}
+                    maxLength={120}
+                    placeholder={`${seg.titulo.replace(/^[^\s]+\s/, '')} — ${new Date().toLocaleDateString('pt-BR')}`}
+                    className="input-field w-full rounded-md px-3 py-2 text-sm"
+                  />
                 </div>
 
                 <div>
