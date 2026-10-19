@@ -29,6 +29,26 @@ function formatarDataOmie(data: Date): string {
   return `${dia}/${mes}/${data.getFullYear()}`
 }
 
+// Texto do campo "Observações do item" no Omie (obs_item, limitado a 500
+// caracteres por segurança): a observação digitada no CRM e, quando houver,
+// CA, tamanho, número e cor do item.
+function observacaoDoItem(item: {
+  observacao: string | null
+  ca: string | null
+  tamanho: string | null
+  numero: string | null
+  cor: string | null
+}): string {
+  const partes = [
+    item.observacao?.trim(),
+    item.ca?.trim() ? `CA ${item.ca.trim()}` : null,
+    item.tamanho?.trim() ? `Tam. ${item.tamanho.trim()}` : null,
+    item.numero?.trim() ? `Nº ${item.numero.trim()}` : null,
+    item.cor?.trim() ? `Cor ${item.cor.trim()}` : null,
+  ].filter((p): p is string => !!p)
+  return partes.join(' | ').slice(0, 500)
+}
+
 // Procura no Omie uma condição de pagamento JÁ CADASTRADA equivalente aos
 // prazos (ex: [30,60,90] -> "30/60/90 dias"; [0] -> "À vista"). Usar o código
 // cadastrado é o que faz o Omie exibir a condição certa no orçamento (o
@@ -418,6 +438,11 @@ export async function POST(request: Request) {
             quantidade: Number(item.quantidade),
             valor_unitario: Number(item.preco_venda),
           },
+          // Observação do item (ex: o que é o produto genérico) + CA/tamanho/
+          // número/cor, quando preenchidos — vai no campo "Observações do
+          // item" do Omie, que aparece no pedido/orçamento e é preservado na
+          // conversão em Pedido de Venda.
+          ...(observacaoDoItem(item) ? { observacao: { obs_item: observacaoDoItem(item) } } : {}),
         })),
         informacoes_adicionais: {
           consumidor_final: 'S',
