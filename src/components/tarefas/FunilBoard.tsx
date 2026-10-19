@@ -170,49 +170,116 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
       new Set(tarefas.map((t) => t.pedido_id).filter((id): id is string => id !== null)),
     ).filter((id) => !(id in pedidosPorId))
 
+    type Info = { numero: number; cliente_nome: string; contato: string | null }
+    type Pendente = {
+      tipo: 'op' | 'pedido'
+      id: string
+      cnpj: string | null
+      omieId: number | null
+      nome: string
+      nomeCargo: string
+      email: string | null
+    }
+
     async function carregar() {
+      const novasOps: Record<string, Info> = {}
+      const novosPedidos: Record<string, Info> = {}
+      // Itens sem telefone próprio: completados pelo cadastro de clientes.
+      const pendentes: Pendente[] = []
+
       if (idsOportunidade.length > 0) {
         const { data } = await supabase
           .from('oportunidades')
           .select(
-            'id, numero, cliente_nome, cliente_telefone, cliente_contato, contato_nome, contato_cargo, contato_email, contato_telefone, whatsapp_comprador, whatsapp_empresa',
+            'id, numero, cliente_nome, cliente_cnpj, cliente_telefone, cliente_contato, contato_nome, contato_cargo, contato_email, contato_telefone, whatsapp_comprador, whatsapp_empresa',
           )
           .in('id', idsOportunidade)
-        if (ativo && data) {
-          setOportunidadesPorId((atual) => ({
-            ...atual,
-            ...Object.fromEntries(
-              data.map((o) => {
-                const nomeCargo = [o.contato_nome ?? o.cliente_contato, o.contato_cargo]
-                  .filter(Boolean)
-                  .join(' — ')
-                const telefone = o.cliente_telefone ?? o.contato_telefone ?? o.whatsapp_comprador ?? o.whatsapp_empresa
-                const contato =
-                  [nomeCargo || null, telefone, o.contato_email].filter(Boolean).join(' · ') || null
-                return [o.id, { numero: o.numero, cliente_nome: o.cliente_nome, contato }]
-              }),
-            ),
-          }))
+        for (const o of data ?? []) {
+          const nomeCargo = [o.contato_nome ?? o.cliente_contato, o.contato_cargo].filter(Boolean).join(' — ')
+          const telefone = o.cliente_telefone ?? o.contato_telefone ?? o.whatsapp_comprador ?? o.whatsapp_empresa
+          novasOps[o.id] = {
+            numero: o.numero,
+            cliente_nome: o.cliente_nome,
+            contato: [nomeCargo || null, telefone, o.contato_email].filter(Boolean).join(' · ') || null,
+          }
+          if (!telefone) {
+            pendentes.push({
+              tipo: 'op',
+              id: o.id,
+              cnpj: o.cliente_cnpj,
+              omieId: null,
+              nome: o.cliente_nome,
+              nomeCargo,
+              email: o.contato_email,
+            })
+          }
         }
       }
       if (idsPedido.length > 0) {
         const { data } = await supabase
           .from('pedidos')
-          .select('id, numero, cliente_nome, cliente_telefone, cliente_contato')
+          .select('id, numero, cliente_nome, cliente_cnpj, cliente_omie_id, cliente_telefone, cliente_contato')
           .in('id', idsPedido)
-        if (ativo && data) {
-          setPedidosPorId((atual) => ({
-            ...atual,
-            ...Object.fromEntries(
-              data.map((p) => {
-                const contato =
-                  [p.cliente_contato, p.cliente_telefone].filter(Boolean).join(' · ') || null
-                return [p.id, { numero: p.numero, cliente_nome: p.cliente_nome, contato }]
-              }),
-            ),
-          }))
+        for (const p of data ?? []) {
+          novosPedidos[p.id] = {
+            numero: p.numero,
+            cliente_nome: p.cliente_nome,
+            contato: [p.cliente_contato, p.cliente_telefone].filter(Boolean).join(' · ') || null,
+          }
+          if (!p.cliente_telefone) {
+            pendentes.push({
+              tipo: 'pedido',
+              id: p.id,
+              cnpj: p.cliente_cnpj,
+              omieId: p.cliente_omie_id,
+              nome: p.cliente_nome,
+              nomeCargo: p.cliente_contato ?? '',
+              email: null,
+            })
+          }
         }
       }
+
+      // Fallback: telefone/contato do cadastro de clientes (CNPJ > código
+      // Omie > nome), igual ao que o Hora de Recomprar já faz.
+      if (pendentes.length > 0) {
+        const cnpjs = Array.from(
+          new Set(pendentes.map((x) => x.cnpj?.replace(/\D/g, '')).filter((v): v is string => !!v)),
+        )
+        const omies = Array.from(new Set(pendentes.map((x) => x.omieId).filter((v): v is number => v !== null)))
+        const nomes = Array.from(new Set(pendentes.map((x) => x.nome.trim()).filter(Boolean)))
+        type Cad = { razao_social: string; cnpj: string | null; telefone: string | null; contato: string | null; omie_cliente_id: number | null }
+        const cadastros: Cad[] = []
+        const campos = 'razao_social, cnpj, telefone, contato, omie_cliente_id'
+        if (cnpjs.length > 0) {
+          const { data } = await supabase.from('clientes').select(campos).in('cnpj', cnpjs)
+          cadastros.push(...((data ?? []) as Cad[]))
+        }
+        if (omies.length > 0) {
+          const { data } = await supabase.from('clientes').select(campos).in('omie_cliente_id', omies)
+          cadastros.push(...((data ?? []) as Cad[]))
+        }
+        if (nomes.length > 0) {
+          const { data } = await supabase.from('clientes').select(campos).in('razao_social', nomes)
+          cadastros.push(...((data ?? []) as Cad[]))
+        }
+        for (const x of pendentes) {
+          const cnpj = x.cnpj?.replace(/\D/g, '') ?? null
+          const cad =
+            cadastros.find((c) => !!cnpj && c.cnpj === cnpj && c.telefone) ??
+            cadastros.find((c) => x.omieId !== null && c.omie_cliente_id === x.omieId && c.telefone) ??
+            cadastros.find((c) => c.razao_social.trim().toLowerCase() === x.nome.trim().toLowerCase() && c.telefone)
+          if (!cad?.telefone) continue
+          const nomeCargo = x.nomeCargo || cad.contato || ''
+          const contato = [nomeCargo || null, cad.telefone, x.email].filter(Boolean).join(' · ')
+          if (x.tipo === 'op') novasOps[x.id].contato = contato
+          else novosPedidos[x.id].contato = contato
+        }
+      }
+
+      if (!ativo) return
+      if (Object.keys(novasOps).length > 0) setOportunidadesPorId((atual) => ({ ...atual, ...novasOps }))
+      if (Object.keys(novosPedidos).length > 0) setPedidosPorId((atual) => ({ ...atual, ...novosPedidos }))
     }
 
     if (idsOportunidade.length > 0 || idsPedido.length > 0) carregar()
