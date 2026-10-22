@@ -297,7 +297,7 @@ export function ClienteFormModal({
       ? await supabase.from('clientes').update(linha).eq('id', idParaAtualizar).select().single()
       : await supabase
           .from('clientes')
-          .insert({ ...linha, criado_por: user.id })
+          .insert({ ...linha, criado_por: user.id, empresa_id: empresaAtiva?.id ?? null })
           .select()
           .single()
 

@@ -658,6 +658,7 @@ export interface Database {
           cep: string | null
           observacoes: string | null
           omie_cliente_id: number | null
+          empresa_id: string | null
           criado_por: string | null
           criado_em: string
           atualizado_em: string
@@ -678,6 +679,7 @@ export interface Database {
           cep?: string | null
           observacoes?: string | null
           omie_cliente_id?: number | null
+          empresa_id?: string | null
           criado_por?: string | null
           criado_em?: string
           atualizado_em?: string
@@ -698,6 +700,7 @@ export interface Database {
           cep?: string | null
           observacoes?: string | null
           omie_cliente_id?: number | null
+          empresa_id?: string | null
           criado_por?: string | null
           criado_em?: string
           atualizado_em?: string

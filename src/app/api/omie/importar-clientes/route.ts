@@ -121,6 +121,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ importadas: 0, ignoradas: itens.length })
     }
 
+    // A coluna empresa_id de `clientes` é obrigatória no banco de produção —
+    // grava a empresa de onde a importação foi feita.
+    const { data: empresaImportacao } = await supabase
+      .from('empresas')
+      .select('id')
+      .eq('slug', empresaSlug)
+      .single()
+
     const { error: erroInsercao } = await supabase.from('clientes').insert(
       novos.map((item) => ({
         razao_social: item.razaoSocial,
@@ -136,6 +144,7 @@ export async function POST(request: Request) {
         cep: item.cep,
         omie_cliente_id: item.omieId,
         criado_por: user.id,
+        empresa_id: empresaImportacao?.id ?? null,
       })),
     )
 
