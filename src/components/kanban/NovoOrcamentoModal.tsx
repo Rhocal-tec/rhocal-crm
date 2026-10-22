@@ -286,6 +286,22 @@ export function NovoOrcamentoModal({
     setDropdownClienteAberto(false)
   }
 
+
+  // Busca automática assim que o 14º dígito entra (digitar ou colar), sem
+  // depender de sair do campo; o botão "Buscar CNPJ" repete a consulta.
+  const ultimoCnpjBuscadoRef = useRef('')
+  useEffect(() => {
+    const d = cnpj.replace(/\D/g, '')
+    if (d.length !== 14) {
+      ultimoCnpjBuscadoRef.current = ''
+      return
+    }
+    if (ultimoCnpjBuscadoRef.current === d) return
+    ultimoCnpjBuscadoRef.current = d
+    void handleBlurCnpj()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cnpj])
+
   async function handleBlurCnpj() {
     const digitos = cnpj.replace(/\D/g, '')
     if (digitos.length !== 14) {
@@ -803,7 +819,9 @@ export function NovoOrcamentoModal({
               inputMode="numeric"
               value={cnpj}
               onChange={(e) => setCnpj(e.target.value)}
-              onBlur={handleBlurCnpj}
+              onBlur={() => {
+                if (cnpj.replace(/\D/g, '') !== ultimoCnpjBuscadoRef.current) void handleBlurCnpj()
+              }}
               className="input-field w-full rounded-md px-3 py-2 pr-9 text-sm"
               placeholder="00.000.000/0000-00"
               disabled={salvando}
@@ -815,6 +833,18 @@ export function NovoOrcamentoModal({
               />
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              ultimoCnpjBuscadoRef.current = ''
+              void handleBlurCnpj()
+            }}
+            disabled={buscandoCnpj || salvando}
+            className="mt-1.5 rounded-md border border-white/15 px-2.5 py-1 text-xs font-medium text-primary/80 transition-colors hover:bg-white/10 disabled:opacity-50"
+          >
+            🔎 Buscar CNPJ
+          </button>
           {avisoCnpj && <p className="mt-1 text-xs text-muted">{avisoCnpj}</p>}
         </div>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
@@ -108,6 +108,24 @@ export function ClienteFormModal({
     if (salvando) return
     onClose()
   }
+
+
+  // Busca automática assim que o 14º dígito entra (digitar ou colar), sem
+  // depender de sair do campo; o botão "Buscar CNPJ" repete a consulta.
+  const ultimoCnpjBuscadoRef = useRef('')
+  useEffect(() => {
+    // Edição de cliente já cadastrado: não busca sozinho (não sobrescreve dados salvos).
+    if (!open || clienteExistente) return
+    const d = form.cnpj.replace(/\D/g, '')
+    if (d.length !== 14) {
+      ultimoCnpjBuscadoRef.current = ''
+      return
+    }
+    if (ultimoCnpjBuscadoRef.current === d) return
+    ultimoCnpjBuscadoRef.current = d
+    void handleBlurCnpj()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.cnpj, open, clienteExistente])
 
   async function handleBlurCnpj() {
     const digitos = form.cnpj.replace(/\D/g, '')
@@ -308,7 +326,9 @@ export function ClienteFormModal({
               inputMode="numeric"
               value={form.cnpj}
               onChange={(e) => atualizarCampo('cnpj', formatarCnpjInput(e.target.value))}
-              onBlur={handleBlurCnpj}
+              onBlur={() => {
+                if (form.cnpj.replace(/\D/g, '') !== ultimoCnpjBuscadoRef.current) void handleBlurCnpj()
+              }}
               className="input-field w-full rounded-md px-3 py-2 pr-9 font-mono text-sm"
               placeholder="00.000.000/0000-00"
               disabled={salvando}
@@ -320,6 +340,18 @@ export function ClienteFormModal({
               />
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              ultimoCnpjBuscadoRef.current = ''
+              void handleBlurCnpj()
+            }}
+            disabled={buscandoCnpj || salvando}
+            className="mt-1.5 rounded-md border border-white/15 px-2.5 py-1 text-xs font-medium text-primary/80 transition-colors hover:bg-white/10 disabled:opacity-50"
+          >
+            🔎 Buscar CNPJ
+          </button>
           {avisoCnpj && <p className="mt-1 text-xs text-muted">{avisoCnpj}</p>}
           {omieClienteId !== null && (
             <p className="mt-1 text-xs text-accent-success">
