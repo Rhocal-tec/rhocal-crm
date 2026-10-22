@@ -22,22 +22,36 @@ export function ClientesList({ setor }: { setor: SetorTipo }) {
   const [modalAberto, setModalAberto] = useState(false)
   const [clienteEditando, setClienteEditando] = useState<Cliente | null>(null)
   const [importando, setImportando] = useState(false)
+  const [erroCarga, setErroCarga] = useState<string | null>(null)
+  const [cadastroInicial, setCadastroInicial] = useState<{ cnpj?: string; razaoSocial?: string }>({})
   const [mensagemImportacao, setMensagemImportacao] = useState<string | null>(null)
 
   useEffect(() => {
     let ativo = true
     setLoading(true)
 
-    supabase
-      .from('clientes')
-      .select('*')
-      .order('razao_social', { ascending: true })
-      .then(({ data, error }) => {
+    // O Supabase limita cada consulta a 1000 linhas — lê em páginas até acabar.
+    ;(async () => {
+      const todos: Cliente[] = []
+      for (let inicio = 0; ; inicio += 1000) {
+        const { data, error } = await supabase
+          .from('clientes')
+          .select('*')
+          .order('razao_social', { ascending: true })
+          .range(inicio, inicio + 999)
         if (!ativo) return
-        if (error) console.error('Erro ao carregar clientes:', error.message)
-        setClientes(data ?? [])
-        setLoading(false)
-      })
+        if (error) {
+          console.error('Erro ao carregar clientes:', error.message)
+          setErroCarga(error.message)
+          break
+        }
+        todos.push(...(data ?? []))
+        if (!data || data.length < 1000) break
+      }
+      if (!ativo) return
+      setClientes(todos)
+      setLoading(false)
+    })()
 
     return () => {
       ativo = false
@@ -64,6 +78,7 @@ export function ClientesList({ setor }: { setor: SetorTipo }) {
   }, [clientes, termo])
 
   function abrirNovo() {
+    setCadastroInicial({})
     setClienteEditando(null)
     setModalAberto(true)
   }
@@ -156,11 +171,33 @@ export function ClientesList({ setor }: { setor: SetorTipo }) {
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {clientesFiltrados.length === 0 ? (
+          <>
           <p className="mt-8 text-center text-sm text-muted">
-            {clientes.length === 0
-              ? 'Nenhum cliente cadastrado ainda.'
-              : 'Nenhum cliente encontrado para essa busca.'}
+            {erroCarga
+              ? `Não foi possível carregar os clientes: ${erroCarga}`
+              : clientes.length === 0
+                ? 'Nenhum cliente cadastrado ainda.'
+                : 'Nenhum cliente encontrado para essa busca.'}
           </p>
+          {termo.trim().length >= 3 && (
+            <div className="mt-3 text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  const digitos = termo.replace(/\D/g, '')
+                  setCadastroInicial(
+                    digitos.length === 14 ? { cnpj: digitos } : { razaoSocial: termo.trim() },
+                  )
+                  setClienteEditando(null)
+                  setModalAberto(true)
+                }}
+                className="rounded-md border border-accent-primary/40 px-3 py-1.5 text-sm font-medium text-accent-primary hover:bg-accent-primary/10"
+              >
+                🔎 Buscar no Omie / Receita e cadastrar “{termo.trim()}”
+              </button>
+            </div>
+          )}
+          </>
         ) : (
           <div className="overflow-hidden rounded-lg border border-white/10">
             <table className="w-full text-left text-sm">
@@ -217,6 +254,8 @@ export function ClientesList({ setor }: { setor: SetorTipo }) {
         onClose={() => setModalAberto(false)}
         clienteExistente={clienteEditando}
         onSaved={aoSalvar}
+        cnpjInicial={cadastroInicial.cnpj}
+        razaoSocialInicial={cadastroInicial.razaoSocial}
       />
     </div>
   )

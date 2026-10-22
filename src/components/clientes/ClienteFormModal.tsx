@@ -67,11 +67,16 @@ export function ClienteFormModal({
   onClose,
   clienteExistente,
   onSaved,
+  cnpjInicial,
+  razaoSocialInicial,
 }: {
   open: boolean
   onClose: () => void
   clienteExistente: ClienteRow | null
   onSaved: (cliente: ClienteRow) => void
+  // Cliente novo já começando com o que foi digitado na busca da lista.
+  cnpjInicial?: string
+  razaoSocialInicial?: string
 }) {
   const { user } = useAuth()
   const { empresaAtiva } = useEmpresa()
@@ -93,12 +98,20 @@ export function ClienteFormModal({
   // outro sem fechar e reabrir o modal.
   useEffect(() => {
     if (!open) return
-    setForm(clienteExistente ? formDoCliente(clienteExistente) : formVazio())
+    setForm(
+      clienteExistente
+        ? formDoCliente(clienteExistente)
+        : {
+            ...formVazio(),
+            cnpj: cnpjInicial ? formatarCnpjInput(cnpjInicial) : '',
+            razaoSocial: razaoSocialInicial ?? '',
+          },
+    )
     setOmieClienteId(clienteExistente?.omie_cliente_id ?? null)
     setAvisoCnpj(null)
     setErro(null)
     setIdSalvoNestaSessao(null)
-  }, [open, clienteExistente])
+  }, [open, clienteExistente, cnpjInicial, razaoSocialInicial])
 
   function atualizarCampo(campo: keyof FormState, valor: string) {
     setForm((atual) => ({ ...atual, [campo]: valor }))
