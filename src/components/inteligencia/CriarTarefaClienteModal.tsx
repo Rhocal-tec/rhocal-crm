@@ -18,12 +18,16 @@ type Profile = Database['public']['Tables']['profiles']['Row']
 // na agregação (oportunidade aberta mais recente, senão pedido mais recente).
 export function CriarTarefaClienteModal({
   cliente,
+  modo = 'churn',
   empresaId,
   onClose,
+  onCriada,
 }: {
   cliente: ClienteInteligencia | null
+  modo?: 'churn' | 'sem_telefone'
   empresaId: string | null
   onClose: () => void
+  onCriada?: (cliente: ClienteInteligencia) => void
 }) {
   const { user } = useAuth()
   const [supabase] = useState(() => createClient())
@@ -41,7 +45,11 @@ export function CriarTarefaClienteModal({
 
   useEffect(() => {
     if (!cliente) return
-    setDescricao(`Contatar ${cliente.nome} — risco de churn`)
+    setDescricao(
+      modo === 'sem_telefone'
+        ? `Cadastrar telefone de ${cliente.nome} — cliente sem telefone`
+        : `Contatar ${cliente.nome} — risco de churn`,
+    )
     setResponsavel('')
     setDataPrevista('')
     setTipo('')
@@ -56,7 +64,7 @@ export function CriarTarefaClienteModal({
       .select('*')
       .eq('ativo', true)
       .then(({ data }) => setProfiles(data ?? []))
-  }, [cliente, supabase])
+  }, [cliente, modo, supabase])
 
   if (!cliente) return null
 
@@ -69,7 +77,9 @@ export function CriarTarefaClienteModal({
       setErro('Informe a descrição da tarefa.')
       return
     }
-    if (!cliente.vinculoTarefaId || !cliente.vinculoTarefaTipo) {
+    // Sem oportunidade/pedido para vincular, cria tarefa avulsa já com o nome do cliente.
+    const vinculado = Boolean(cliente.vinculoTarefaId && cliente.vinculoTarefaTipo)
+    if (!vinculado && modo !== 'sem_telefone') {
       setErro('Não foi possível vincular esta tarefa a uma oportunidade ou pedido deste cliente.')
       return
     }
@@ -82,6 +92,9 @@ export function CriarTarefaClienteModal({
         oportunidade_id: cliente.vinculoTarefaTipo === 'oportunidade' ? cliente.vinculoTarefaId : null,
         pedido_id: cliente.vinculoTarefaTipo === 'pedido' ? cliente.vinculoTarefaId : null,
         empresa_id: empresaId,
+        ...(vinculado
+          ? {}
+          : { cliente_nome: cliente.nome, cliente_cnpj: cliente.cnpj ? cliente.cnpj.replace(/\D/g, '') : null }),
         descricao: descricao.trim(),
         responsavel: responsavel || null,
         data_prevista: dataPrevista || null,
@@ -103,6 +116,7 @@ export function CriarTarefaClienteModal({
 
     if (data.oportunidade_id) sincronizarTarefaComOmie(data.id)
     setSucesso(true)
+    onCriada?.(cliente)
   }
 
   return (
@@ -121,8 +135,9 @@ export function CriarTarefaClienteModal({
       ) : (
         <form onSubmit={salvar} className="flex flex-col gap-3">
           <p className="text-xs text-muted">
-            Vinculada {cliente.vinculoTarefaTipo === 'oportunidade' ? 'à oportunidade aberta' : 'ao pedido'} mais
-            recente deste cliente.
+            {cliente.vinculoTarefaTipo
+              ? `Vinculada ${cliente.vinculoTarefaTipo === 'oportunidade' ? 'à oportunidade aberta' : 'ao pedido'} mais recente deste cliente.`
+              : 'Tarefa avulsa (cliente sem oportunidade ou pedido).'}
           </p>
           <div>
             <label className="block text-xs text-muted">Descrição</label>

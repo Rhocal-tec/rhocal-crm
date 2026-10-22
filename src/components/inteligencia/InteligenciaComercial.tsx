@@ -71,6 +71,13 @@ export function InteligenciaComercial() {
   const [aba, setAba] = useState<'segmentacao' | 'campanhas'>('segmentacao')
   const [ordemScore, setOrdemScore] = useState<OrdemScore>(null)
   const [clienteParaTarefa, setClienteParaTarefa] = useState<ClienteInteligencia | null>(null)
+  const [modoTarefa, setModoTarefa] = useState<'churn' | 'sem_telefone'>('churn')
+  const [chavesComTarefa, setChavesComTarefa] = useState<Set<string>>(new Set())
+
+  function abrirTarefa(cliente: ClienteInteligencia, modo: 'churn' | 'sem_telefone') {
+    setModoTarefa(modo)
+    setClienteParaTarefa(cliente)
+  }
   const [modalCampanhaAberto, setModalCampanhaAberto] = useState(false)
 
   // Filtro de período (mesmo componente/mecanismo do Painel executivo —
@@ -387,7 +394,12 @@ export function InteligenciaComercial() {
 
           {!carregando && (
             <div className="mt-6">
-              <AlertasChurn clientes={clientes} onCriarTarefa={setClienteParaTarefa} />
+              <AlertasChurn
+                clientes={clientes}
+                onCriarTarefa={(c) => abrirTarefa(c, 'churn')}
+                onCriarTarefaSemTelefone={(c) => abrirTarefa(c, 'sem_telefone')}
+                chavesComTarefa={chavesComTarefa}
+              />
             </div>
           )}
 
@@ -440,6 +452,7 @@ export function InteligenciaComercial() {
                 onAlternarSelecao={alternarSelecao}
                 onAlternarSelecionarTodos={alternarSelecionarTodos}
                 onVerFicha={setFichaAberta}
+                onCriarTarefaSemTelefone={(c) => abrirTarefa(c, 'sem_telefone')}
                 ordemScore={ordemScore}
                 onAlternarOrdemScore={alternarOrdemScore}
               />
@@ -451,8 +464,12 @@ export function InteligenciaComercial() {
       <FichaClienteModal cliente={fichaAberta} onClose={() => setFichaAberta(null)} />
       <CriarTarefaClienteModal
         cliente={clienteParaTarefa}
+        modo={modoTarefa}
         empresaId={empresaAtiva?.id ?? null}
         onClose={() => setClienteParaTarefa(null)}
+        onCriada={(c) => {
+          if (modoTarefa === 'churn') setChavesComTarefa((prev) => new Set(prev).add(c.chave))
+        }}
       />
       <SalvarCampanhaModal
         aberto={modalCampanhaAberto}

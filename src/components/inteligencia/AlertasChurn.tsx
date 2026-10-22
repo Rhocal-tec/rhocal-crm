@@ -1,5 +1,7 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { formatarDataSomente } from '@/lib/kanban/formatacao'
 import type { ClienteInteligencia } from '@/lib/inteligencia/agregar'
 
@@ -9,11 +11,42 @@ import type { ClienteInteligencia } from '@/lib/inteligencia/agregar'
 export function AlertasChurn({
   clientes,
   onCriarTarefa,
+  onCriarTarefaSemTelefone,
+  chavesComTarefa,
 }: {
   clientes: ClienteInteligencia[]
   onCriarTarefa: (cliente: ClienteInteligencia) => void
+  onCriarTarefaSemTelefone: (cliente: ClienteInteligencia) => void
+  chavesComTarefa: Set<string>
 }) {
-  const emRisco = clientes.filter((c) => c.emRiscoChurn)
+  const [supabase] = useState(() => createClient())
+  // Vínculos (oportunidade/pedido) que já têm tarefa de churn em aberto — o cliente
+  // some do card enquanto a tarefa existir, inclusive depois de recarregar a página.
+  const [vinculosComTarefa, setVinculosComTarefa] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    supabase
+      .from('tarefas')
+      .select('oportunidade_id, pedido_id')
+      .ilike('descricao', '%risco de churn%')
+      .eq('concluida', false)
+      .eq('excluida', false)
+      .then(({ data }) => {
+        const ids = new Set<string>()
+        for (const t of data ?? []) {
+          if (t.oportunidade_id) ids.add(t.oportunidade_id)
+          if (t.pedido_id) ids.add(t.pedido_id)
+        }
+        setVinculosComTarefa(ids)
+      })
+  }, [supabase, chavesComTarefa])
+
+  const emRisco = clientes.filter(
+    (c) =>
+      c.emRiscoChurn &&
+      !chavesComTarefa.has(c.chave) &&
+      !(c.vinculoTarefaId && vinculosComTarefa.has(c.vinculoTarefaId)),
+  )
 
   if (emRisco.length === 0) return null
 
@@ -42,6 +75,17 @@ export function AlertasChurn({
                   ` · intervalo médio: ${cliente.intervaloMedioDiasCompra} dias`}
               </p>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {!cliente.telefone && (
+                <button
+                  type="button"
+                  onClick={() => onCriarTarefaSemTelefone(cliente)}
+                  title="Cliente sem telefone cadastrado — cria uma tarefa para conseguir o número"
+                  className="rounded-md border border-amber-400/40 px-2.5 py-1 text-xs font-medium text-amber-300 transition-colors hover:bg-amber-400/10"
+                >
+                  📵 Sem telefone — criar tarefa
+                </button>
+              )}
             <button
               type="button"
               onClick={() => onCriarTarefa(cliente)}
@@ -49,6 +93,7 @@ export function AlertasChurn({
             >
               Criar tarefa
             </button>
+            </div>
           </div>
         ))}
       </div>

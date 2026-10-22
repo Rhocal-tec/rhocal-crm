@@ -14,6 +14,7 @@ export function TabelaInteligencia({
   onAlternarSelecao,
   onAlternarSelecionarTodos,
   onVerFicha,
+  onCriarTarefaSemTelefone,
   ordemScore,
   onAlternarOrdemScore,
 }: {
@@ -22,6 +23,7 @@ export function TabelaInteligencia({
   onAlternarSelecao: (chave: string) => void
   onAlternarSelecionarTodos: () => void
   onVerFicha: (cliente: ClienteInteligencia) => void
+  onCriarTarefaSemTelefone: (cliente: ClienteInteligencia) => void
   ordemScore: OrdemScore
   onAlternarOrdemScore: () => void
 }) {
@@ -142,6 +144,16 @@ export function TabelaInteligencia({
                 >
                   Ver ficha
                 </button>
+                {!cliente.telefone && (
+                  <button
+                    type="button"
+                    onClick={() => onCriarTarefaSemTelefone(cliente)}
+                    title="Cliente sem telefone — criar tarefa para cadastrar"
+                    className="ml-1.5 rounded-md border border-amber-400/40 px-2.5 py-1 text-xs font-medium text-amber-300 transition-colors hover:bg-amber-400/10"
+                  >
+                    📵 Tarefa
+                  </button>
+                )}
               </td>
             </tr>
           ))}
