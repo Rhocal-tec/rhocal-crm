@@ -307,8 +307,9 @@ export function ClienteFormModal({
       setErro(
         error?.message.includes('clientes_cnpj_unico')
           ? 'Já existe um cliente cadastrado com este CNPJ.'
-          : 'Não foi possível salvar o cliente. Tente novamente.',
+          : `Não foi possível salvar o cliente${error?.message ? `: ${error.message}` : ''}. Tente novamente.`,
       )
+      if (error) console.error('Erro ao salvar cliente:', error.code, error.message)
       return
     }
 
