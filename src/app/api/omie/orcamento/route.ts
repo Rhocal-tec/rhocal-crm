@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { registrarErro } from '@/lib/omie/registrar-erro'
 import {
+  buscarComFallbackRhocal,
   chamarOmie,
   resolverCredenciaisOmie,
   obterCredenciaisOmiePorEmpresaId,
@@ -299,34 +300,31 @@ export async function POST(request: Request) {
         return NextResponse.json({ erro: 'Nome do cliente não informado.' }, { status: 400 })
       }
 
-      const credenciais = await resolverCredenciaisOmie(supabase, body)
-
-      let resultado: Record<string, unknown>
-      try {
-        resultado = await chamarOmie(
-          OMIE_CLIENTES_URL,
-          'ListarClientes',
-          {
-            pagina: 1,
-            registros_por_pagina: 50,
-            apenas_importado_api: 'N',
-            clientesFiltro: { razao_social: clienteNome },
-          },
-          credenciais,
-        )
-      } catch (err) {
-        // O Omie sinaliza "nenhum cliente bate com o filtro" como uma falha
-        // (faultstring "Não existem registros para a página...") em vez de uma
-        // lista vazia. Trata como resultado vazio — outros erros (credenciais,
-        // rede, etc.) continuam propagando normalmente.
-        const mensagem = err instanceof Error ? err.message : ''
-        if (mensagem.toLowerCase().includes('não existem registros')) {
-          return NextResponse.json({ clientes: [] })
-        }
-        throw err
-      }
-
-      const bruto = Array.isArray(resultado.clientes_cadastro) ? resultado.clientes_cadastro : []
+      const bruto = await buscarComFallbackRhocal<Record<string, unknown>>(
+        supabase,
+        body,
+        async (credenciais) => {
+          try {
+            const resultado = await chamarOmie(
+              OMIE_CLIENTES_URL,
+              'ListarClientes',
+              {
+                pagina: 1,
+                registros_por_pagina: 50,
+                apenas_importado_api: 'N',
+                clientesFiltro: { razao_social: clienteNome },
+              },
+              credenciais,
+            )
+            return Array.isArray(resultado.clientes_cadastro) ? resultado.clientes_cadastro : []
+          } catch (err) {
+            // O Omie sinaliza "nenhum cliente" como falha, não como lista vazia.
+            const mensagem = err instanceof Error ? err.message : ''
+            if (mensagem.toLowerCase().includes('não existem registros')) return []
+            throw err
+          }
+        },
+      )
       const clientes: ClienteOmie[] = bruto.map((c: Record<string, unknown>) => ({
         codigoClienteOmie: c.codigo_cliente_omie as number,
         razaoSocial: c.razao_social as string,

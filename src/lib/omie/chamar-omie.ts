@@ -161,3 +161,33 @@ export async function chamarOmie(
 
   return dados as Record<string, unknown>
 }
+
+// Busca/leitura com segunda chance: tenta com as credenciais da empresa ativa
+// e, se a chamada falhar ou voltar vazia, repete com as da RHOCAL (os cadastros
+// de clientes são compartilhados entre os apps Omie). Só para rotas de LEITURA.
+export async function buscarComFallbackRhocal<T>(
+  supabase: SupabaseServerClient,
+  body: { pedidoId?: unknown; empresaSlug?: unknown },
+  executar: (credenciais: CredenciaisOmie) => Promise<T[]>,
+): Promise<T[]> {
+  const primarias = await resolverCredenciaisOmieParaBusca(supabase, body)
+  let erroPrimario: unknown = null
+  let resultado: T[] = []
+  try {
+    resultado = await executar(primarias)
+    if (resultado.length > 0) return resultado
+  } catch (err) {
+    erroPrimario = err
+  }
+
+  const fallback = obterCredenciaisOmiePorSlug(SLUG_OMIE_FALLBACK_BUSCA)
+  if (fallback.appKey === primarias.appKey) {
+    if (erroPrimario) throw erroPrimario
+    return resultado
+  }
+  try {
+    return await executar(fallback)
+  } catch (err) {
+    throw erroPrimario ?? err
+  }
+}

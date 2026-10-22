@@ -242,6 +242,12 @@ export function NovoOrcamentoModal({
       }
 
       setSugestoesCliente(unificados)
+      // Falha na busca do Omie não pode parecer "nenhum cliente": avisa.
+      if (unificados.length === 0 && (respostaOmie === null || typeof respostaOmie?.erro === 'string')) {
+        setErro(
+          `Não foi possível buscar no Omie${typeof respostaOmie?.erro === 'string' ? `: ${respostaOmie.erro}` : ''}. Digite o CNPJ ou cadastre o cliente.`,
+        )
+      }
     } finally {
       setBuscandoCliente(false)
     }
