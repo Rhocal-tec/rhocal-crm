@@ -4,7 +4,6 @@ import { registrarErro } from '@/lib/omie/registrar-erro'
 import {
   buscarComFallbackRhocal,
   chamarOmie,
-  resolverCredenciaisOmie,
   obterCredenciaisOmiePorEmpresaId,
   type CredenciaisOmie,
 } from '@/lib/omie/chamar-omie'
