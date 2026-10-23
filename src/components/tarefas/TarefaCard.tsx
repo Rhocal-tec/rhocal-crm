@@ -85,14 +85,14 @@ export function TarefaCard({
         </p>
       )}
 
-      {onCadastrarCliente && clienteLabel && (
+      {onCadastrarCliente && (
         <button
           type="button"
           onClick={() => onCadastrarCliente(tarefa)}
           title="Abre o cadastro deste cliente já com os dados da tarefa, para completar o que falta (telefone, contato, CNPJ…)"
           className="mt-1.5 rounded-md border border-accent-primary/40 bg-accent-primary/10 px-2 py-1 text-[11px] font-medium text-accent-primary transition-colors hover:bg-accent-primary/20"
         >
-          👤 {contato ? 'Editar cliente' : 'Cadastrar cliente'}
+          👤 {contato ? 'Editar cliente' : clienteLabel ? 'Cadastrar cliente' : 'Cadastrar cliente (novo)'}
         </button>
       )}
 
