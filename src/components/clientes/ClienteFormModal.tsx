@@ -69,6 +69,8 @@ export function ClienteFormModal({
   onSaved,
   cnpjInicial,
   razaoSocialInicial,
+  telefoneInicial,
+  contatoInicial,
 }: {
   open: boolean
   onClose: () => void
@@ -77,6 +79,8 @@ export function ClienteFormModal({
   // Cliente novo já começando com o que foi digitado na busca da lista.
   cnpjInicial?: string
   razaoSocialInicial?: string
+  telefoneInicial?: string
+  contatoInicial?: string
 }) {
   const { user } = useAuth()
   const { empresaAtiva } = useEmpresa()
@@ -105,13 +109,15 @@ export function ClienteFormModal({
             ...formVazio(),
             cnpj: cnpjInicial ? formatarCnpjInput(cnpjInicial) : '',
             razaoSocial: razaoSocialInicial ?? '',
+            telefone: telefoneInicial ? formatarTelefoneInput(telefoneInicial) : '',
+            contato: contatoInicial ?? '',
           },
     )
     setOmieClienteId(clienteExistente?.omie_cliente_id ?? null)
     setAvisoCnpj(null)
     setErro(null)
     setIdSalvoNestaSessao(null)
-  }, [open, clienteExistente, cnpjInicial, razaoSocialInicial])
+  }, [open, clienteExistente, cnpjInicial, razaoSocialInicial, telefoneInicial, contatoInicial])
 
   function atualizarCampo(campo: keyof FormState, valor: string) {
     setForm((atual) => ({ ...atual, [campo]: valor }))

@@ -19,6 +19,7 @@ export function TarefaCard({
   onReabrir,
   onExcluir,
   onAbrirOportunidade,
+  onCadastrarCliente,
 }: {
   tarefa: Tarefa
   clienteLabel: string | null
@@ -34,6 +35,8 @@ export function TarefaCard({
   // oportunidade com tarefa aberta sai da coluna "Oportunidades" do
   // FunilBoard, e o card da tarefa passa a ser o único caminho até ela.
   onAbrirOportunidade?: (oportunidadeId: string) => void
+  // Abre o cadastro do cliente desta tarefa (novo ou já existente) para completar telefone etc.
+  onCadastrarCliente?: (tarefa: Tarefa) => void
 }) {
   const terminal = situacaoTerminal(tarefa.situacao)
   const badge = badgeSituacao(tarefa.situacao)
@@ -80,6 +83,17 @@ export function TarefaCard({
         <p title={contato} className="mt-0.5 break-words text-[11px] text-muted">
           📞 {contato}
         </p>
+      )}
+
+      {onCadastrarCliente && clienteLabel && (
+        <button
+          type="button"
+          onClick={() => onCadastrarCliente(tarefa)}
+          title="Abre o cadastro deste cliente já com os dados da tarefa, para completar o que falta (telefone, contato, CNPJ…)"
+          className="mt-1.5 rounded-md border border-accent-primary/40 bg-accent-primary/10 px-2 py-1 text-[11px] font-medium text-accent-primary transition-colors hover:bg-accent-primary/20"
+        >
+          👤 {contato ? 'Editar cliente' : 'Cadastrar cliente'}
+        </button>
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">

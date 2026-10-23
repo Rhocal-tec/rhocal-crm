@@ -12,6 +12,7 @@ import { useConclusaoTarefa } from '@/lib/tarefas/useConclusaoTarefa'
 import { FiltroData } from '@/components/busca/FiltroData'
 import { resolverFiltroData, type ModoFiltroData } from '@/lib/kanban/filtro-data'
 import { TarefaColuna } from './TarefaColuna'
+import { ClienteFormModal } from '@/components/clientes/ClienteFormModal'
 import { EncadearTarefaModal } from './EncadearTarefaModal'
 import { TarefaModal } from './TarefaModal'
 import { ConcluirTarefaModal } from './ConcluirTarefaModal'
@@ -60,6 +61,16 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     Record<string, { numero: number; cliente_nome: string; contato: string | null }>
   >({})
   const [novaTarefaAberta, setNovaTarefaAberta] = useState(false)
+  // Cadastro/edição do cliente a partir do card da tarefa.
+  const [cadastroCliente, setCadastroCliente] = useState<{
+    tarefa: Tarefa
+    existente: Database['public']['Tables']['clientes']['Row'] | null
+    cnpj: string
+    razaoSocial: string
+    telefone: string
+    contato: string
+  } | null>(null)
+  const [contatoVersao, setContatoVersao] = useState(0)
 
   // ===== Busca/filtro do quadro (tarefas + oportunidades juntas) =====
   const [buscaCliente, setBuscaCliente] = useState('')
@@ -288,7 +299,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
       ativo = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase, tarefas])
+  }, [supabase, tarefas, contatoVersao])
 
   useEffect(() => {
     if (!empresaAtiva) return
@@ -454,6 +465,81 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     dataDe,
     dataAte,
   ])
+
+  // Botão "Cadastrar cliente" do card: junta o que a tarefa já sabe do cliente
+  // (oportunidade, pedido ou campos próprios da tarefa), procura se ele já está
+  // no cadastro e abre o formulário — existente para completar, novo já preenchido.
+  async function abrirCadastroCliente(tarefa: Tarefa) {
+    let nome = tarefa.cliente_nome ?? ''
+    let cnpj = tarefa.cliente_cnpj ?? ''
+    let telefone = tarefa.cliente_telefone ?? ''
+    let contato = tarefa.contato_nome ?? ''
+    let omieId: number | null = null
+
+    if (tarefa.oportunidade_id) {
+      const { data } = await supabase
+        .from('oportunidades')
+        .select('cliente_nome, cliente_cnpj, cliente_telefone, cliente_contato, contato_nome, contato_telefone')
+        .eq('id', tarefa.oportunidade_id)
+        .single()
+      if (data) {
+        nome = data.cliente_nome ?? nome
+        cnpj = data.cliente_cnpj ?? ''
+        telefone = data.cliente_telefone ?? data.contato_telefone ?? ''
+        contato = data.contato_nome ?? data.cliente_contato ?? ''
+      }
+    } else if (tarefa.pedido_id) {
+      const { data } = await supabase
+        .from('pedidos')
+        .select('cliente_nome, cliente_cnpj, cliente_omie_id, cliente_telefone, cliente_contato')
+        .eq('id', tarefa.pedido_id)
+        .single()
+      if (data) {
+        nome = data.cliente_nome ?? nome
+        cnpj = data.cliente_cnpj ?? ''
+        omieId = data.cliente_omie_id
+        telefone = data.cliente_telefone ?? ''
+        contato = data.cliente_contato ?? ''
+      }
+    }
+
+    const cnpjDigitos = cnpj.replace(/\D/g, '')
+    let existente: Database['public']['Tables']['clientes']['Row'] | null = null
+    if (cnpjDigitos.length === 14) {
+      const { data } = await supabase.from('clientes').select('*').eq('cnpj', cnpjDigitos).maybeSingle()
+      existente = data
+    }
+    if (!existente && omieId !== null) {
+      const { data } = await supabase.from('clientes').select('*').eq('omie_cliente_id', omieId).maybeSingle()
+      existente = data
+    }
+    if (!existente && nome.trim()) {
+      const { data } = await supabase.from('clientes').select('*').ilike('razao_social', nome.trim()).limit(1)
+      existente = data?.[0] ?? null
+    }
+
+    setCadastroCliente({ tarefa, existente, cnpj: cnpjDigitos, razaoSocial: nome.trim(), telefone, contato })
+  }
+
+  function aoSalvarCliente(cliente: Database['public']['Tables']['clientes']['Row']) {
+    const origem = cadastroCliente?.tarefa
+    // Tarefa solta: guarda os dados na própria tarefa, para o card já mostrar o contato.
+    if (origem && !origem.oportunidade_id && !origem.pedido_id) {
+      const campos = {
+        cliente_nome: cliente.razao_social,
+        cliente_cnpj: cliente.cnpj,
+        cliente_telefone: cliente.telefone,
+        contato_nome: cliente.contato,
+      }
+      supabase.from('tarefas').update(campos).eq('id', origem.id).then(() => {})
+      setTarefas((atual) => atual.map((t) => (t.id === origem.id ? { ...t, ...campos } : t)))
+    }
+    // Oportunidades/pedidos: recarrega o contato (agora o cadastro tem o telefone).
+    setOportunidadesPorId({})
+    setPedidosPorId({})
+    setContatoVersao((v) => v + 1)
+    setMensagemSucesso(`Cliente ${cliente.razao_social} salvo no cadastro.`)
+  }
 
   async function alterarSituacao(tarefa: Tarefa, novaSituacao: string) {
     const atualizada = { ...tarefa, situacao: novaSituacao }
@@ -682,6 +768,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
             onReabrir={(t) => alterarSituacao(t, 'Pendente')}
             onExcluir={excluirTarefa}
             onAbrirOportunidade={setOportunidadeAbertaId}
+            onCadastrarCliente={abrirCadastroCliente}
           />
         ))}
 
@@ -722,6 +809,17 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
         onSoRegistrarContato={confirmarSoRegistrarContato}
         salvando={salvandoConclusao}
         erro={erroConclusao}
+      />
+
+      <ClienteFormModal
+        open={cadastroCliente !== null}
+        onClose={() => setCadastroCliente(null)}
+        clienteExistente={cadastroCliente?.existente ?? null}
+        onSaved={aoSalvarCliente}
+        cnpjInicial={cadastroCliente?.cnpj || undefined}
+        razaoSocialInicial={cadastroCliente?.razaoSocial || undefined}
+        telefoneInicial={cadastroCliente?.telefone || undefined}
+        contatoInicial={cadastroCliente?.contato || undefined}
       />
 
       <NovaOportunidadeModal open={novoLeadAberto} onClose={() => setNovoLeadAberto(false)} />
