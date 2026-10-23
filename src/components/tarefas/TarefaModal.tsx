@@ -76,7 +76,7 @@ export function TarefaModal({
         pedido_id: pedidoId ?? null,
         empresa_id: empresaId ?? null,
         descricao: descricao.trim(),
-        responsavel: responsavel || null,
+        responsavel: responsavel || user?.id || null,
         data_prevista: dataPrevista || null,
         tipo: tipo || null,
         notificar_em: notificarEm,

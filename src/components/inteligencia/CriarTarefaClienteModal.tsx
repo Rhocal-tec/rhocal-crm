@@ -96,7 +96,7 @@ export function CriarTarefaClienteModal({
           ? {}
           : { cliente_nome: cliente.nome, cliente_cnpj: cliente.cnpj ? cliente.cnpj.replace(/\D/g, '') : null }),
         descricao: descricao.trim(),
-        responsavel: responsavel || null,
+        responsavel: responsavel || user.id,
         data_prevista: dataPrevista || null,
         tipo: tipo || null,
         notificar_em: notificarEm,

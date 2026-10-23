@@ -483,7 +483,17 @@ export function ProdutividadePainel() {
       setErroOportunidades(null)
       try {
         const { inicio, fim } = limitesDoMes(ano, mes)
-        const colunasTarefa = 'id, oportunidade_id, responsavel, situacao, data_prevista, criado_em, descricao, cliente_nome'
+        const colunasBase = 'id, oportunidade_id, responsavel, situacao, data_prevista, criado_em, descricao, cliente_nome'
+        // Com quem concluiu/criou (migração 0036). Se a coluna ainda não existir
+        // no banco, cai para as colunas antigas em vez de quebrar o painel.
+        const colunasNovas = `${colunasBase}, concluida_por, concluida_em, criado_por, omie_tarefa_id`
+        let colunasTarefa = colunasNovas
+        const testeColuna = await supabase.from('tarefas').select('concluida_por').limit(1)
+        if (testeColuna.error) colunasTarefa = colunasBase
+        const filtroConcluidaEm =
+          colunasTarefa === colunasNovas
+            ? `,and(concluida_em.gte.${inicio.toISOString()},concluida_em.lt.${fim.toISOString()})`
+            : ''
         const [periodoMes, deOportunidade, oportunidadesLista] = await Promise.all([
           paginar<TarefaProdutividade>((de, ate) =>
             supabase
@@ -493,8 +503,10 @@ export function ProdutividadePainel() {
               .eq('excluida', false)
               .or(
                 `and(data_prevista.gte.${dataISO(inicio)},data_prevista.lt.${dataISO(fim)}),` +
-                  `and(criado_em.gte.${inicio.toISOString()},criado_em.lt.${fim.toISOString()})`,
+                  `and(criado_em.gte.${inicio.toISOString()},criado_em.lt.${fim.toISOString()})` +
+                  filtroConcluidaEm,
               )
+              .returns<TarefaProdutividade[]>()
               .order('id')
               .range(de, ate),
           ),
@@ -505,6 +517,7 @@ export function ProdutividadePainel() {
               .eq('empresa_id', empresaId)
               .eq('excluida', false)
               .not('oportunidade_id', 'is', null)
+              .returns<TarefaProdutividade[]>()
               .order('id')
               .range(de, ate),
           ),

@@ -80,7 +80,7 @@ export function EncadearTarefaModal({
         pedido_id: tarefaConcluida.pedido_id,
         empresa_id: tarefaConcluida.empresa_id,
         descricao: descricao.trim(),
-        responsavel: tarefaConcluida.responsavel,
+        responsavel: tarefaConcluida.responsavel ?? user?.id ?? null,
         data_prevista: dataPrevista || null,
         // Copia os dados de contato da tarefa original (fase 0022/0028) —
         // sem isso, uma tarefa solta (sem oportunidade_id/pedido_id) perdia

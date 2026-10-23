@@ -496,6 +496,8 @@ export interface Database {
           motivo_conclusao: string | null
           criado_por: string
           criado_em: string
+          concluida_por: string | null
+          concluida_em: string | null
         }
         Insert: {
           id?: string
@@ -529,6 +531,8 @@ export interface Database {
           historico_conversa?: string | null
           necessidade_cliente?: string | null
           motivo_conclusao?: string | null
+          concluida_por?: string | null
+          concluida_em?: string | null
           criado_por: string
           criado_em?: string
         }
@@ -564,6 +568,8 @@ export interface Database {
           historico_conversa?: string | null
           necessidade_cliente?: string | null
           motivo_conclusao?: string | null
+          concluida_por?: string | null
+          concluida_em?: string | null
           criado_por?: string
           criado_em?: string
         }

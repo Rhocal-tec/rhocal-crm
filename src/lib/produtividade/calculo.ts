@@ -219,6 +219,11 @@ export interface TarefaProdutividade {
   criado_em: string
   descricao: string
   cliente_nome: string | null
+  // Quem concluiu e quando (migração 0036) — opcionais: antes dela só há responsável.
+  concluida_por?: string | null
+  concluida_em?: string | null
+  criado_por?: string | null
+  omie_tarefa_id?: number | null
 }
 
 export interface OportunidadeProdutividade {
@@ -296,18 +301,27 @@ export function agregarTarefasOportunidades(params: {
   }
 
   for (const t of tarefasPeriodo) {
+    // Nova tarefa: de quem ficou como responsável; sem responsável, de quem criou
+    // (menos as importadas do Omie, cujo "criador" é só quem rodou a importação).
     if (dentro(t.criado_em, inicio, fim)) {
-      somar(t.responsavel, (m) => {
+      const dono = t.responsavel ?? (t.omie_tarefa_id ? null : t.criado_por ?? null)
+      somar(dono, (m) => {
         m.novaTarefa += 1
       })
     }
-    if (t.situacao === 'Cancelada' || !noMes(t)) continue
+    if (t.situacao === 'Cancelada') continue
     if (t.situacao === 'Realizada') {
-      somar(t.responsavel, (m) => {
-        m.concluidas += 1
-      })
+      // Concluída vale para QUEM concluiu (login que clicou) e no mês da conclusão;
+      // tarefas antigas, sem esse registro, seguem o responsável e a data prevista.
+      const noMesDaConclusao = t.concluida_em ? dentro(t.concluida_em, inicio, fim) : noMes(t)
+      if (noMesDaConclusao) {
+        somar(t.concluida_por ?? t.responsavel, (m) => {
+          m.concluidas += 1
+        })
+      }
       continue
     }
+    if (!noMes(t)) continue
     const prazo = classificarPrazo(t)
     if (prazo === 'HOJE') {
       somar(t.responsavel, (m) => {
