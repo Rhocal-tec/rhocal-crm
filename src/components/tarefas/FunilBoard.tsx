@@ -569,6 +569,32 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     if (error) setTarefas((atual) => [...atual, tarefa])
   }
 
+  // Arquivar: some do quadro e das contagens (fica Cancelada e oculta), com o
+  // motivo gravado — para tarefas de cliente sem dados suficientes para cadastrar.
+  // Não sincroniza com o Omie e nada é apagado do banco.
+  async function arquivarTarefa(tarefa: Tarefa) {
+    const motivo = window.prompt(
+      `Arquivar a tarefa "${tarefa.descricao}"?\nEla sai do quadro mas continua no banco. Motivo (opcional):`,
+      'Sem dados do cliente para concluir o cadastro',
+    )
+    if (motivo === null) return
+    setTarefas((atual) => atual.filter((t) => t.id !== tarefa.id))
+
+    const { error } = await supabase
+      .from('tarefas')
+      .update({
+        situacao: 'Cancelada',
+        concluida: false,
+        motivo_conclusao: `Arquivada${motivo.trim() ? `: ${motivo.trim()}` : ''}`,
+        excluida: true,
+        excluida_em: new Date().toISOString(),
+        excluida_por: user?.id ?? null,
+      })
+      .eq('id', tarefa.id)
+
+    if (error) setTarefas((atual) => [...atual, tarefa])
+  }
+
   // --- Oportunidades: carregamento, Realtime ---
 
   useEffect(() => {
@@ -769,6 +795,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
             onExcluir={excluirTarefa}
             onAbrirOportunidade={setOportunidadeAbertaId}
             onCadastrarCliente={abrirCadastroCliente}
+            onArquivar={arquivarTarefa}
           />
         ))}
 

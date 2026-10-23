@@ -20,6 +20,7 @@ export function TarefaCard({
   onExcluir,
   onAbrirOportunidade,
   onCadastrarCliente,
+  onArquivar,
 }: {
   tarefa: Tarefa
   clienteLabel: string | null
@@ -37,6 +38,8 @@ export function TarefaCard({
   onAbrirOportunidade?: (oportunidadeId: string) => void
   // Abre o cadastro do cliente desta tarefa (novo ou já existente) para completar telefone etc.
   onCadastrarCliente?: (tarefa: Tarefa) => void
+  // Tira a tarefa do quadro sem apagar (ex: cliente sem dados para cadastrar).
+  onArquivar?: (tarefa: Tarefa) => void
 }) {
   const terminal = situacaoTerminal(tarefa.situacao)
   const badge = badgeSituacao(tarefa.situacao)
@@ -163,6 +166,15 @@ export function TarefaCard({
         {tarefa.situacao === 'Cancelada' && (
           <button onClick={() => onReabrir(tarefa)} className="hover:text-primary">
             Reabrir
+          </button>
+        )}
+        {onArquivar && !terminal && (
+          <button
+            onClick={() => onArquivar(tarefa)}
+            title="Tira do quadro e da contagem de atrasadas, sem apagar do banco"
+            className="hover:text-primary"
+          >
+            🗂 Arquivar
           </button>
         )}
         <button onClick={() => onExcluir(tarefa)} className="ml-auto hover:text-accent-danger">
