@@ -28,3 +28,9 @@ export function podeUsarKanban(setor: SetorTipo): boolean {
 export function podeVerIndicadoresCS(setor: SetorTipo): boolean {
   return setor === 'gestor'
 }
+
+// Lista e acompanhamento de reclamações: só a diretoria. A CS ainda abre
+// reclamações dentro do atendimento, mas não vê a lista.
+export function podeVerReclamacoesCS(setor: SetorTipo): boolean {
+  return setor === 'gestor'
+}

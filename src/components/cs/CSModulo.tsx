@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { useDadosCS } from '@/lib/cs/useDadosCS'
 import { montarFila, type ItemFila } from '@/lib/cs/fila'
-import { podeAtenderCS, podeEditarRegrasCS, podeVerIndicadoresCS } from '@/lib/cs/permissions'
+import { podeAtenderCS, podeEditarRegrasCS, podeVerIndicadoresCS, podeVerReclamacoesCS } from '@/lib/cs/permissions'
 import type { SetorTipo } from '@/types/database'
 import { FilaDoDia } from './FilaDoDia'
 import { TelaAtendimento } from './TelaAtendimento'
@@ -23,7 +23,7 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
   const { empresaAtiva } = useEmpresa()
   const { dados, carregando, erro, recarregar } = useDadosCS(empresaAtiva?.id ?? null)
   const atende = podeAtenderCS(setor)
-  const [aba, setAba] = useState<Aba>(atende ? 'fila' : 'reclamacoes')
+  const [aba, setAba] = useState<Aba>(atende ? 'fila' : 'repasses')
   const [atendendo, setAtendendo] = useState<ItemFila | null>(null)
 
   const filaBase = useMemo(() => {
@@ -86,7 +86,7 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
 
   const abas: { id: Aba; label: string }[] = [
     ...(atende ? [{ id: 'fila' as Aba, label: 'Fila do dia' }, { id: 'recentes' as Aba, label: 'Entregues 30 dias (MATSEG)' }] : []),
-    { id: 'reclamacoes', label: 'Reclamações' },
+    ...(podeVerReclamacoesCS(setor) ? [{ id: 'reclamacoes' as Aba, label: 'Reclamações' }] : []),
     { id: 'repasses', label: 'Repasses' },
     ...(podeVerIndicadoresCS(setor) ? [{ id: 'indicadores' as Aba, label: 'Indicadores' }] : []),
     ...(podeEditarRegrasCS(setor) ? [{ id: 'regras' as Aba, label: 'Regras' }] : []),
@@ -120,7 +120,7 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
         <FilaDoDia fila={fila} dados={dados} usuarioId={profile.id} onAtender={setAtendendo} />
       )}
       {aba === 'recentes' && atende && <PosVendaRecentes dados={dados} />}
-      {!carregando && aba === 'reclamacoes' && (
+      {!carregando && aba === 'reclamacoes' && podeVerReclamacoesCS(setor) && (
         <ReclamacoesLista setor={setor} dados={dados} usuarioId={profile.id} recarregar={recarregar} />
       )}
       {!carregando && aba === 'repasses' && (

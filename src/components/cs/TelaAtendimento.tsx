@@ -14,6 +14,7 @@ import {
   ROTEIROS,
 } from '@/lib/cs/constantes'
 import type { ItemFila } from '@/lib/cs/fila'
+import { podeVerReclamacoesCS } from '@/lib/cs/permissions'
 import type { DadosCS } from '@/lib/cs/useDadosCS'
 import { FichaClienteModal } from '@/components/inteligencia/FichaClienteModal'
 import { ReclamacaoForm } from './ReclamacaoForm'
@@ -343,7 +344,7 @@ export function TelaAtendimento({
   const contatosAnteriores = dados.contatos
     .filter((c) => c.cliente_chave === cliente.chave && c.status !== 'em_andamento')
     .slice(0, 8)
-  const reclamacoesCliente = dados.reclamacoes.filter(
+  const reclamacoesCliente = (podeVerReclamacoesCS(profile.setor) ? dados.reclamacoes : []).filter(
     (r) =>
       (cnpjDigitos && r.cliente_cnpj === cnpjDigitos) ||
       r.cliente_nome.trim().toLowerCase() === cliente.nome.trim().toLowerCase(),
@@ -722,6 +723,7 @@ export function TelaAtendimento({
         usuarioId={profile.id}
         clienteNome={cliente.nome}
         clienteCnpj={cnpjDigitos}
+        vendedorId={cliente.vendedorId}
         garantirContato={garantirContato}
         onCriado={recarregar}
       />
