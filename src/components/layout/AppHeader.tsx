@@ -8,12 +8,14 @@ import { useEmpresa } from '@/contexts/EmpresaContext'
 import { podeAcessarTarefas } from '@/lib/tarefas/permissions'
 import { podeAcessarRecompra } from '@/lib/recompra/permissions'
 import { podeAcessarProdutividade } from '@/lib/produtividade/permissions'
+import { podeAcessarCS, podeUsarKanban } from '@/lib/cs/permissions'
 import type { SetorTipo } from '@/types/database'
 
 const SETOR_LABEL: Record<SetorTipo, string> = {
   compras: 'Compras',
   comercial: 'Comercial',
   gestor: 'Gestor',
+  cs: 'CS',
 }
 
 // Cor sutil de identificação por perfil: comercial em tom neutro, compras em
@@ -22,6 +24,7 @@ const SETOR_BADGE_CLASSES: Record<SetorTipo, string> = {
   comercial: 'bg-white/10 text-primary/80',
   compras: 'bg-accent-compras/15 text-accent-compras',
   gestor: 'bg-accent-primary/15 text-accent-primary',
+  cs: 'bg-accent-success/15 text-accent-success',
 }
 
 // Ordem de exibição fixa no header: Kanban, Tarefas (que agora também
@@ -30,12 +33,13 @@ const SETOR_BADGE_CLASSES: Record<SetorTipo, string> = {
 // Inteligência.
 // `check` restringe a visibilidade por perfil; ausência de `check` = visível a todos.
 const NAV_ITEMS: { href: string; label: string; check?: (setor: SetorTipo) => boolean }[] = [
-  { href: '/dashboard', label: 'Kanban' },
+  { href: '/dashboard', label: 'Kanban', check: podeUsarKanban },
+  { href: '/cs', label: 'CS', check: podeAcessarCS },
   { href: '/tarefas', label: 'Tarefas', check: podeAcessarTarefas },
   { href: '/recompra', label: 'Hora de Recomprar', check: podeAcessarRecompra },
   { href: '/clientes', label: 'Clientes' },
-  { href: '/busca', label: 'Busca' },
-  { href: '/arquivados', label: 'Arquivados' },
+  { href: '/busca', label: 'Busca', check: podeUsarKanban },
+  { href: '/arquivados', label: 'Arquivados', check: podeUsarKanban },
   { href: '/painel', label: 'Painel', check: (setor) => setor === 'gestor' },
   { href: '/produtividade', label: 'Produtividade', check: podeAcessarProdutividade },
   {

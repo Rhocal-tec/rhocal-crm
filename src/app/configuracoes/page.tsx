@@ -10,6 +10,7 @@ const SETOR_LABEL: Record<SetorTipo, string> = {
   compras: 'Compras',
   comercial: 'Comercial',
   gestor: 'Gestor',
+  cs: 'CS',
 }
 
 export default function ConfiguracoesPage() {

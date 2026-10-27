@@ -1,7 +1,7 @@
 // Tipos do banco RHOCAL CRM — espelham o schema definido no CLAUDE.md.
 // Regenerar com `supabase gen types typescript` quando o schema mudar.
 
-export type SetorTipo = 'compras' | 'comercial' | 'gestor'
+export type SetorTipo = 'compras' | 'comercial' | 'gestor' | 'cs'
 
 export type PedidoStatus =
   | 'PEDIDO'
@@ -988,6 +988,243 @@ export interface Database {
           dias_uteis_ajuste?: number | null
           criado_por?: string
           criado_em?: string
+          atualizado_em?: string
+        }
+        Relationships: []
+      }
+      cs_config: {
+        Row: {
+          chave: string
+          valor: number
+          descricao: string | null
+          atualizado_em: string
+          atualizado_por: string | null
+        }
+        Insert: {
+          chave: string
+          valor: number
+          descricao?: string | null
+          atualizado_em?: string
+          atualizado_por?: string | null
+        }
+        Update: {
+          chave?: string
+          valor?: number
+          descricao?: string | null
+          atualizado_em?: string
+          atualizado_por?: string | null
+        }
+        Relationships: []
+      }
+      cs_contatos: {
+        Row: {
+          id: string
+          empresa_id: string | null
+          cliente_chave: string
+          cliente_nome: string
+          cliente_cnpj: string | null
+          fase: string
+          canal: string | null
+          status: string
+          observacao: string | null
+          usuario_id: string | null
+          criado_em: string
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          empresa_id?: string | null
+          cliente_chave: string
+          cliente_nome: string
+          cliente_cnpj?: string | null
+          fase: string
+          canal?: string | null
+          status?: string
+          observacao?: string | null
+          usuario_id?: string | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          empresa_id?: string | null
+          cliente_chave?: string
+          cliente_nome?: string
+          cliente_cnpj?: string | null
+          fase?: string
+          canal?: string | null
+          status?: string
+          observacao?: string | null
+          usuario_id?: string | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Relationships: []
+      }
+      cs_pesquisas: {
+        Row: {
+          id: string
+          contato_id: string
+          nota: number | null
+          motivos: string[]
+          comentario: string | null
+          p1_palavra: string | null
+          p2_motivos: string[]
+          p3_outros_fornecedores: boolean | null
+          p3_nome: string | null
+          p3_texto: string | null
+          p4_mudaria: string | null
+          p5_origem: string | null
+          ajustes_pedido: string | null
+          proxima_reposicao: string | null
+          aceita_contato: boolean | null
+          criado_em: string
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          contato_id: string
+          nota?: number | null
+          motivos?: string[]
+          comentario?: string | null
+          p1_palavra?: string | null
+          p2_motivos?: string[]
+          p3_outros_fornecedores?: boolean | null
+          p3_nome?: string | null
+          p3_texto?: string | null
+          p4_mudaria?: string | null
+          p5_origem?: string | null
+          ajustes_pedido?: string | null
+          proxima_reposicao?: string | null
+          aceita_contato?: boolean | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          contato_id?: string
+          nota?: number | null
+          motivos?: string[]
+          comentario?: string | null
+          p1_palavra?: string | null
+          p2_motivos?: string[]
+          p3_outros_fornecedores?: boolean | null
+          p3_nome?: string | null
+          p3_texto?: string | null
+          p4_mudaria?: string | null
+          p5_origem?: string | null
+          ajustes_pedido?: string | null
+          proxima_reposicao?: string | null
+          aceita_contato?: boolean | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Relationships: []
+      }
+      cs_reclamacoes: {
+        Row: {
+          id: string
+          empresa_id: string | null
+          contato_id: string | null
+          cliente_nome: string
+          cliente_cnpj: string | null
+          categoria: string
+          descricao: string | null
+          area_responsavel: string
+          status: string
+          aberta_em: string
+          prazo_em: string
+          solucao: string | null
+          retorno_em: string | null
+          criado_por: string | null
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          empresa_id?: string | null
+          contato_id?: string | null
+          cliente_nome: string
+          cliente_cnpj?: string | null
+          categoria: string
+          descricao?: string | null
+          area_responsavel: string
+          status?: string
+          aberta_em?: string
+          prazo_em: string
+          solucao?: string | null
+          retorno_em?: string | null
+          criado_por?: string | null
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          empresa_id?: string | null
+          contato_id?: string | null
+          cliente_nome?: string
+          cliente_cnpj?: string | null
+          categoria?: string
+          descricao?: string | null
+          area_responsavel?: string
+          status?: string
+          aberta_em?: string
+          prazo_em?: string
+          solucao?: string | null
+          retorno_em?: string | null
+          criado_por?: string | null
+          atualizado_em?: string
+        }
+        Relationships: []
+      }
+      cs_repasses: {
+        Row: {
+          id: string
+          empresa_id: string | null
+          contato_id: string | null
+          cliente_nome: string
+          cliente_cnpj: string | null
+          destino: string
+          destinatario_id: string | null
+          resumo: string
+          resultado: string
+          valor: number | null
+          criado_por: string | null
+          criado_em: string
+          resolvido_por: string | null
+          resolvido_em: string | null
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          empresa_id?: string | null
+          contato_id?: string | null
+          cliente_nome: string
+          cliente_cnpj?: string | null
+          destino: string
+          destinatario_id?: string | null
+          resumo: string
+          resultado?: string
+          valor?: number | null
+          criado_por?: string | null
+          criado_em?: string
+          resolvido_por?: string | null
+          resolvido_em?: string | null
+          atualizado_em?: string
+        }
+        Update: {
+          id?: string
+          empresa_id?: string | null
+          contato_id?: string | null
+          cliente_nome?: string
+          cliente_cnpj?: string | null
+          destino?: string
+          destinatario_id?: string | null
+          resumo?: string
+          resultado?: string
+          valor?: number | null
+          criado_por?: string | null
+          criado_em?: string
+          resolvido_por?: string | null
+          resolvido_em?: string | null
           atualizado_em?: string
         }
         Relationships: []

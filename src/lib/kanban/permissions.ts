@@ -12,6 +12,8 @@ const DESTINOS_PERMITIDOS: Record<SetorTipo, PedidoStatus[] | 'TODAS'> = {
   comercial: 'TODAS',
   compras: ['EM_COTACAO', 'PEDIDO_COTADO', 'PEDIDO_EFETUADO', 'ARQUIVADO', 'ENTREGUE'],
   gestor: 'TODAS',
+  // CS não trabalha no kanban de pedidos (só enxerga, se algum dia abrir um card).
+  cs: [],
 }
 
 export function podeMoverPara(setor: SetorTipo, destino: PedidoStatus): boolean {
