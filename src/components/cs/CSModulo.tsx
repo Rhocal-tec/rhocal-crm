@@ -12,8 +12,9 @@ import { TelaAtendimento } from './TelaAtendimento'
 import { ReclamacoesLista } from './ReclamacoesLista'
 import { RepassesLista } from './RepassesLista'
 import { RegrasCS } from './RegrasCS'
+import { PosVendaRecentes } from './PosVendaRecentes'
 
-type Aba = 'fila' | 'reclamacoes' | 'repasses' | 'regras'
+type Aba = 'fila' | 'recentes' | 'reclamacoes' | 'repasses' | 'regras'
 
 export function CSModulo({ setor }: { setor: SetorTipo }) {
   const { profile } = useAuth()
@@ -68,7 +69,7 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
   }
 
   const abas: { id: Aba; label: string }[] = [
-    ...(atende ? [{ id: 'fila' as Aba, label: 'Fila do dia' }] : []),
+    ...(atende ? [{ id: 'fila' as Aba, label: 'Fila do dia' }, { id: 'recentes' as Aba, label: 'Entregues 30 dias (MATSEG)' }] : []),
     { id: 'reclamacoes', label: 'Reclamações' },
     { id: 'repasses', label: 'Repasses' },
     ...(podeEditarRegrasCS(setor) ? [{ id: 'regras' as Aba, label: 'Regras' }] : []),
@@ -101,6 +102,7 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
       {!carregando && aba === 'fila' && atende && (
         <FilaDoDia fila={fila} dados={dados} usuarioId={profile.id} onAtender={setAtendendo} />
       )}
+      {aba === 'recentes' && atende && <PosVendaRecentes dados={dados} />}
       {!carregando && aba === 'reclamacoes' && (
         <ReclamacoesLista setor={setor} dados={dados} usuarioId={profile.id} recarregar={recarregar} />
       )}
