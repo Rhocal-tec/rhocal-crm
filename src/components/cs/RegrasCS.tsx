@@ -38,13 +38,20 @@ export function RegrasCS({
   async function salvar() {
     setMsg(null)
     setSalvando(true)
-    const linhas = Object.entries(valores).map(([chave, v]) => ({
-      chave,
-      valor: Math.max(0, Math.round(Number(v) || 0)),
-      atualizado_por: usuarioId,
-      atualizado_em: new Date().toISOString(),
-    }))
-    const { error } = await supabase.from('cs_config').upsert(linhas, { onConflict: 'chave' })
+    // A tabela só permite UPDATE ao gestor (as linhas já vêm criadas pela migração).
+    const resultados = await Promise.all(
+      Object.entries(valores).map(([chave, v]) =>
+        supabase
+          .from('cs_config')
+          .update({
+            valor: Math.max(0, Math.round(Number(v) || 0)),
+            atualizado_por: usuarioId,
+            atualizado_em: new Date().toISOString(),
+          })
+          .eq('chave', chave),
+      ),
+    )
+    const error = resultados.find((r) => r.error)?.error ?? null
     setSalvando(false)
     if (error) {
       setMsg(`Não foi possível salvar: ${error.message}`)
