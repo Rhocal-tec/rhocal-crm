@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { useDadosCS } from '@/lib/cs/useDadosCS'
 import { montarFila, type ItemFila } from '@/lib/cs/fila'
-import { podeAtenderCS, podeEditarRegrasCS } from '@/lib/cs/permissions'
+import { podeAtenderCS, podeEditarRegrasCS, podeVerIndicadoresCS } from '@/lib/cs/permissions'
 import type { SetorTipo } from '@/types/database'
 import { FilaDoDia } from './FilaDoDia'
 import { TelaAtendimento } from './TelaAtendimento'
@@ -14,8 +14,9 @@ import { RepassesLista } from './RepassesLista'
 import { RegrasCS } from './RegrasCS'
 import { useTelefonesOmie } from '@/lib/cs/useTelefonesOmie'
 import { PosVendaRecentes } from './PosVendaRecentes'
+import { Indicadores } from './Indicadores'
 
-type Aba = 'fila' | 'recentes' | 'reclamacoes' | 'repasses' | 'regras'
+type Aba = 'fila' | 'recentes' | 'indicadores' | 'reclamacoes' | 'repasses' | 'regras'
 
 export function CSModulo({ setor }: { setor: SetorTipo }) {
   const { profile } = useAuth()
@@ -87,6 +88,7 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
     ...(atende ? [{ id: 'fila' as Aba, label: 'Fila do dia' }, { id: 'recentes' as Aba, label: 'Entregues 30 dias (MATSEG)' }] : []),
     { id: 'reclamacoes', label: 'Reclamações' },
     { id: 'repasses', label: 'Repasses' },
+    ...(podeVerIndicadoresCS(setor) ? [{ id: 'indicadores' as Aba, label: 'Indicadores' }] : []),
     ...(podeEditarRegrasCS(setor) ? [{ id: 'regras' as Aba, label: 'Regras' }] : []),
   ]
 
@@ -124,6 +126,7 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
       {!carregando && aba === 'repasses' && (
         <RepassesLista setor={setor} dados={dados} usuarioId={profile.id} recarregar={recarregar} />
       )}
+      {!carregando && aba === 'indicadores' && podeVerIndicadoresCS(setor) && <Indicadores dados={dados} />}
       {aba === 'regras' && podeEditarRegrasCS(setor) && (
         <RegrasCS config={dados.config} usuarioId={profile.id} recarregar={recarregar} />
       )}

@@ -23,3 +23,8 @@ export function podeUsarKanban(setor: SetorTipo): boolean {
 }
 
 // Aba Inteligência, Recompra, Tarefas etc. seguem suas próprias regras (cs fica de fora).
+
+// Indicadores (sintético e analítico) e exportação: só a diretoria.
+export function podeVerIndicadoresCS(setor: SetorTipo): boolean {
+  return setor === 'gestor'
+}
