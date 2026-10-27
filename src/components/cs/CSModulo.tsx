@@ -12,6 +12,7 @@ import { TelaAtendimento } from './TelaAtendimento'
 import { ReclamacoesLista } from './ReclamacoesLista'
 import { RepassesLista } from './RepassesLista'
 import { RegrasCS } from './RegrasCS'
+import { useTelefonesOmie } from '@/lib/cs/useTelefonesOmie'
 import { PosVendaRecentes } from './PosVendaRecentes'
 
 type Aba = 'fila' | 'recentes' | 'reclamacoes' | 'repasses' | 'regras'
@@ -24,7 +25,7 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
   const [aba, setAba] = useState<Aba>(atende ? 'fila' : 'reclamacoes')
   const [atendendo, setAtendendo] = useState<ItemFila | null>(null)
 
-  const fila = useMemo(() => {
+  const filaBase = useMemo(() => {
     const abertas = dados.reclamacoes.filter((r) => r.status === 'aberta' || r.status === 'com_a_area')
     const chaves = new Set<string>()
     for (const c of dados.clientes) {
@@ -44,6 +45,20 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
       agora: new Date(),
     })
   }, [dados])
+
+  // Cliente da fila sem telefone no CRM: o vendedor pode ter cadastrado no Omie.
+  const telefonesOmie = useTelefonesOmie(
+    atende ? filaBase.filter((i) => !i.cliente.telefone && i.cliente.omieClienteId).map((i) => i.cliente.omieClienteId as number) : [],
+    empresaAtiva?.slug ?? null,
+  )
+  const fila = useMemo(
+    () =>
+      filaBase.map((i) => {
+        const tel = i.cliente.omieClienteId ? telefonesOmie[String(i.cliente.omieClienteId)] : undefined
+        return !i.cliente.telefone && tel ? { ...i, cliente: { ...i.cliente, telefone: tel } } : i
+      }),
+    [filaBase, telefonesOmie],
+  )
 
   if (!empresaAtiva || !profile) {
     return <div className="flex flex-1 items-center justify-center text-sm text-muted">Carregando…</div>

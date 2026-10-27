@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatarCnpjInput, formatarDataSomente, formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { FASE_LABELS } from '@/lib/cs/constantes'
 import type { DadosCS } from '@/lib/cs/useDadosCS'
+import { useTelefonesOmie } from '@/lib/cs/useTelefonesOmie'
 
 const JANELA_DIAS = 30
 const MS_DIA = 86_400_000
@@ -17,6 +18,7 @@ interface ClienteRecente {
   contato: string | null
   email: string | null
   cidade: string | null
+  omieId: number | null
   ultimoPedidoEm: string
 }
 
@@ -36,7 +38,6 @@ export function PosVendaRecentes({ dados }: { dados: DadosCS }) {
   const [busca, setBusca] = useState('')
 
   const carregar = useCallback(async () => {
-    setCarregando(true)
     setErro(null)
     try {
       const { data: emp, error: e0 } = await supabase.from('empresas').select('id').eq('slug', 'matseg').maybeSingle()
@@ -89,6 +90,7 @@ export function PosVendaRecentes({ dados }: { dados: DadosCS }) {
           contato: cad?.contato || p.cliente_contato,
           email: cad?.email ?? null,
           cidade: cad ? [cad.cidade, cad.estado].filter(Boolean).join('/') || null : null,
+          omieId: p.cliente_omie_id ? Number(p.cliente_omie_id) : cad?.omie_cliente_id ? Number(cad.omie_cliente_id) : null,
           ultimoPedidoEm: quando,
         })
       }
@@ -102,7 +104,22 @@ export function PosVendaRecentes({ dados }: { dados: DadosCS }) {
 
   useEffect(() => {
     void carregar()
+    // Telefone novo cadastrado no CRM aparece sozinho: recarrega ao voltar para a aba e a cada 3 min.
+    const timer = setInterval(() => void carregar(), 3 * 60_000)
+    const aoVoltar = () => {
+      if (document.visibilityState === 'visible') void carregar()
+    }
+    document.addEventListener('visibilitychange', aoVoltar)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', aoVoltar)
+    }
   }, [carregar])
+
+  const telefonesOmie = useTelefonesOmie(
+    lista.filter((c) => !c.telefone && c.omieId).map((c) => c.omieId as number),
+    'matseg',
+  )
 
   // Já houve contato de CS com o cliente depois da última entrega?
   const contatados = useMemo(() => {
@@ -121,7 +138,12 @@ export function PosVendaRecentes({ dados }: { dados: DadosCS }) {
     return set
   }, [lista, dados.contatos])
 
-  const visiveis = lista.filter(
+  const comTelefone = useMemo(
+    () => lista.map((c) => (c.telefone || !c.omieId ? c : { ...c, telefone: telefonesOmie[String(c.omieId)] ?? null })),
+    [lista, telefonesOmie],
+  )
+
+  const visiveis = comTelefone.filter(
     (c) =>
       (!ocultarContatados || !contatados.has(c.chave)) &&
       (!busca.trim() || c.nome.toLowerCase().includes(busca.trim().toLowerCase()) || soDigitos(c.cnpj).includes(soDigitos(busca))),
