@@ -12,7 +12,8 @@ import { TelaAtendimento } from './TelaAtendimento'
 import { ReclamacoesLista } from './ReclamacoesLista'
 import { RepassesLista } from './RepassesLista'
 import { RegrasCS } from './RegrasCS'
-import { useTelefonesOmie } from '@/lib/cs/useTelefonesOmie'
+import { useSincronizarOmie } from '@/lib/cs/useSincronizarOmie'
+import { chaveItemOmie } from '@/lib/omie/cliente-completo'
 import { PosVendaRecentes } from './PosVendaRecentes'
 import { Indicadores } from './Indicadores'
 
@@ -47,18 +48,32 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
     })
   }, [dados])
 
-  // Cliente da fila sem telefone no CRM: o vendedor pode ter cadastrado no Omie.
-  const telefonesOmie = useTelefonesOmie(
-    atende ? filaBase.filter((i) => !i.cliente.telefone && i.cliente.omieClienteId).map((i) => i.cliente.omieClienteId as number) : [],
-    empresaAtiva?.slug ?? null,
+  // Cliente da fila com cadastro incompleto: busca no Omie, grava no cadastro do CRM
+  // (só o que está vazio) e recarrega. O que o Omie já devolveu aparece na hora.
+  const candidatosOmie = useMemo(
+    () =>
+      atende
+        ? filaBase
+            .filter((i) => (!i.cliente.telefone || !i.cliente.email || !i.cliente.contato) && (i.cliente.omieClienteId || i.cliente.cnpj))
+            .map((i) => ({ omieId: i.cliente.omieClienteId, cnpj: i.cliente.cnpj }))
+        : [],
+    [filaBase, atende],
   )
+  const { dadosOmie } = useSincronizarOmie(candidatosOmie, empresaAtiva?.slug ?? null, recarregar)
   const fila = useMemo(
     () =>
       filaBase.map((i) => {
-        const tel = i.cliente.omieClienteId ? telefonesOmie[String(i.cliente.omieClienteId)] : undefined
-        return !i.cliente.telefone && tel ? { ...i, cliente: { ...i.cliente, telefone: tel } } : i
+        const o = dadosOmie[chaveItemOmie({ omieId: i.cliente.omieClienteId, cnpj: i.cliente.cnpj })]
+        if (!o) return i
+        const cliente = {
+          ...i.cliente,
+          telefone: i.cliente.telefone ?? o.telefone1 ?? o.telefone2,
+          email: i.cliente.email ?? o.email,
+          contato: i.cliente.contato ?? o.contato,
+        }
+        return { ...i, cliente }
       }),
-    [filaBase, telefonesOmie],
+    [filaBase, dadosOmie],
   )
 
   if (!empresaAtiva || !profile) {
@@ -76,6 +91,7 @@ export function CSModulo({ setor }: { setor: SetorTipo }) {
         dados={dados}
         empresaId={empresaAtiva.id}
         empresaNome={empresaAtiva.nome_fantasia}
+        empresaSlug={empresaAtiva.slug}
         profile={profile}
         onSair={() => setAtendendo(null)}
         onProximo={(p) => setAtendendo(p)}

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
+import { formatarCnpjInput, formatarDataSomente, formatarMoeda, formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { STATUS_LABELS } from '@/lib/kanban/status'
 import {
   CANAIS,
@@ -14,6 +14,7 @@ import {
   ROTEIROS,
 } from '@/lib/cs/constantes'
 import type { ItemFila } from '@/lib/cs/fila'
+import { chaveItemOmie, type ClienteOmieCompleto } from '@/lib/omie/cliente-completo'
 import { podeVerReclamacoesCS } from '@/lib/cs/permissions'
 import type { DadosCS } from '@/lib/cs/useDadosCS'
 import { FichaClienteModal } from '@/components/inteligencia/FichaClienteModal'
@@ -94,6 +95,7 @@ export function TelaAtendimento({
   dados,
   empresaId,
   empresaNome,
+  empresaSlug,
   profile,
   onSair,
   onProximo,
@@ -104,6 +106,7 @@ export function TelaAtendimento({
   dados: DadosCS
   empresaId: string
   empresaNome: string
+  empresaSlug: string
   profile: Profile
   onSair: () => void
   onProximo: (proximo: ItemFila | null) => void
@@ -158,6 +161,55 @@ export function TelaAtendimento({
   const [copiado, setCopiado] = useState(false)
   const [finalizando, setFinalizando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+
+  // Dados completos do cliente no Omie (telefones, e-mail, contato, endereço…). Também
+  // são gravados no cadastro do CRM, só nos campos que estavam vazios.
+  const [omie, setOmie] = useState<ClienteOmieCompleto | null>(null)
+  const [omieEstado, setOmieEstado] = useState<'carregando' | 'ok' | 'erro'>('carregando')
+  const [omieErro, setOmieErro] = useState<string | null>(null)
+  const [omieVersao, setOmieVersao] = useState(0)
+  useEffect(() => {
+    const item = { omieId: cliente.omieClienteId, cnpj: cliente.cnpj }
+    if (!item.omieId && !(item.cnpj ?? '').replace(/\D/g, '')) {
+      setOmieEstado('erro')
+      setOmieErro('Cliente sem código nem CNPJ para consultar no Omie.')
+      return
+    }
+    let ativo = true
+    setOmieEstado('carregando')
+    setOmieErro(null)
+    fetch('/api/omie/cliente-completo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ empresaSlug, itens: [item] }),
+    })
+      .then(async (r) => {
+        const json = (await r.json().catch(() => null)) as {
+          erro?: string
+          resultados?: Record<string, { dados: ClienteOmieCompleto | null; erro: string | null }>
+          persistidos?: number
+        } | null
+        if (!ativo) return
+        if (!r.ok || !json) throw new Error(json?.erro ?? 'Não foi possível consultar o Omie.')
+        const res = json.resultados?.[chaveItemOmie(item)]
+        if (!res?.dados) throw new Error(res?.erro ?? 'Cliente não encontrado no Omie.')
+        setOmie(res.dados)
+        setOmieEstado('ok')
+        if ((json.persistidos ?? 0) > 0) recarregar()
+      })
+      .catch((e: unknown) => {
+        if (!ativo) return
+        setOmieEstado('erro')
+        setOmieErro(e instanceof Error ? e.message : 'Erro ao consultar o Omie.')
+      })
+    return () => {
+      ativo = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cliente.chave, empresaSlug, omieVersao])
+  const telefoneEfetivo = cliente.telefone ?? omie?.telefone1 ?? omie?.telefone2 ?? null
+  const contatoEfetivo = cliente.contato ?? omie?.contato ?? null
+  const emailEfetivo = cliente.email ?? omie?.email ?? null
 
   // Cria o contato (rascunho) na primeira interação — nada é gravado se a CS só abrir e pular.
   const garantirContato = useCallback(async (): Promise<string | null> => {
@@ -315,12 +367,12 @@ export function TelaAtendimento({
   const concorrentes = useMemo(() => maisFrequentes(dados.pesquisas.map((p) => p.p3_nome), 10), [dados.pesquisas])
 
   const produtos = cliente.itensMaisComprados.slice(0, 2).map((i) => i.descricao).join(' e ') || 'seus produtos'
-  const nomeContato = (cliente.contato ?? '').split(/[—,·]/)[0].trim() || cliente.nome
+  const nomeContato = (contatoEfetivo ?? '').split(/[—,·]/)[0].trim() || cliente.nome
   const mensagem = ROTEIROS[fase].mensagem
     .replace(/\{nome\}/g, nomeContato)
     .replace(/\{empresa\}/g, empresaNome)
     .replace(/\{produtos\}/g, produtos)
-  const telefoneDigitos = (cliente.telefone ?? '').replace(/\D/g, '')
+  const telefoneDigitos = (telefoneEfetivo ?? '').replace(/\D/g, '')
   const linkWhatsapp = telefoneDigitos
     ? `https://wa.me/${telefoneDigitos.startsWith('55') ? telefoneDigitos : `55${telefoneDigitos}`}?text=${encodeURIComponent(mensagem)}`
     : null
@@ -384,9 +436,13 @@ export function TelaAtendimento({
             <p className="text-[11px] uppercase tracking-wide text-muted">Cliente</p>
             <p className="font-medium text-primary">{cliente.razaoSocial ?? cliente.nome}</p>
             {cliente.cnpj && <p className="text-xs text-muted">CNPJ {cliente.cnpj}</p>}
-            {cliente.contato && <p className="mt-1 text-xs text-primary/80">{cliente.contato}</p>}
-            {cliente.telefone && <p className="text-xs text-primary/80">📞 {cliente.telefone}</p>}
-            {cliente.email && <p className="text-xs text-primary/80">{cliente.email}</p>}
+            {contatoEfetivo && <p className="mt-1 text-xs text-primary/80">{contatoEfetivo}</p>}
+            {telefoneEfetivo ? (
+              <p className="text-xs text-primary/80">📞 {formatarTelefoneInput(telefoneEfetivo)}</p>
+            ) : (
+              <p className="text-xs text-accent-danger">Sem telefone no CRM nem no Omie</p>
+            )}
+            {emailEfetivo && <p className="text-xs text-primary/80">{emailEfetivo}</p>}
             {(cliente.cidade || cliente.estado) && (
               <p className="text-xs text-muted">{[cliente.cidade, cliente.estado].filter(Boolean).join('/')}</p>
             )}
@@ -397,6 +453,44 @@ export function TelaAtendimento({
             >
               Ver ficha completa
             </button>
+          </div>
+
+          <div className="rounded-lg border border-white/10 bg-surface p-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted">Dados do Omie</p>
+            {omieEstado === 'carregando' && <p className="text-xs text-muted">Buscando no Omie…</p>}
+            {omieEstado === 'erro' && (
+              <div>
+                <p className="text-xs text-accent-danger">{omieErro}</p>
+                <button
+                  onClick={() => setOmieVersao((v) => v + 1)}
+                  className="mt-1 rounded-md border border-white/15 px-2 py-1 text-xs text-primary/80 hover:bg-white/10"
+                >
+                  Tentar de novo
+                </button>
+              </div>
+            )}
+            {omieEstado === 'ok' && omie && (
+              <ul className="mt-1 space-y-0.5 text-xs text-primary/90">
+                {omie.inativo && <li className="text-amber-300">⚠ Cliente inativo no Omie</li>}
+                {omie.razaoSocial && <li>{omie.razaoSocial}</li>}
+                {omie.nomeFantasia && <li className="text-muted">Fantasia: {omie.nomeFantasia}</li>}
+                {omie.cnpj && <li className="text-muted">CNPJ/CPF: {formatarCnpjInput(omie.cnpj)}</li>}
+                {omie.contato && <li>👤 {omie.contato}</li>}
+                {omie.telefone1 && <li>📞 {formatarTelefoneInput(omie.telefone1)}</li>}
+                {omie.telefone2 && <li>📞 {formatarTelefoneInput(omie.telefone2)} (2º)</li>}
+                {omie.email && <li>✉ {omie.email}</li>}
+                {(omie.endereco || omie.cidade) && (
+                  <li className="text-muted">
+                    📍 {[omie.endereco, omie.numero, omie.complemento, omie.bairro].filter(Boolean).join(', ')}
+                    {omie.cidade && ` — ${omie.cidade}`}
+                    {omie.estado && `/${omie.estado}`}
+                    {omie.cep && ` · CEP ${omie.cep}`}
+                  </li>
+                )}
+                {omie.inscricaoEstadual && <li className="text-muted">IE: {omie.inscricaoEstadual}</li>}
+                {omie.observacao && <li className="text-muted">Obs.: {omie.observacao}</li>}
+              </ul>
+            )}
           </div>
 
           <div className="rounded-lg border border-white/10 bg-surface p-3">

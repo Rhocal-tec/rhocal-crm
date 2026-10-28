@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { formatarCnpjInput, formatarDataSomente, formatarTelefoneInput } from '@/lib/kanban/formatacao'
 import { FASE_LABELS } from '@/lib/cs/constantes'
 import type { DadosCS } from '@/lib/cs/useDadosCS'
-import { useTelefonesOmie } from '@/lib/cs/useTelefonesOmie'
+import { useSincronizarOmie } from '@/lib/cs/useSincronizarOmie'
+import { chaveItemOmie } from '@/lib/omie/cliente-completo'
 
 const JANELA_DIAS = 30
 const MS_DIA = 86_400_000
@@ -116,10 +117,11 @@ export function PosVendaRecentes({ dados }: { dados: DadosCS }) {
     }
   }, [carregar])
 
-  const telefonesOmie = useTelefonesOmie(
-    lista.filter((c) => !c.telefone && c.omieId).map((c) => c.omieId as number),
-    'matseg',
+  const candidatosOmie = useMemo(
+    () => lista.filter((c) => (!c.telefone || !c.email || !c.contato) && (c.omieId || c.cnpj)).map((c) => ({ omieId: c.omieId, cnpj: c.cnpj })),
+    [lista],
   )
+  const { dadosOmie } = useSincronizarOmie(candidatosOmie, 'matseg', carregar)
 
   // Já houve contato de CS com o cliente depois da última entrega?
   const contatados = useMemo(() => {
@@ -139,8 +141,12 @@ export function PosVendaRecentes({ dados }: { dados: DadosCS }) {
   }, [lista, dados.contatos])
 
   const comTelefone = useMemo(
-    () => lista.map((c) => (c.telefone || !c.omieId ? c : { ...c, telefone: telefonesOmie[String(c.omieId)] ?? null })),
-    [lista, telefonesOmie],
+    () =>
+      lista.map((c) => {
+        const o = dadosOmie[chaveItemOmie({ omieId: c.omieId, cnpj: c.cnpj })]
+        return o ? { ...c, telefone: c.telefone ?? o.telefone1 ?? o.telefone2, email: c.email ?? o.email, contato: c.contato ?? o.contato } : c
+      }),
+    [lista, dadosOmie],
   )
 
   const visiveis = comTelefone.filter(
