@@ -466,10 +466,11 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
       if (!dentroDoFiltroData(oportunidade.criado_em)) return false
       return true
     })
-    const visiveis = correspondentes.filter((o) => !oportunidadesComTarefaAberta.has(o.id))
+    // Toda oportunidade aberta aparece na coluna, mesmo com tarefa agendada
+    // (o card ganha a etiqueta "com tarefa agendada" na coluna).
     return {
-      oportunidadesFiltradas: visiveis,
-      ocultasComTarefa: correspondentes.length - visiveis.length,
+      oportunidadesFiltradas: correspondentes,
+      ocultasComTarefa: 0,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -833,6 +834,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
             corVar="--accent-primary"
             oportunidades={oportunidadesFiltradas}
             ocultasComTarefa={ocultasComTarefa}
+            idsComTarefaAberta={oportunidadesComTarefaAberta}
             onAbrir={setOportunidadeAbertaId}
             nomesPorId={nomesPorId}
           />

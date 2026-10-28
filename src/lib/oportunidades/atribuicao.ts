@@ -7,8 +7,9 @@
 //   2. sem tarefa aberta: responsável da última tarefa Realizada
 //      (Canceladas não contam);
 //   3. tarefa escolhida sem responsável (comum nas importadas do Omie):
-//      null = "não atribuído" — não volta pra uma tarefa mais antiga, que
-//      poderia apontar alguém que já saiu do caso;
+//      cai para quem CRIOU a oportunidade (criado_por) — nunca volta pra uma
+//      tarefa mais antiga, que poderia apontar alguém que já saiu do caso.
+//      Assim nada que um usuário cria fica "não atribuído";
 //   4. nenhuma tarefa: criado_por (Novo Lead/Cadastro rápido não criam
 //      tarefa).
 // "Mais recente" = maior criado_em.
@@ -31,10 +32,10 @@ export function atribuirOportunidade<T extends TarefaParaAtribuicao>(
     lista.reduce<T | null>((atual, t) => (!atual || t.criado_em > atual.criado_em ? t : atual), null)
 
   const tarefaAberta = maisRecente(validas.filter((t) => !situacaoTerminal(t.situacao)))
-  if (tarefaAberta) return { responsavel: tarefaAberta.responsavel, origem: 'tarefa_aberta', tarefaAberta }
+  if (tarefaAberta) return { responsavel: tarefaAberta.responsavel ?? criadoPor, origem: 'tarefa_aberta', tarefaAberta }
 
   const concluida = maisRecente(validas.filter((t) => t.situacao === 'Realizada'))
-  if (concluida) return { responsavel: concluida.responsavel, origem: 'tarefa_concluida', tarefaAberta: null }
+  if (concluida) return { responsavel: concluida.responsavel ?? criadoPor, origem: 'tarefa_concluida', tarefaAberta: null }
 
   return { responsavel: criadoPor, origem: 'criador', tarefaAberta: null }
 }

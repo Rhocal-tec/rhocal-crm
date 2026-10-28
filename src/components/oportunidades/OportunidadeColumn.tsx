@@ -19,6 +19,7 @@ export function OportunidadeColumn({
   onAbrir,
   nomesPorId,
   ocultasComTarefa = 0,
+  idsComTarefaAberta,
 }: {
   titulo: string
   corVar: string
@@ -28,6 +29,8 @@ export function OportunidadeColumn({
   // Quantas oportunidades ficaram fora da coluna por já terem tarefa aberta
   // vinculada (ver oportunidadesComTarefaAberta no FunilBoard).
   ocultasComTarefa?: number
+  // Oportunidades que já têm tarefa aberta: ganham uma etiqueta no card.
+  idsComTarefaAberta?: Set<string>
 }) {
   // Fase 37.2: soma do valor_estimado da coluna, ao lado do contador — omite
   // quando dá zero (cobre tanto "nenhuma tem valor" quanto "soma é zero").
@@ -58,12 +61,14 @@ export function OportunidadeColumn({
       )}
       <div className="flex min-h-[200px] flex-1 flex-col gap-2 p-2">
         {oportunidades.map((oportunidade) => (
-          <OportunidadeCard
-            key={oportunidade.id}
-            oportunidade={oportunidade}
-            onAbrir={onAbrir}
-            nomesPorId={nomesPorId}
-          />
+          <div key={oportunidade.id} className="flex flex-col gap-1">
+            {idsComTarefaAberta?.has(oportunidade.id) && (
+              <span className="self-start rounded-full border border-cyan-400/40 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-medium text-cyan-300">
+                📅 com tarefa agendada
+              </span>
+            )}
+            <OportunidadeCard oportunidade={oportunidade} onAbrir={onAbrir} nomesPorId={nomesPorId} />
+          </div>
         ))}
         {oportunidades.length === 0 && (
           <p className="mt-2 text-center text-xs text-muted/60">Nenhuma oportunidade</p>
