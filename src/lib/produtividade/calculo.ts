@@ -24,7 +24,6 @@
 // - Atribuição por criado_por (quem vendeu — diferente do "Entregues" do
 //   Analítico, que é de quem operacionalizou). Valor = Σ preco_venda ×
 //   quantidade dos itens não excluídos, sem frete.
-import { atribuirOportunidade } from '@/lib/oportunidades/atribuicao'
 import { classificarPrazo } from '@/lib/tarefas/prazo'
 import type { PedidoStatus } from '@/types/database'
 
@@ -360,7 +359,10 @@ export function agregarTarefasOportunidades(params: {
       dentro(o.ultima_movimentacao, inicio, fim) ||
       tarefas.some((t) => t.situacao !== 'Cancelada' && noMes(t))
     if (!ativa) continue
-    const { responsavel } = atribuirOportunidade(tarefas, o.criado_por)
+    // Quem CRIOU a oportunidade é quem recebe o crédito (assim tudo que o
+    // vendedor cria aparece na produtividade dele, mesmo que a tarefa seguinte
+    // fique com outra pessoa).
+    const responsavel = o.criado_por
     const ganhaNoMes = o.status === 'GANHO' && dentro(o.ultima_movimentacao, inicio, fim)
     somar(responsavel, (m) => {
       m.oportunidades += 1
