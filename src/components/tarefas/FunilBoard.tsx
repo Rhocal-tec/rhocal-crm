@@ -141,7 +141,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     // recente (tarefas de hoje/futuras) — por isso paginamos até acabar.
     async function carregarTudo() {
       const todas: Tarefa[] = []
-      for (let de = 0; ; de += 1000) {
+      for (let de = 0; ; ) {
         const { data, error } = await supabase
           .from('tarefas')
           .select('*')
@@ -154,8 +154,11 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
           console.error('Erro ao carregar tarefas:', error.message)
           break
         }
-        todas.push(...(data ?? []))
-        if (!data || data.length < 1000) break
+        // Avança pelo que realmente voltou (o limite do projeto pode ser < 1000)
+        // e só para quando não vier mais nada.
+        if (!data || data.length === 0) break
+        todas.push(...data)
+        de += data.length
       }
       if (!ativo) return
       setTarefas(todas)
@@ -620,7 +623,7 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
       // Mesma proteção das tarefas: pagina além do limite de 1000 linhas.
       const todas: Oportunidade[] = []
       let falhou = false
-      for (let de = 0; ; de += 1000) {
+      for (let de = 0; ; ) {
         const { data, error } = await supabase
           .from('oportunidades')
           .select('*')
@@ -634,8 +637,9 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
           falhou = true
           break
         }
-        todas.push(...(data ?? []))
-        if (!data || data.length < 1000) break
+        if (!data || data.length === 0) break
+        todas.push(...data)
+        de += data.length
       }
 
       if (!ativo) return
