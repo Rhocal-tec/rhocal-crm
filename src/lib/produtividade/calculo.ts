@@ -228,6 +228,8 @@ export interface TarefaProdutividade {
 export interface OportunidadeProdutividade {
   id: string
   criado_por: string
+  // Quem fez a última movimentação (trigger grava auth.uid() ao mudar o status).
+  movido_por: string | null
   criado_em: string
   status: string
   ultima_movimentacao: string
@@ -366,8 +368,14 @@ export function agregarTarefasOportunidades(params: {
     const ganhaNoMes = o.status === 'GANHO' && dentro(o.ultima_movimentacao, inicio, fim)
     somar(responsavel, (m) => {
       m.oportunidades += 1
-      if (ganhaNoMes) m.oportunidadesConcluidas += 1
     })
+    // Concluída (GANHO) conta para quem concluiu — quem fez a última
+    // movimentação —, mesmo que outra pessoa tenha criado a oportunidade.
+    if (ganhaNoMes) {
+      somar(o.movido_por ?? o.criado_por, (m) => {
+        m.oportunidadesConcluidas += 1
+      })
+    }
   }
 
   for (const m of Array.from(porFuncionario.values()).concat(equipe)) {

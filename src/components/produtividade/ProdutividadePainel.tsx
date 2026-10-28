@@ -524,7 +524,7 @@ export function ProdutividadePainel() {
           paginar<OportunidadeProdutividade>((de, ate) =>
             supabase
               .from('oportunidades')
-              .select('id, criado_por, criado_em, status, ultima_movimentacao, cliente_nome')
+              .select('id, criado_por, movido_por, criado_em, status, ultima_movimentacao, cliente_nome')
               .eq('empresa_id', empresaId)
               .order('id')
               .range(de, ate),
