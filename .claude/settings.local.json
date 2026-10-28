@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Start-Process \"http://localhost:3000\")",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(npm run *)",
+      "Bash(npx next *)",
+      "Skill(run)",
+      "Bash(npm run *)",
+      "Bash(echo \"started with pid $!\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/login --max-time 5)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/login --max-time 8)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/busca --max-time 8)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/dashboard --max-time 8)",
+      "Bash(curl -s -o /dev/null -w \"dashboard:%{http_code}\\\\n\" http://localhost:3000/dashboard --max-time 10)",
+      "Bash(curl -sf http://localhost:3001/login)",
+      "Bash(node \"C:/Users/LOLIMA~1/AppData/Local/Temp/claude/C--Users-L-o-Lima-OneDrive--rea-de-Trabalho-rhocal-crm/8aea8eb6-4f1b-4807-bc92-fd34793402f1/scratchpad/test-esqueci-senha.mjs\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3001/dashboard)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/login)",
+      "WebFetch(domain:developer.omie.com.br)",
+      "Bash(npx eslint *)",
+      "Bash(taskkill //PID 45832 //F)",
+      "Bash(taskkill //PID 60568 //F)",
+      "Bash(taskkill //PID 13844 //F)",
+      "Bash(netstat -ano)"
+    ]
+  }
+}

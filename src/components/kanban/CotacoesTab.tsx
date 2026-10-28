@@ -54,7 +54,9 @@ export function CotacoesTab({
   itens: PedidoItem[]
   pedidoNumero: number
 }) {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
+  // Regra de Compras: somente o Alex define o custo final do item.
+  const podeDefinirCustoFinal = (profile?.nome ?? '').trim().toLowerCase().startsWith('alex')
   const [supabase] = useState(() => createClient())
   // Itens já em estoque (fase 26) não precisam de cotação — ficam 100% fora
   // desta aba, sem exceção. Memoizado para não recriar a referência do array
@@ -318,22 +320,28 @@ export function CotacoesTab({
       return
     }
 
-    const { error: erroCusto } = await supabase
-      .from('pedido_itens')
-      .update({ custo_final: preco })
-      .eq('id', itemId)
-    if (erroCusto) {
-      setErro('Cotação marcada como vencedora, mas houve erro ao atualizar o custo final.')
+    // Custo final só é definido pelo Alex; os demais apenas marcam a vencedora.
+    if (podeDefinirCustoFinal) {
+      const { error: erroCusto } = await supabase
+        .from('pedido_itens')
+        .update({ custo_final: preco })
+        .eq('id', itemId)
+      if (erroCusto) {
+        setErro('Cotação marcada como vencedora, mas houve erro ao atualizar o custo final.')
+      }
     }
 
     setCotacoesPorItem((atual) => ({
       ...atual,
       [itemId]: (atual[itemId] ?? []).map((c) => ({ ...c, vencedora: c.id === cotacaoId })),
     }))
-    setCustoFinalPorItem((atual) => ({ ...atual, [itemId]: preco.toString() }))
+    if (podeDefinirCustoFinal) {
+      setCustoFinalPorItem((atual) => ({ ...atual, [itemId]: preco.toString() }))
+    }
   }
 
   async function salvarCustoFinal(itemId: string, valor: string) {
+    if (!podeDefinirCustoFinal) return
     const numero = valor.trim() === '' ? null : Number(valor)
     if (numero !== null && !Number.isFinite(numero)) return
 
@@ -425,14 +433,22 @@ export function CotacoesTab({
 
             <div className="mt-3 flex items-center gap-2">
               <label className="text-sm text-muted">Custo final:</label>
-              <MoedaInput
-                value={custoFinalPorItem[item.id] ?? ''}
-                onChange={(valor) =>
-                  setCustoFinalPorItem((atual) => ({ ...atual, [item.id]: valor }))
-                }
-                onBlurSalvar={(valor) => salvarCustoFinal(item.id, valor)}
-                className="input-field w-32 rounded-md px-2 py-1 font-mono text-sm"
-              />
+              {podeDefinirCustoFinal ? (
+                <MoedaInput
+                  value={custoFinalPorItem[item.id] ?? ''}
+                  onChange={(valor) =>
+                    setCustoFinalPorItem((atual) => ({ ...atual, [item.id]: valor }))
+                  }
+                  onBlurSalvar={(valor) => salvarCustoFinal(item.id, valor)}
+                  className="input-field w-32 rounded-md px-2 py-1 font-mono text-sm"
+                />
+              ) : (
+                <span className="font-mono text-sm text-primary">
+                  {custoFinalPorItem[item.id]
+                    ? formatarMoeda(Number(custoFinalPorItem[item.id]))
+                    : 'Aguardando definição do Alex'}
+                </span>
+              )}
             </div>
 
             <div className="mt-3 overflow-x-auto">
