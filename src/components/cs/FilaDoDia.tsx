@@ -76,8 +76,9 @@ export function FilaDoDia({
                   <span className="text-sm font-medium text-primary">{item.cliente.nome}</span>
                   <span className="flex items-center gap-2 text-xs text-muted">
                     {item.sugerirLigacao && <span className="text-amber-300">📞 ligar</span>}
-                    {item.tentativasSemRetorno > 0 && !item.sugerirLigacao && (
-                      <span>{item.tentativasSemRetorno}ª tentativa</span>
+                    {item.tentadoHoje && <span className="text-amber-300">tentado hoje · sem retorno</span>}
+                    {item.tentativasSemRetorno > 0 && !item.sugerirLigacao && !item.tentadoHoje && (
+                      <span>{item.tentativasSemRetorno} tentativa(s) sem retorno</span>
                     )}
                     {item.detalhe}
                     {!item.cliente.telefone && <span className="text-accent-danger">sem telefone</span>}

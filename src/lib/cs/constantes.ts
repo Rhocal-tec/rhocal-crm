@@ -35,7 +35,6 @@ export const CONFIG_PADRAO: Record<string, number> = {
   meta_dia: 20,
   prazo_reclamacao_horas: 48,
   alerta_reclamacao_horas: 12,
-  retentativa_dias_uteis: 2,
 }
 
 export const CANAIS = [

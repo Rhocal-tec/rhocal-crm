@@ -150,6 +150,8 @@ export function TelaAtendimento({
   const [sujo, setSujo] = useState(false)
   const [estadoSalvo, setEstadoSalvo] = useState<'' | 'salvando' | 'salvo' | 'erro'>('')
   const [reclamacaoAberta, setReclamacaoAberta] = useState(false)
+  // Houve repasse neste atendimento: o contato conta hoje e volta na fila amanhã.
+  const [repasseFeito, setRepasseFeito] = useState(false)
   const [modalReclamacao, setModalReclamacao] = useState(false)
   const [modalRepasse, setModalRepasse] = useState(false)
   const [fichaAberta, setFichaAberta] = useState(false)
@@ -253,7 +255,7 @@ export function TelaAtendimento({
     const { error } = await supabase
       .from('cs_contatos')
       .update({
-        status: reclamacaoAberta ? 'reclamacao_aberta' : status,
+        status: reclamacaoAberta ? 'reclamacao_aberta' : repasseFeito ? 'repassado' : status,
         canal,
         observacao: observacao.trim() || null,
       })
@@ -673,7 +675,7 @@ export function TelaAtendimento({
             disabled={finalizando}
             className="rounded-md border border-white/15 px-3 py-2 text-sm font-medium text-primary/80 hover:bg-white/10 disabled:opacity-50"
           >
-            📵 Sem retorno e próximo
+            📵 Sem retorno (volta à lista) e próximo
           </button>
           <button
             onClick={() => setModalReclamacao(true)}
@@ -697,6 +699,9 @@ export function TelaAtendimento({
           {erro && <p className="text-xs text-accent-danger">{erro}</p>}
           <p className="text-[11px] text-muted">
             {proximo ? `Próximo da fila: ${proximo.cliente.nome}` : 'Este é o último cliente da fila.'}
+          </p>
+          <p className="text-[11px] text-muted">
+            Sem retorno: o cliente continua na lista. Só sai quando houver conclusão. Repasse: volta amanhã.
           </p>
           {contatoId && <p className="text-[10px] text-muted/60">Registro em andamento</p>}
         </aside>
@@ -725,7 +730,10 @@ export function TelaAtendimento({
         clienteCnpj={cnpjDigitos}
         vendedorId={cliente.vendedorId}
         garantirContato={garantirContato}
-        onCriado={recarregar}
+        onCriado={() => {
+          setRepasseFeito(true)
+          recarregar()
+        }}
       />
       <FichaClienteModal cliente={fichaAberta ? cliente : null} onClose={() => setFichaAberta(false)} />
     </div>

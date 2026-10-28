@@ -129,7 +129,7 @@ export function PosVendaRecentes({ dados }: { dados: DadosCS }) {
       const nome = c.nome.trim().toLowerCase()
       const achou = dados.contatos.some(
         (k) =>
-          k.status !== 'em_andamento' &&
+          (k.status === 'respondeu' || k.status === 'repassado' || k.status === 'reclamacao_aberta') &&
           k.criado_em >= c.ultimoPedidoEm &&
           ((cnpj && k.cliente_cnpj === cnpj) || k.cliente_nome.trim().toLowerCase() === nome),
       )

@@ -13,6 +13,8 @@ export interface ItemFila {
   detalhe: string
   tentativasSemRetorno: number
   sugerirLigacao: boolean
+  // Já houve tentativa sem retorno hoje: continua na lista, mas vai para o fim.
+  tentadoHoje: boolean
 }
 
 const MS_DIA = 86_400_000
@@ -72,30 +74,42 @@ export function montarFila(params: {
         .filter((c) => c.fase === fase && c.criado_em >= desdeIso && c.status !== 'em_andamento')
         .sort((a, b) => b.criado_em.localeCompare(a.criado_em))
 
-    const avaliar = (fase: FaseCS, desdeIso: string): { ok: boolean; tentativas: number; sugerirLigacao: boolean } => {
+    // Regras da fila:
+    //  - respondeu / reclamação aberta = CONCLUSÃO: sai da lista nesta fase;
+    //  - sem retorno: o cliente NÃO sai — continua na lista (vai para o fim
+    //    enquanto não for tentado de novo) e a tentativa conta no dia;
+    //  - repassado: sai só por hoje e volta no dia seguinte;
+    //  - nada some para sempre sem uma conclusão.
+    const inicioHoje = inicioDoDia(agora).toISOString()
+    const avaliar = (
+      fase: FaseCS,
+      desdeIso: string,
+    ): { ok: boolean; tentativas: number; sugerirLigacao: boolean; tentadoHoje: boolean } => {
       const lista = naFase(fase, desdeIso)
-      if (lista.some((c) => c.status === 'respondeu' || c.status === 'reclamacao_aberta')) {
-        return { ok: false, tentativas: 0, sugerirLigacao: false }
-      }
+      const fora = { ok: false, tentativas: 0, sugerirLigacao: false, tentadoHoje: false }
+      if (lista.some((c) => c.status === 'respondeu' || c.status === 'reclamacao_aberta')) return fora
+      if (lista.some((c) => c.status === 'repassado' && c.criado_em >= inicioHoje)) return fora
       const semRetorno = lista.filter((c) => c.status === 'sem_retorno')
-      if (semRetorno.length === 0) return { ok: true, tentativas: 0, sugerirLigacao: false }
-      const ultimo = new Date(semRetorno[0].criado_em)
-      if (semRetorno.length >= 2) {
-        // Segunda falta: sugere ligação na semana seguinte.
-        const volta = new Date(ultimo.getTime() + 7 * MS_DIA)
-        return { ok: agora >= volta, tentativas: semRetorno.length, sugerirLigacao: true }
+      return {
+        ok: true,
+        tentativas: semRetorno.length,
+        sugerirLigacao: semRetorno.length >= 2,
+        tentadoHoje: semRetorno.some((c) => c.criado_em >= inicioHoje),
       }
-      const volta = adicionarDiasUteis(ultimo, cfg.retentativa_dias_uteis)
-      return { ok: agora >= volta, tentativas: semRetorno.length, sugerirLigacao: false }
     }
 
     let escolhido: ItemFila | null = null
-    const cria = (fase: FaseCS, detalhe: string, a: { tentativas: number; sugerirLigacao: boolean }) => ({
+    const cria = (
+      fase: FaseCS,
+      detalhe: string,
+      a: { tentativas: number; sugerirLigacao: boolean; tentadoHoje?: boolean },
+    ) => ({
       cliente,
       fase,
       detalhe,
       tentativasSemRetorno: a.tentativas,
       sugerirLigacao: a.sugerirLigacao,
+      tentadoHoje: a.tentadoHoje ?? false,
     })
 
     // 1) Reclamação aberta
@@ -153,6 +167,7 @@ export function montarFila(params: {
   }
 
   return itens.sort((a, b) => {
+    if (a.tentadoHoje !== b.tentadoHoje) return a.tentadoHoje ? 1 : -1
     const pa = FASES_ORDEM.indexOf(a.fase)
     const pb = FASES_ORDEM.indexOf(b.fase)
     if (pa !== pb) return pa - pb

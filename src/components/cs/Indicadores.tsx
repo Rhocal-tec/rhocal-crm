@@ -121,7 +121,7 @@ export function Indicadores({ dados }: { dados: DadosCS }) {
       const k = dia(c.criado_em)
       const x = porDia.get(k) ?? { total: 0, resp: 0, sem: 0, recl: 0 }
       x.total += 1
-      if (c.status === 'respondeu') x.resp += 1
+      if (c.status === 'respondeu' || c.status === 'repassado') x.resp += 1
       if (c.status === 'sem_retorno') x.sem += 1
       if (c.status === 'reclamacao_aberta') x.recl += 1
       porDia.set(k, x)
@@ -131,7 +131,7 @@ export function Indicadores({ dados }: { dados: DadosCS }) {
     return { contatos, pesquisas, comNota, prom, neut, det, nps, media, reclam, abertas, vencidas, fechadas, noPrazo, comRetorno, horasMedias, rep, fechados, encerrados, dias, contatoPorId }
   }, [dados, periodo])
 
-  const respondeu = d.contatos.filter((c) => c.status === 'respondeu' || c.status === 'reclamacao_aberta').length
+  const respondeu = d.contatos.filter((c) => c.status === 'respondeu' || c.status === 'reclamacao_aberta' || c.status === 'repassado').length
   const semRetorno = d.contatos.filter((c) => c.status === 'sem_retorno').length
   const valorFechado = d.fechados.reduce((s, r) => s + (r.valor ?? 0), 0)
   const diasMeta = d.dias.filter(([, v]) => v.total >= meta).length

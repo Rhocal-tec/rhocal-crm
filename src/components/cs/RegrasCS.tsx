@@ -16,7 +16,6 @@ const ROTULOS: Record<string, string> = {
   meta_dia: 'Meta de contatos por dia',
   prazo_reclamacao_horas: 'Prazo de retorno da reclamação (horas)',
   alerta_reclamacao_horas: 'Alerta antes do vencimento (horas)',
-  retentativa_dias_uteis: 'Nova tentativa após (dias úteis)',
 }
 
 export function RegrasCS({
