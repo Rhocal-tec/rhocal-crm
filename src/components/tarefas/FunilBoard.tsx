@@ -136,18 +136,32 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     let ativo = true
     setLoadingTarefas(true)
 
-    supabase
-      .from('tarefas')
-      .select('*')
-      .eq('empresa_id', empresaAtiva.id)
-      .eq('excluida', false)
-      .order('data_prevista', { ascending: true })
-      .then(({ data, error }) => {
-        if (!ativo) return
-        if (error) console.error('Erro ao carregar tarefas:', error.message)
-        setTarefas(data ?? [])
-        setLoadingTarefas(false)
-      })
+    // O Supabase corta cada consulta em 1000 linhas. Como a lista vem do mais
+    // antigo para o mais novo, o que passava de 1000 era justamente o mais
+    // recente (tarefas de hoje/futuras) — por isso paginamos até acabar.
+    async function carregarTudo() {
+      const todas: Tarefa[] = []
+      for (let de = 0; ; de += 1000) {
+        const { data, error } = await supabase
+          .from('tarefas')
+          .select('*')
+          .eq('empresa_id', empresaAtiva!.id)
+          .eq('excluida', false)
+          .order('data_prevista', { ascending: true })
+          .order('id', { ascending: true })
+          .range(de, de + 999)
+        if (error) {
+          console.error('Erro ao carregar tarefas:', error.message)
+          break
+        }
+        todas.push(...(data ?? []))
+        if (!data || data.length < 1000) break
+      }
+      if (!ativo) return
+      setTarefas(todas)
+      setLoadingTarefas(false)
+    }
+    void carregarTudo()
 
     return () => {
       ativo = false
@@ -603,19 +617,29 @@ export function FunilBoard({ setor }: { setor: SetorTipo }) {
     setLoadingOportunidades(true)
 
     async function carregar() {
-      const { data, error } = await supabase
-        .from('oportunidades')
-        .select('*')
-        .eq('empresa_id', empresaAtiva!.id)
-        .not('status', 'in', '(GANHO,PERDIDO,INATIVA)')
-        .order('criado_em', { ascending: true })
+      // Mesma proteção das tarefas: pagina além do limite de 1000 linhas.
+      const todas: Oportunidade[] = []
+      let falhou = false
+      for (let de = 0; ; de += 1000) {
+        const { data, error } = await supabase
+          .from('oportunidades')
+          .select('*')
+          .eq('empresa_id', empresaAtiva!.id)
+          .not('status', 'in', '(GANHO,PERDIDO,INATIVA)')
+          .order('criado_em', { ascending: true })
+          .order('id', { ascending: true })
+          .range(de, de + 999)
+        if (error) {
+          console.error('Erro ao carregar oportunidades:', error.message)
+          falhou = true
+          break
+        }
+        todas.push(...(data ?? []))
+        if (!data || data.length < 1000) break
+      }
 
       if (!ativo) return
-      if (error) {
-        console.error('Erro ao carregar oportunidades:', error.message)
-      } else {
-        setOportunidades(data ?? [])
-      }
+      if (!falhou) setOportunidades(todas)
       setLoadingOportunidades(false)
     }
 
