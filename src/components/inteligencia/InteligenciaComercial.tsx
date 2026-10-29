@@ -129,7 +129,7 @@ export function InteligenciaComercial() {
         let queryOportunidades = supabase
           .from('oportunidades')
           .select(
-            'id, numero, cliente_nome, cliente_cnpj, cliente_telefone, contato_nome, whatsapp_comprador, whatsapp_empresa, status, origem, temperatura, valor_estimado, criado_em, criado_por',
+            'id, numero, cliente_nome, cliente_cnpj, cliente_telefone, contato_nome, whatsapp_comprador, whatsapp_empresa, status, origem, temperatura, valor_estimado, criado_em, criado_por, pedido_id',
           )
           .eq('empresa_id', empresaAtiva!.id)
         if (range.inicio) queryOportunidades = queryOportunidades.gte('criado_em', `${range.inicio}T00:00:00`)

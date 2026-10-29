@@ -275,6 +275,7 @@ export interface OportunidadeBruta {
   valor_estimado: number | null
   criado_em: string
   criado_por: string
+  pedido_id?: string | null
 }
 
 export interface TarefaBruta {
@@ -493,8 +494,14 @@ export function agregarClientesInteligencia(params: {
     acc.clienteId = c.id
   }
 
+  // Oportunidade que virou orçamento (pedido_id) deve cair no MESMO cliente do
+  // pedido; sem isso o cliente se dividia em dois (um "Nunca comprou" só com a
+  // oportunidade e outro com o orçamento).
+  const chavePorPedido = new Map<string, string>()
+
   for (const pedido of pedidos) {
     const chave = chaveDoRegistro(pedido.cliente_omie_id, pedido.cliente_cnpj, pedido.cliente_nome)
+    chavePorPedido.set(pedido.id, chave)
     const acc = acumuladorDe(chave, pedido.cliente_nome, pedido.criado_em)
 
     if (pedido.criado_em >= acc.nomeAtualizadoEm) {
@@ -532,7 +539,9 @@ export function agregarClientesInteligencia(params: {
   }
 
   for (const oportunidade of oportunidades) {
-    const chave = chaveDoRegistro(null, oportunidade.cliente_cnpj, oportunidade.cliente_nome)
+    const chave =
+      (oportunidade.pedido_id ? chavePorPedido.get(oportunidade.pedido_id) : undefined) ??
+      chaveDoRegistro(null, oportunidade.cliente_cnpj, oportunidade.cliente_nome)
     const acc = acumuladorDe(chave, oportunidade.cliente_nome, oportunidade.criado_em)
 
     if (oportunidade.criado_em >= acc.nomeAtualizadoEm) {
