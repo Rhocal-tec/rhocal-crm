@@ -534,7 +534,11 @@ export function agregarClientesInteligencia(params: {
       criado_em: pedido.criado_em,
       criado_por: pedido.criado_por,
       total,
-      dataEfetuacao: dataEfetuacaoPorPedido.get(pedido.id) ?? null,
+      dataEfetuacao:
+        dataEfetuacaoPorPedido.get(pedido.id) ??
+        // Rede de segurança: pedido já efetuado/entregue sem registro de auditoria
+        // nunca pode ser tratado como orçamento parado.
+        (pedido.status === 'PEDIDO_EFETUADO' || pedido.status === 'ENTREGUE' ? pedido.criado_em : null),
     })
   }
 

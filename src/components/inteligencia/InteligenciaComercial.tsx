@@ -59,6 +59,28 @@ function aplicaFiltroFaixaScore(score: number, faixa: FiltrosState['faixaScore']
   return score <= 39
 }
 
+// PostgREST devolve no máximo 1000 linhas por consulta; sem paginar, base grande
+// perdia pedidos/auditoria e o resultado mudava conforme o usuário.
+async function todas<T>(
+  fazer: (de: number, ate: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: null }> {
+  const acc: T[] = []
+  for (let de = 0; ; ) {
+    const { data, error } = await fazer(de, de + 999)
+    if (error) throw new Error(error.message)
+    if (!data || data.length === 0) break
+    acc.push(...data)
+    de += data.length
+  }
+  return { data: acc, error: null }
+}
+
+function emLotes<T>(lista: T[], tamanho: number): T[][] {
+  const lotes: T[][] = []
+  for (let i = 0; i < lista.length; i += tamanho) lotes.push(lista.slice(i, i + tamanho))
+  return lotes
+}
+
 export function InteligenciaComercial() {
   const { empresaAtiva } = useEmpresa()
   const [supabase] = useState(() => createClient())
@@ -113,14 +135,17 @@ export function InteligenciaComercial() {
 
     async function carregar() {
       try {
-        const { data: pedidosData, error: erroPedidos } = await supabase
-          .from('pedidos')
-          .select(
-            'id, numero, cliente_nome, cliente_cnpj, cliente_omie_id, cliente_telefone, cliente_contato, status, criado_em, criado_por, valor_frete',
-          )
-          .eq('empresa_id', empresaAtiva!.id)
-        if (erroPedidos) throw erroPedidos
-        const pedidos = (pedidosData ?? []) as PedidoBruto[]
+        const { data: pedidosData } = await todas<Record<string, unknown>>((de, ate) =>
+          supabase
+            .from('pedidos')
+            .select(
+              'id, numero, cliente_nome, cliente_cnpj, cliente_omie_id, cliente_telefone, cliente_contato, status, criado_em, criado_por, valor_frete',
+            )
+            .eq('empresa_id', empresaAtiva!.id)
+            .order('id')
+            .range(de, ate),
+        )
+        const pedidos = pedidosData as unknown as PedidoBruto[]
         const idsPedidos = pedidos.map((p) => p.id)
 
         // Só a query de oportunidades respeita o filtro de período — pedidos
@@ -138,29 +163,40 @@ export function InteligenciaComercial() {
         }
 
         const [itensResp, auditoriaResp, oportunidadesResp, clientesResp, profilesResp] = await Promise.all([
-          idsPedidos.length > 0
-            ? supabase
-                .from('pedido_itens')
-                .select('pedido_id, descricao, preco_venda, quantidade')
-                .in('pedido_id', idsPedidos)
-                .eq('excluido', false)
-            : Promise.resolve({ data: [], error: null }),
-          idsPedidos.length > 0
-            ? supabase
-                .from('audit_log')
-                .select('registro_id, data_hora, dados_depois')
-                .eq('tabela', 'pedidos')
-                .in('registro_id', idsPedidos)
-                .order('data_hora', { ascending: true })
-            : Promise.resolve({ data: [], error: null }),
-          queryOportunidades,
+          (async () => {
+            const lista: Record<string, unknown>[] = []
+            for (const lote of emLotes(idsPedidos, 150)) {
+              const r = await todas<Record<string, unknown>>((de, ate) =>
+                supabase
+                  .from('pedido_itens')
+                  .select('id, pedido_id, descricao, preco_venda, quantidade')
+                  .in('pedido_id', lote)
+                  .eq('excluido', false)
+                  .order('id')
+                  .range(de, ate),
+              )
+              lista.push(...r.data)
+            }
+            return { data: lista, error: null }
+          })(),
+          // audit_log só é legível por compras/gestor (RLS): o comercial recebia
+          // vazio e todo pedido efetuado parecia "orçamento parado". A função RPC
+          // (security definer) entrega a data de efetuação igual para todos.
+          todas<{ pedido_id: string; efetuado_em: string }>((de, ate) =>
+            supabase.rpc('fn_pedidos_efetuados', { p_empresa_id: empresaAtiva!.id }).range(de, ate),
+          ),
+          todas<Record<string, unknown>>((de, ate) => queryOportunidades.order('id').range(de, ate)),
           // `clientes` não é escopada por empresa (cadastro compartilhado
           // RHOCAL/MATSEG no Omie — fase 30/34): traz todo mundo, o
           // cruzamento com pedidos/oportunidades da empresa ativa é quem
           // decide quais aparecem de fato na tela.
-          supabase
-            .from('clientes')
-            .select('id, razao_social, nome_fantasia, cnpj, email, telefone, contato, cidade, estado, cep, observacoes, omie_cliente_id'),
+          todas<Record<string, unknown>>((de, ate) =>
+            supabase
+              .from('clientes')
+              .select('id, razao_social, nome_fantasia, cnpj, email, telefone, contato, cidade, estado, cep, observacoes, omie_cliente_id')
+              .order('id')
+              .range(de, ate),
+          ),
           supabase.from('profiles').select('id, nome'),
         ])
 
@@ -170,21 +206,29 @@ export function InteligenciaComercial() {
         if (clientesResp.error) throw clientesResp.error
         if (profilesResp.error) throw profilesResp.error
 
-        const oportunidades = (oportunidadesResp.data ?? []) as OportunidadeBruta[]
+        const oportunidades = (oportunidadesResp.data ?? []) as unknown as OportunidadeBruta[]
         const idsOportunidades = oportunidades.map((o) => o.id)
 
         const [tarefasResp, interacoesResp] =
           idsPedidos.length > 0 || idsOportunidades.length > 0
             ? await Promise.all([
-                supabase
-                  .from('tarefas')
-                  .select('id, oportunidade_id, pedido_id, descricao, data_prevista, situacao, responsavel')
-                  .eq('excluida', false)
-                  .neq('situacao', 'Realizada')
-                  .neq('situacao', 'Cancelada'),
-                supabase
-                  .from('interacoes')
-                  .select('id, oportunidade_id, pedido_id, tipo, resultado, criado_em'),
+                todas<Record<string, unknown>>((de, ate) =>
+                  supabase
+                    .from('tarefas')
+                    .select('id, oportunidade_id, pedido_id, descricao, data_prevista, situacao, responsavel')
+                    .eq('excluida', false)
+                    .neq('situacao', 'Realizada')
+                    .neq('situacao', 'Cancelada')
+                    .order('id')
+                    .range(de, ate),
+                ),
+                todas<Record<string, unknown>>((de, ate) =>
+                  supabase
+                    .from('interacoes')
+                    .select('id, oportunidade_id, pedido_id, tipo, resultado, criado_em')
+                    .order('id')
+                    .range(de, ate),
+                ),
               ])
             : [
                 { data: [], error: null },
@@ -193,10 +237,10 @@ export function InteligenciaComercial() {
         if (tarefasResp.error) throw tarefasResp.error
         if (interacoesResp.error) throw interacoesResp.error
 
-        const auditoriaPedidos: AuditoriaPedidoBruta[] = (auditoriaResp.data ?? []).map((log) => ({
-          registro_id: log.registro_id,
-          data_hora: log.data_hora,
-          status_depois: (log.dados_depois as Record<string, unknown> | null)?.status as string | null,
+        const auditoriaPedidos: AuditoriaPedidoBruta[] = (auditoriaResp.data ?? []).map((r) => ({
+          registro_id: r.pedido_id,
+          data_hora: r.efetuado_em,
+          status_depois: 'PEDIDO_EFETUADO',
         }))
 
         const nomesPorProfileId = Object.fromEntries(
@@ -205,12 +249,12 @@ export function InteligenciaComercial() {
 
         const agregados = agregarClientesInteligencia({
           pedidos,
-          itens: (itensResp.data ?? []) as ItemBruto[],
+          itens: (itensResp.data ?? []) as unknown as ItemBruto[],
           auditoriaPedidos,
           oportunidades,
-          tarefas: (tarefasResp.data ?? []) as TarefaBruta[],
-          interacoes: (interacoesResp.data ?? []) as InteracaoBruta[],
-          clientesCadastro: (clientesResp.data ?? []) as ClienteCadastroBruto[],
+          tarefas: (tarefasResp.data ?? []) as unknown as TarefaBruta[],
+          interacoes: (interacoesResp.data ?? []) as unknown as InteracaoBruta[],
+          clientesCadastro: (clientesResp.data ?? []) as unknown as ClienteCadastroBruto[],
           nomesPorProfileId,
         })
 
