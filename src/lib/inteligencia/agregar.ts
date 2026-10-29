@@ -108,8 +108,13 @@ export function faixaDoScorePropensao(score: number): TemperaturaAutomatica {
 // de por item/categoria. Exige pelo menos 2 pedidos efetuados; sem isso não
 // há base pra média e o cliente não entra no cálculo de risco.
 export const MULTIPLICADOR_ALERTA_CHURN = 1.5
+// Piso: nunca alerta churn antes disso, mesmo que o intervalo médio seja minúsculo
+// (ex.: vários pedidos no mesmo dia/semana deixavam a média ~0 e todo cliente virava risco).
+export const DIAS_MINIMOS_ALERTA_CHURN = 30
 
-function calcularIntervaloMedioDiasCompra(datasEfetuacaoAsc: string[]): number | null {
+function calcularIntervaloMedioDiasCompra(datasEfetuacaoAscBruto: string[]): number | null {
+  // Vários pedidos no mesmo dia contam como uma compra só.
+  const datasEfetuacaoAsc = Array.from(new Set(datasEfetuacaoAscBruto.map((d) => d.slice(0, 10)))).sort()
   if (datasEfetuacaoAsc.length < 2) return null
   const intervalos: number[] = []
   for (let i = 1; i < datasEfetuacaoAsc.length; i++) {
@@ -649,7 +654,8 @@ export function agregarClientesInteligencia(params: {
     const emRiscoChurn =
       intervaloMedioDiasCompra !== null &&
       diasDesdeUltimaCompra !== null &&
-      diasDesdeUltimaCompra > MULTIPLICADOR_ALERTA_CHURN * intervaloMedioDiasCompra
+      diasDesdeUltimaCompra >
+        Math.max(DIAS_MINIMOS_ALERTA_CHURN, MULTIPLICADOR_ALERTA_CHURN * intervaloMedioDiasCompra)
 
     // Vínculo sugerido pro botão "Criar tarefa" do alerta de churn:
     // oportunidade aberta mais recente, senão o pedido mais recente.
