@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
 import { RecompraCard } from './RecompraCard'
+import { RecompraEmpresaCard } from './RecompraEmpresaCard'
 import type { Database, SetorTipo } from '@/types/database'
 
 type RecompraPrevisao = Database['public']['Views']['v_recompra_priorizada']['Row']
@@ -23,22 +24,35 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
   const [loading, setLoading] = useState(true)
   const [apenasMeus, setApenasMeus] = useState(setor !== 'gestor')
   const [busca, setBusca] = useState('')
+  const [visao, setVisao] = useState<'empresa' | 'item'>('empresa')
 
   useEffect(() => {
     if (!empresaAtiva) return
     let ativo = true
     setLoading(true)
 
-    supabase
-      .from('v_recompra_priorizada')
-      .select('*')
-      .eq('empresa_id', empresaAtiva.id)
-      .then(({ data, error }) => {
-        if (!ativo) return
-        if (error) console.error('Erro ao carregar previsões de recompra:', error.message)
-        setPrevisoes(data ?? [])
-        setLoading(false)
-      })
+    // Pagina: PostgREST limita 1000 linhas por consulta.
+    ;(async () => {
+      const todas: RecompraPrevisao[] = []
+      for (let de = 0; ; ) {
+        const { data, error } = await supabase
+          .from('v_recompra_priorizada')
+          .select('*')
+          .eq('empresa_id', empresaAtiva.id)
+          .order('id')
+          .range(de, de + 999)
+        if (error) {
+          console.error('Erro ao carregar previsões de recompra:', error.message)
+          break
+        }
+        if (!data || data.length === 0) break
+        todas.push(...data)
+        de += data.length
+      }
+      if (!ativo) return
+      setPrevisoes(todas)
+      setLoading(false)
+    })()
 
     return () => {
       ativo = false
@@ -174,6 +188,22 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
     })
   }, [previsoes, apenasMeus, busca, profile?.vendedor_omie_id])
 
+  // Agrupa por cliente; empresas com mais itens atrasados / previsão mais antiga primeiro.
+  const grupos = useMemo(() => {
+    const mapa = new Map<string, RecompraPrevisao[]>()
+    for (const p of previsoesVisiveis) {
+      const chave = p.cliente_omie_codigo || p.cliente_nome
+      const lista = mapa.get(chave) ?? []
+      lista.push(p)
+      mapa.set(chave, lista)
+    }
+    const atrasadosDe = (l: RecompraPrevisao[]) =>
+      l.filter((i) => (i.status === 'pendente' || i.status === 'contatado') && i.data_prevista_recompra.slice(0, 10) < new Date().toISOString().slice(0, 10)).length
+    return Array.from(mapa.values())
+      .map((l) => [...l].sort((a, b) => a.data_prevista_recompra.localeCompare(b.data_prevista_recompra)))
+      .sort((a, b) => atrasadosDe(b) - atrasadosDe(a) || a[0].data_prevista_recompra.localeCompare(b[0].data_prevista_recompra))
+  }, [previsoesVisiveis])
+
   useEffect(() => {
     document.title = `Hora de Recomprar (${previsoesVisiveis.length}) · RHOCAL CRM`
     return () => {
@@ -199,7 +229,7 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
         <div>
           <h1 className="font-heading text-xl font-semibold text-primary">Hora de Recomprar</h1>
           <p className="text-xs text-muted">
-            {previsoesVisiveis.length} item(ns) aguardando ação
+            {visao === 'empresa' ? `${grupos.length} empresa(s) · ` : ''}{previsoesVisiveis.length} item(ns) aguardando ação
           </p>
         </div>
 
@@ -210,6 +240,17 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
             placeholder="Buscar por cliente…"
             className="input-field rounded-md px-3 py-1.5 text-sm"
           />
+          <div className="flex overflow-hidden rounded-full border border-white/10 text-xs">
+            {(['empresa', 'item'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setVisao(v)}
+                className={`px-3 py-1.5 font-medium ${visao === v ? 'bg-accent-primary text-white' : 'text-muted hover:text-primary'}`}
+              >
+                {v === 'empresa' ? 'Por empresa' : 'Por item'}
+              </button>
+            ))}
+          </div>
           <button
             onClick={() => setApenasMeus((atual) => !atual)}
             aria-pressed={apenasMeus}
@@ -231,6 +272,27 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
             : 'Nenhum item bate com os filtros atuais.'}
         </div>
       ) : (
+        visao === 'empresa' ? (
+          <div className="grid grid-cols-1 gap-3 p-6 lg:grid-cols-2 xl:grid-cols-3">
+            {grupos.map((itens) => {
+              const ref = itens[0]
+              return (
+                <RecompraEmpresaCard
+                  key={ref.cliente_omie_codigo || ref.cliente_nome}
+                  itens={itens}
+                  telefone={
+                    telefonePorOmie[ref.cliente_omie_codigo] ??
+                    (ref.cliente_cnpj ? telefonePorCnpj[ref.cliente_cnpj.replace(/\D/g, '')] : undefined) ??
+                    null
+                  }
+                  onAtualizadas={(atualizadas) =>
+                    setPrevisoes((atual) => atual.map((p) => atualizadas.find((a) => a.id === p.id) ?? p))
+                  }
+                />
+              )
+            })}
+          </div>
+        ) : (
         <div className="grid grid-cols-1 gap-3 p-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {previsoesVisiveis.map((previsao) => (
             <RecompraCard
@@ -248,6 +310,7 @@ export function HoraDeRecomprarTab({ setor }: { setor: SetorTipo }) {
             />
           ))}
         </div>
+        )
       )}
     </div>
   )
