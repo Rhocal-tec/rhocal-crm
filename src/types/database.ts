@@ -992,6 +992,64 @@ export interface Database {
         }
         Relationships: []
       }
+      banco_precos: {
+        Row: {
+          id: string
+          ca: string | null
+          item_descricao: string
+          fornecedor: string
+          marca: string | null
+          unidade: string | null
+          preco: number
+          quantidade_minima: number | null
+          frete: number | null
+          condicao_pagamento: string | null
+          prazo_entrega_dias: number | null
+          data_preco: string
+          validade: string | null
+          observacao: string | null
+          origem: string
+          cotacao_id: string | null
+          criado_por: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          ca?: string | null
+          item_descricao: string
+          fornecedor: string
+          marca?: string | null
+          unidade?: string | null
+          preco: number
+          quantidade_minima?: number | null
+          frete?: number | null
+          condicao_pagamento?: string | null
+          prazo_entrega_dias?: number | null
+          data_preco?: string
+          validade?: string | null
+          observacao?: string | null
+          origem?: string
+          cotacao_id?: string | null
+          criado_por?: string | null
+          criado_em?: string
+        }
+        Update: {
+          ca?: string | null
+          item_descricao?: string
+          fornecedor?: string
+          marca?: string | null
+          unidade?: string | null
+          preco?: number
+          quantidade_minima?: number | null
+          frete?: number | null
+          condicao_pagamento?: string | null
+          prazo_entrega_dias?: number | null
+          data_preco?: string
+          validade?: string | null
+          observacao?: string | null
+        }
+        Relationships: []
+      }
       cs_config: {
         Row: {
           chave: string

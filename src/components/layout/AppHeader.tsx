@@ -9,6 +9,7 @@ import { podeAcessarTarefas } from '@/lib/tarefas/permissions'
 import { podeAcessarRecompra } from '@/lib/recompra/permissions'
 import { podeAcessarProdutividade } from '@/lib/produtividade/permissions'
 import { podeAcessarCS, podeUsarKanban } from '@/lib/cs/permissions'
+import { podeAcessarBancoPrecos } from '@/lib/banco-precos/permissions'
 import type { SetorTipo } from '@/types/database'
 
 const SETOR_LABEL: Record<SetorTipo, string> = {
@@ -37,6 +38,7 @@ const NAV_ITEMS: { href: string; label: string; check?: (setor: SetorTipo) => bo
   { href: '/cs', label: 'CS', check: podeAcessarCS },
   { href: '/tarefas', label: 'Tarefas', check: podeAcessarTarefas },
   { href: '/recompra', label: 'Hora de Recomprar', check: podeAcessarRecompra },
+  { href: '/banco-precos', label: 'Banco de Preços', check: podeAcessarBancoPrecos },
   { href: '/clientes', label: 'Clientes' },
   { href: '/busca', label: 'Busca', check: podeUsarKanban },
   { href: '/arquivados', label: 'Arquivados', check: podeUsarKanban },

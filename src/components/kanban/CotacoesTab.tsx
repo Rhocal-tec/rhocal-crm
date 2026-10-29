@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { MoedaInput } from '@/components/ui/MoedaInput'
 import { formatarDataSomente, formatarMoeda } from '@/lib/kanban/formatacao'
 import { cotacaoVencida } from '@/lib/kanban/cotacao-vencida'
+import { HistoricoPrecosItem } from '@/components/banco-precos/HistoricoPrecosItem'
 import type { Database } from '@/types/database'
 
 type PedidoItem = Database['public']['Tables']['pedido_itens']['Row']
@@ -450,6 +451,17 @@ export function CotacoesTab({
                 </span>
               )}
             </div>
+
+            <HistoricoPrecosItem
+              ca={item.ca}
+              descricao={item.descricao}
+              cotacaoIdsAtuais={(cotacoesPorItem[item.id] ?? []).map((c) => c.id)}
+              menorPrecoAtual={
+                (cotacoesPorItem[item.id] ?? []).length > 0
+                  ? Math.min(...(cotacoesPorItem[item.id] ?? []).map((c) => c.preco))
+                  : null
+              }
+            />
 
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-left text-sm">
