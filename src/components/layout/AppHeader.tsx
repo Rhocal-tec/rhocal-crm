@@ -10,6 +10,7 @@ import { podeAcessarRecompra } from '@/lib/recompra/permissions'
 import { podeAcessarProdutividade } from '@/lib/produtividade/permissions'
 import { podeAcessarCS, podeUsarKanban } from '@/lib/cs/permissions'
 import { podeAcessarBancoPrecos } from '@/lib/banco-precos/permissions'
+import { NewsroomBell } from '@/components/newsroom/NewsroomBell'
 import type { SetorTipo } from '@/types/database'
 
 const SETOR_LABEL: Record<SetorTipo, string> = {
@@ -40,6 +41,7 @@ const NAV_ITEMS: { href: string; label: string; check?: (setor: SetorTipo) => bo
   { href: '/recompra', label: 'Hora de Recomprar', check: podeAcessarRecompra },
   { href: '/banco-precos', label: 'Banco de Preços', check: podeAcessarBancoPrecos },
   { href: '/clientes', label: 'Clientes' },
+  { href: '/newsroom', label: 'Newsroom' },
   { href: '/busca', label: 'Busca', check: podeUsarKanban },
   { href: '/arquivados', label: 'Arquivados', check: podeUsarKanban },
   { href: '/painel', label: 'Painel', check: (setor) => setor === 'gestor' },
@@ -103,6 +105,7 @@ export function AppHeader() {
       </div>
       <div className="flex items-center gap-3">
         <EmpresaSwitcher />
+        <NewsroomBell />
         <span className="text-sm text-primary/70">
           {profile?.nome ?? user?.email}{' '}
           <span className="text-muted">({profile ? SETOR_LABEL[profile.setor] : '—'})</span>

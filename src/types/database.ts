@@ -992,6 +992,126 @@ export interface Database {
         }
         Relationships: []
       }
+      newsroom_comunicados: {
+        Row: {
+          id: string
+          titulo: string
+          corpo: string
+          tipo: string
+          exibicao: string
+          exige_confirmacao: boolean
+          fixado: boolean
+          inicio_em: string
+          fim_em: string | null
+          prazo_ciencia_em: string | null
+          status: string
+          link_video: string | null
+          versao: number
+          criado_por: string | null
+          criado_em: string
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          titulo: string
+          corpo: string
+          tipo: string
+          exibicao: string
+          exige_confirmacao?: boolean
+          fixado?: boolean
+          inicio_em?: string
+          fim_em?: string | null
+          prazo_ciencia_em?: string | null
+          status?: string
+          link_video?: string | null
+          versao?: number
+          criado_por?: string | null
+          criado_em?: string
+          atualizado_em?: string
+        }
+        Update: {
+          titulo?: string
+          corpo?: string
+          tipo?: string
+          exibicao?: string
+          exige_confirmacao?: boolean
+          fixado?: boolean
+          inicio_em?: string
+          fim_em?: string | null
+          prazo_ciencia_em?: string | null
+          status?: string
+          link_video?: string | null
+          versao?: number
+          atualizado_em?: string
+        }
+        Relationships: []
+      }
+      newsroom_destinos: {
+        Row: {
+          id: string
+          comunicado_id: string
+          tipo: string
+          setor: SetorTipo | null
+          usuario_id: string | null
+        }
+        Insert: {
+          id?: string
+          comunicado_id: string
+          tipo: string
+          setor?: SetorTipo | null
+          usuario_id?: string | null
+        }
+        Update: {
+          tipo?: string
+          setor?: SetorTipo | null
+          usuario_id?: string | null
+        }
+        Relationships: []
+      }
+      newsroom_anexos: {
+        Row: {
+          id: string
+          comunicado_id: string
+          nome: string
+          caminho: string
+          mime: string | null
+          tamanho: number | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          comunicado_id: string
+          nome: string
+          caminho: string
+          mime?: string | null
+          tamanho?: number | null
+          criado_em?: string
+        }
+        Update: {
+          nome?: string
+        }
+        Relationships: []
+      }
+      newsroom_leituras: {
+        Row: {
+          id: string
+          comunicado_id: string
+          usuario_id: string
+          versao: number
+          lido_em: string
+        }
+        Insert: {
+          id?: string
+          comunicado_id: string
+          usuario_id: string
+          versao?: number
+          lido_em?: string
+        }
+        Update: {
+          versao?: number
+        }
+        Relationships: []
+      }
       banco_precos: {
         Row: {
           id: string
