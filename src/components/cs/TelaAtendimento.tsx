@@ -18,11 +18,13 @@ import { chaveItemOmie, type ClienteOmieCompleto } from '@/lib/omie/cliente-comp
 import { podeVerReclamacoesCS } from '@/lib/cs/permissions'
 import type { DadosCS } from '@/lib/cs/useDadosCS'
 import { FichaClienteModal } from '@/components/inteligencia/FichaClienteModal'
+import { ClienteFormModal } from '@/components/clientes/ClienteFormModal'
 import { ReclamacaoForm } from './ReclamacaoForm'
 import { RepasseForm } from './RepasseForm'
 import type { Database } from '@/types/database'
 
 type Profile = Database['public']['Tables']['profiles']['Row']
+type ClienteRow = Database['public']['Tables']['clientes']['Row']
 
 interface PesquisaForm {
   nota: number | null
@@ -158,9 +160,33 @@ export function TelaAtendimento({
   const [modalReclamacao, setModalReclamacao] = useState(false)
   const [modalRepasse, setModalRepasse] = useState(false)
   const [fichaAberta, setFichaAberta] = useState(false)
+  const [cadastroAberto, setCadastroAberto] = useState(false)
+  const [cadastroExistente, setCadastroExistente] = useState<ClienteRow | null>(null)
+  const [abrindoCadastro, setAbrindoCadastro] = useState(false)
   const [copiado, setCopiado] = useState(false)
   const [finalizando, setFinalizando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+
+  // Abre o cadastro do cliente para a CS completar telefone, contato, e-mail etc.
+  async function abrirCadastro() {
+    setAbrindoCadastro(true)
+    let achado: ClienteRow | null = null
+    if (cliente.clienteId) {
+      const { data } = await supabase.from('clientes').select('*').eq('id', cliente.clienteId).maybeSingle()
+      achado = data
+    }
+    if (!achado && cliente.omieClienteId) {
+      const { data } = await supabase.from('clientes').select('*').eq('omie_cliente_id', cliente.omieClienteId).limit(1)
+      achado = data?.[0] ?? null
+    }
+    if (!achado && cnpjDigitos) {
+      const { data } = await supabase.from('clientes').select('*').eq('cnpj', cnpjDigitos).limit(1)
+      achado = data?.[0] ?? null
+    }
+    setCadastroExistente(achado)
+    setAbrindoCadastro(false)
+    setCadastroAberto(true)
+  }
 
   // Dados completos do cliente no Omie (telefones, e-mail, contato, endereço…). Também
   // são gravados no cadastro do CRM, só nos campos que estavam vazios.
@@ -452,6 +478,13 @@ export function TelaAtendimento({
               className="mt-2 rounded-md border border-white/15 px-2 py-1 text-xs text-primary/80 hover:bg-white/10"
             >
               Ver ficha completa
+            </button>
+            <button
+              onClick={abrirCadastro}
+              disabled={abrindoCadastro}
+              className="ml-2 mt-2 rounded-md bg-accent-primary px-2 py-1 text-xs font-medium text-white disabled:opacity-60"
+            >
+              {abrindoCadastro ? 'Abrindo…' : '✏️ Adicionar/editar dados'}
             </button>
           </div>
 
@@ -830,6 +863,19 @@ export function TelaAtendimento({
         }}
       />
       <FichaClienteModal cliente={fichaAberta ? cliente : null} onClose={() => setFichaAberta(false)} />
+      <ClienteFormModal
+        open={cadastroAberto}
+        onClose={() => setCadastroAberto(false)}
+        clienteExistente={cadastroExistente}
+        onSaved={() => {
+          setCadastroAberto(false)
+          recarregar()
+        }}
+        cnpjInicial={cliente.cnpj ?? undefined}
+        razaoSocialInicial={cliente.razaoSocial ?? cliente.nome}
+        telefoneInicial={cliente.telefone ?? undefined}
+        contatoInicial={cliente.contato ?? undefined}
+      />
     </div>
   )
 }
