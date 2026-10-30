@@ -106,12 +106,14 @@ export function ComunicadoCorpo({
   nomeUsuario,
   setorUsuario,
   anexosPreviaQtd,
+  destaqueNome,
 }: {
   comunicado: Pick<Comunicado, 'titulo' | 'corpo' | 'tipo' | 'link_video' | 'prazo_ciencia_em' | 'fixado'> & { id?: string }
   anexos: Anexo[]
   nomeUsuario?: string | null
   setorUsuario?: string | null
   anexosPreviaQtd?: number
+  destaqueNome?: string | null
 }) {
   const t = tipoDe(comunicado as Comunicado)
   const video = linkSeguro(comunicado.link_video)
@@ -128,6 +130,11 @@ export function ComunicadoCorpo({
           </span>
         )}
       </div>
+      {destaqueNome && (
+        <p className="mt-3 inline-block rounded-lg border border-accent-alert/40 bg-accent-alert/10 px-3 py-1.5 text-base font-semibold text-accent-alert">
+          🏆 {destaqueNome}
+        </p>
+      )}
       <h2 className="mt-2 font-heading text-xl font-semibold text-primary">
         {aplicarVariaveis(comunicado.titulo, nomeUsuario, setorUsuario)}
       </h2>

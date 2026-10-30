@@ -6,9 +6,15 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useNewsroom } from '@/contexts/NewsroomContext'
 import { ComunicadoForm, type PessoaOpcao } from './ComunicadoForm'
+import { GerenciarMetas } from './GerenciarMetas'
+import { GerenciarCalendario } from './GerenciarCalendario'
+import { GerenciarSugestoes } from './GerenciarSugestoes'
+import { Engajamento } from './Engajamento'
+import { useEmpresa } from '@/contexts/EmpresaContext'
+import { ocorrenciaAtual } from '@/lib/newsroom/ocorrencias'
 import { destinadoA, situacao } from '@/lib/newsroom/regras'
 import { emLotes, paginar } from '@/lib/newsroom/paginar'
-import { tipoDe, type Anexo, type Comunicado, type Destino, type Leitura } from '@/lib/newsroom/tipos'
+import { lerEnquete, lerQuiz, tipoDe, type Anexo, type Comunicado, type Destino, type Leitura, type Resposta } from '@/lib/newsroom/tipos'
 import type { SetorTipo } from '@/types/database'
 
 interface Pessoa extends PessoaOpcao {
@@ -34,6 +40,9 @@ export function GerenciarNewsroom() {
   const [destinos, setDestinos] = useState<Destino[]>([])
   const [anexos, setAnexos] = useState<Anexo[]>([])
   const [leituras, setLeituras] = useState<Leitura[]>([])
+  const [respostas, setRespostas] = useState<Resposta[]>([])
+  const [aba, setAba] = useState<'comunicados' | 'engajamento' | 'metas' | 'calendario' | 'sugestoes'>('comunicados')
+  const [tarefaCom, setTarefaCom] = useState<Comunicado | null>(null)
   const [pessoas, setPessoas] = useState<Pessoa[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
@@ -55,6 +64,7 @@ export function GerenciarNewsroom() {
       const dest: Destino[] = []
       const anx: Anexo[] = []
       const leit: Leitura[] = []
+      const resp: Resposta[] = []
       for (const lote of emLotes(ids, 80)) {
         const [d, a] = await Promise.all([
           supabase.from('newsroom_destinos').select('*').in('comunicado_id', lote),
@@ -67,12 +77,18 @@ export function GerenciarNewsroom() {
             supabase.from('newsroom_leituras').select('*').in('comunicado_id', lote).order('id').range(de, ate),
           )),
         )
+        resp.push(
+          ...(await paginar<Resposta>((de, ate) =>
+            supabase.from('newsroom_respostas').select('*').in('comunicado_id', lote).order('id').range(de, ate),
+          )),
+        )
       }
       const { data: perfis } = await supabase.from('profiles').select('id, nome, setor, ativo').order('nome')
       setComunicados(lista)
       setDestinos(dest)
       setAnexos(anx)
       setLeituras(leit)
+      setRespostas(resp)
       setPessoas((perfis ?? []) as Pessoa[])
     } catch (e) {
       console.error(e)
@@ -93,8 +109,18 @@ export function GerenciarNewsroom() {
     return ativos.filter((p) => destinadoA(d, p.id, p.setor as SetorTipo))
   }
 
+  function leituraAtual(c: Comunicado): Leitura[] {
+    const oc = ocorrenciaAtual(c) ?? ''
+    return leituras.filter((l) => l.comunicado_id === c.id && l.versao === c.versao && l.ocorrencia === oc)
+  }
+
   function leram(c: Comunicado): Set<string> {
-    return new Set(leituras.filter((l) => l.comunicado_id === c.id && l.versao === c.versao).map((l) => l.usuario_id))
+    return new Set(leituraAtual(c).map((l) => l.usuario_id))
+  }
+
+  function compartilharWhatsApp(c: Comunicado) {
+    const texto = `*${c.titulo}*\n\n${c.corpo}`
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank', 'noopener')
   }
 
   function resumoPublico(c: Comunicado): string {
@@ -195,6 +221,34 @@ export function GerenciarNewsroom() {
 
       {erro && <p className="text-sm text-accent-danger">{erro}</p>}
 
+      <div className="flex flex-wrap gap-1 border-b border-white/10">
+        {(
+          [
+            ['comunicados', 'Comunicados'],
+            ['engajamento', 'Engajamento'],
+            ['metas', 'Metas'],
+            ['calendario', 'Calendário'],
+            ['sugestoes', 'Sugestões'],
+          ] as const
+        ).map(([k, r]) => (
+          <button
+            key={k}
+            onClick={() => setAba(k)}
+            className={`px-3 py-2 text-sm ${aba === k ? 'border-b-2 border-accent-primary font-medium text-primary' : 'text-muted hover:text-primary'}`}
+          >
+            {r}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'engajamento' && (
+        <Engajamento comunicados={comunicados} destinos={destinos} leituras={leituras} pessoas={ativos} />
+      )}
+      {aba === 'metas' && <GerenciarMetas />}
+      {aba === 'calendario' && <GerenciarCalendario pessoas={ativos.map((p) => ({ id: p.id, nome: p.nome, setor: p.setor }))} />}
+      {aba === 'sugestoes' && <GerenciarSugestoes pessoas={ativos.map((p) => ({ id: p.id, nome: p.nome, setor: p.setor }))} />}
+
+      {aba === 'comunicados' && (
       <div className="overflow-x-auto rounded-lg border border-white/10">
         <table className="w-full text-left text-sm">
           <thead>
@@ -245,6 +299,8 @@ export function GerenciarNewsroom() {
                       <div className="flex flex-wrap gap-2">
                         <button onClick={() => setEditando(c)} className="text-accent-primary hover:underline">Editar</button>
                         <button onClick={() => duplicar(c)} className="text-muted hover:text-primary">Duplicar</button>
+                        <button onClick={() => compartilharWhatsApp(c)} className="text-muted hover:text-primary">WhatsApp</button>
+                        <button onClick={() => setTarefaCom(c)} className="text-muted hover:text-primary">Criar tarefa</button>
                         {c.status !== 'rascunho' && (
                           <button onClick={() => setRelatorioId(c.id === relatorioId ? null : c.id)} className="text-accent-compras hover:underline">
                             Relatório
@@ -262,13 +318,25 @@ export function GerenciarNewsroom() {
           </tbody>
         </table>
       </div>
+      )}
 
-      {relatorioCom && (
+      {aba === 'comunicados' && relatorioCom && (
         <RelatorioLeitura
           comunicado={relatorioCom}
           destinatarios={destinatarios(relatorioCom)}
-          leituras={leituras.filter((l) => l.comunicado_id === relatorioCom.id && l.versao === relatorioCom.versao)}
+          leituras={leituraAtual(relatorioCom)}
+          respostas={respostas.filter(
+            (r) => r.comunicado_id === relatorioCom.id && r.versao === relatorioCom.versao && r.ocorrencia === (ocorrenciaAtual(relatorioCom) ?? ''),
+          )}
           onFechar={() => setRelatorioId(null)}
+        />
+      )}
+
+      {tarefaCom && (
+        <TarefaDoAviso
+          comunicado={tarefaCom}
+          pessoas={ativos}
+          onFechar={() => setTarefaCom(null)}
         />
       )}
     </div>
@@ -279,13 +347,18 @@ function RelatorioLeitura({
   comunicado,
   destinatarios,
   leituras,
+  respostas,
   onFechar,
 }: {
   comunicado: Comunicado
   destinatarios: Pessoa[]
   leituras: Leitura[]
+  respostas: Resposta[]
   onFechar: () => void
 }) {
+  const enquete = lerEnquete(comunicado)
+  const quiz = lerQuiz(comunicado)
+  const nomeDe = (id: string) => destinatarios.find((p) => p.id === id)?.nome ?? 'Usuário'
   const porUsuario = new Map(leituras.map((l) => [l.usuario_id, l]))
   const leram = destinatarios.filter((p) => porUsuario.has(p.id))
   const pendentes = destinatarios.filter((p) => !porUsuario.has(p.id))
@@ -305,6 +378,49 @@ function RelatorioLeitura({
         </div>
         <button onClick={onFechar} className="text-sm text-muted hover:text-primary">Fechar</button>
       </div>
+
+      {enquete && (
+        <div className="mt-3 rounded-md border border-white/10 p-3">
+          <p className="mb-2 text-xs font-semibold uppercase text-muted">Enquete: {enquete.pergunta} ({respostas.length} votos)</p>
+          {enquete.opcoes.map((o, i) => {
+            const votos = respostas.filter((r) => {
+              const d = r.dados as { opcoes?: number[] } | null
+              return d?.opcoes?.includes(i)
+            })
+            const pct = respostas.length ? Math.round((votos.length / respostas.length) * 100) : 0
+            return (
+              <div key={i} className="mb-2">
+                <div className="flex justify-between text-sm text-primary">
+                  <span>{o}</span>
+                  <span className="text-xs text-muted">{votos.length} ({pct}%)</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                  <div className="h-full bg-accent-primary" style={{ width: `${pct}%` }} />
+                </div>
+                {votos.length > 0 && <p className="text-xs text-muted">{votos.map((v) => nomeDe(v.usuario_id)).join(', ')}</p>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {quiz && (
+        <div className="mt-3 rounded-md border border-white/10 p-3">
+          <p className="mb-2 text-xs font-semibold uppercase text-muted">Treinamento: resultado ({respostas.length} responderam)</p>
+          {respostas.length === 0 ? (
+            <p className="text-xs text-muted">Ninguém respondeu ainda.</p>
+          ) : (
+            <ul className="space-y-1 text-sm text-primary">
+              {respostas.map((r) => (
+                <li key={r.id}>
+                  {nomeDe(r.usuario_id)}: <strong>{r.acertos ?? 0}/{r.total ?? quiz.length}</strong>
+                  {(r.acertos ?? 0) === (r.total ?? quiz.length) ? ' ✅' : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
@@ -337,6 +453,86 @@ function RelatorioLeitura({
               </li>
             ))}
           </ul>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TarefaDoAviso({
+  comunicado,
+  pessoas,
+  onFechar,
+}: {
+  comunicado: Comunicado
+  pessoas: Pessoa[]
+  onFechar: () => void
+}) {
+  const { user } = useAuth()
+  const { empresaAtiva } = useEmpresa()
+  const [supabase] = useState(() => createClient())
+  const [responsavel, setResponsavel] = useState('')
+  const [descricao, setDescricao] = useState(`Comunicado: ${comunicado.titulo}`)
+  const [data, setData] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  async function salvar() {
+    if (!user || !empresaAtiva || !responsavel || !descricao.trim()) {
+      setMsg('Escolha a pessoa e descreva a tarefa.')
+      return
+    }
+    setSalvando(true)
+    const { error } = await supabase.from('tarefas').insert({
+      oportunidade_id: null,
+      pedido_id: null,
+      empresa_id: empresaAtiva.id,
+      descricao: descricao.trim(),
+      responsavel,
+      data_prevista: data || null,
+      tipo: null,
+      notificar_em: 'nao_notificar',
+      importante: false,
+      urgente: false,
+      criado_por: user.id,
+    })
+    setSalvando(false)
+    if (error) {
+      setMsg(`Não foi possível criar: ${error.message}`)
+      return
+    }
+    setMsg('Tarefa criada! ✅')
+    setTimeout(onFechar, 900)
+  }
+
+  const input = 'input-field w-full rounded-md px-2 py-1.5 text-sm text-primary'
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md space-y-3 rounded-lg border border-white/10 bg-surface p-5">
+        <h2 className="font-heading text-lg font-semibold text-primary">Transformar em tarefa</h2>
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Responsável
+          <select value={responsavel} onChange={(e) => setResponsavel(e.target.value)} className={input}>
+            <option value="">Selecione…</option>
+            {pessoas.map((p) => (
+              <option key={p.id} value={p.id}>{p.nome}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Descrição
+          <textarea value={descricao} onChange={(e) => setDescricao(e.target.value)} rows={3} className={input} />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Data prevista
+          <input type="date" value={data} onChange={(e) => setData(e.target.value)} className={input} />
+        </label>
+        {msg && <p className="text-sm text-primary">{msg}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onFechar} className="rounded-md border border-white/15 px-3 py-1.5 text-sm text-primary">Cancelar</button>
+          <button onClick={salvar} disabled={salvando} className="rounded-md bg-accent-success px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60">
+            {salvando ? 'Criando…' : 'Criar tarefa'}
+          </button>
         </div>
       </div>
     </div>

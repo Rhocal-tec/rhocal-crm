@@ -1,3 +1,5 @@
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
+
 // Tipos do banco RHOCAL CRM — espelham o schema definido no CLAUDE.md.
 // Regenerar com `supabase gen types typescript` quando o schema mudar.
 
@@ -1010,6 +1012,15 @@ export interface Database {
           criado_por: string | null
           criado_em: string
           atualizado_em: string
+          recorrencia: string | null
+          recorrencia_dia: number | null
+          recorrencia_hora: string | null
+          enquete: Json | null
+          quiz: Json | null
+          destaque_usuario_id: string | null
+          contexto_rota: string | null
+          na_base: boolean
+          categoria: string | null
         }
         Insert: {
           id?: string
@@ -1028,6 +1039,15 @@ export interface Database {
           criado_por?: string | null
           criado_em?: string
           atualizado_em?: string
+          recorrencia?: string | null
+          recorrencia_dia?: number | null
+          recorrencia_hora?: string | null
+          enquete?: Json | null
+          quiz?: Json | null
+          destaque_usuario_id?: string | null
+          contexto_rota?: string | null
+          na_base?: boolean
+          categoria?: string | null
         }
         Update: {
           titulo?: string
@@ -1043,6 +1063,15 @@ export interface Database {
           link_video?: string | null
           versao?: number
           atualizado_em?: string
+          recorrencia?: string | null
+          recorrencia_dia?: number | null
+          recorrencia_hora?: string | null
+          enquete?: Json | null
+          quiz?: Json | null
+          destaque_usuario_id?: string | null
+          contexto_rota?: string | null
+          na_base?: boolean
+          categoria?: string | null
         }
         Relationships: []
       }
@@ -1099,6 +1128,7 @@ export interface Database {
           usuario_id: string
           versao: number
           lido_em: string
+          ocorrencia: string
         }
         Insert: {
           id?: string
@@ -1106,9 +1136,180 @@ export interface Database {
           usuario_id: string
           versao?: number
           lido_em?: string
+          ocorrencia?: string
         }
         Update: {
           versao?: number
+        }
+        Relationships: []
+      }
+      newsroom_respostas: {
+        Row: {
+          id: string
+          comunicado_id: string
+          usuario_id: string
+          versao: number
+          ocorrencia: string
+          dados: Json
+          acertos: number | null
+          total: number | null
+          respondido_em: string
+        }
+        Insert: {
+          id?: string
+          comunicado_id: string
+          usuario_id: string
+          versao?: number
+          ocorrencia?: string
+          dados: Json
+          acertos?: number | null
+          total?: number | null
+          respondido_em?: string
+        }
+        Update: {
+          dados?: Json
+        }
+        Relationships: []
+      }
+      newsroom_reacoes: {
+        Row: {
+          id: string
+          comunicado_id: string
+          usuario_id: string
+          emoji: string
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          comunicado_id: string
+          usuario_id: string
+          emoji: string
+          criado_em?: string
+        }
+        Update: {
+          emoji?: string
+        }
+        Relationships: []
+      }
+      newsroom_comentarios: {
+        Row: {
+          id: string
+          comunicado_id: string
+          usuario_id: string
+          texto: string
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          comunicado_id: string
+          usuario_id: string
+          texto: string
+          criado_em?: string
+        }
+        Update: {
+          texto?: string
+        }
+        Relationships: []
+      }
+      newsroom_metas: {
+        Row: {
+          id: string
+          titulo: string
+          indicador: string
+          meta_valor: number
+          inicio: string
+          fim: string
+          setor: SetorTipo | null
+          ativa: boolean
+          criado_por: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          titulo: string
+          indicador: string
+          meta_valor: number
+          inicio: string
+          fim: string
+          setor?: SetorTipo | null
+          ativa?: boolean
+          criado_por?: string | null
+          criado_em?: string
+        }
+        Update: {
+          titulo?: string
+          indicador?: string
+          meta_valor?: number
+          inicio?: string
+          fim?: string
+          setor?: SetorTipo | null
+          ativa?: boolean
+        }
+        Relationships: []
+      }
+      newsroom_datas: {
+        Row: {
+          id: string
+          tipo: string
+          titulo: string
+          data: string
+          data_fim: string | null
+          hora: string | null
+          usuario_id: string | null
+          anual: boolean
+          criado_por: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          tipo: string
+          titulo: string
+          data: string
+          data_fim?: string | null
+          hora?: string | null
+          usuario_id?: string | null
+          anual?: boolean
+          criado_por?: string | null
+          criado_em?: string
+        }
+        Update: {
+          tipo?: string
+          titulo?: string
+          data?: string
+          data_fim?: string | null
+          hora?: string | null
+          usuario_id?: string | null
+          anual?: boolean
+        }
+        Relationships: []
+      }
+      newsroom_sugestoes: {
+        Row: {
+          id: string
+          usuario_id: string | null
+          anonima: boolean
+          categoria: string | null
+          texto: string
+          status: string
+          resposta: string | null
+          respondido_em: string | null
+          criado_em: string
+        }
+        Insert: {
+          id?: string
+          usuario_id?: string | null
+          anonima?: boolean
+          categoria?: string | null
+          texto: string
+          status?: string
+          resposta?: string | null
+          respondido_em?: string | null
+          criado_em?: string
+        }
+        Update: {
+          status?: string
+          resposta?: string | null
+          respondido_em?: string | null
         }
         Relationships: []
       }

@@ -6,17 +6,22 @@ import { useAuth } from '@/contexts/AuthContext'
 import { ComunicadoCorpo } from './ComunicadoCorpo'
 import { MODELOS } from '@/lib/newsroom/modelos'
 import { linkSeguro } from '@/lib/newsroom/regras'
+import { DIAS_SEMANA } from '@/lib/newsroom/ocorrencias'
 import {
+  CONTEXTOS,
   EXIBICOES,
   SETORES,
   TIPOS,
+  lerEnquete,
+  lerQuiz,
+  type PerguntaQuiz,
   type Anexo,
   type Comunicado,
   type Destino,
   type Exibicao,
   type TipoComunicado,
 } from '@/lib/newsroom/tipos'
-import type { SetorTipo } from '@/types/database'
+import type { Json, SetorTipo } from '@/types/database'
 
 export interface PessoaOpcao {
   id: string
@@ -67,6 +72,22 @@ export function ComunicadoForm({
   const [prazo, setPrazo] = useState(paraInputLocal(inicial?.prazo_ciencia_em ?? null))
   const [video, setVideo] = useState(inicial?.link_video ?? '')
   const [arquivos, setArquivos] = useState<File[]>([])
+  const [destaque, setDestaque] = useState(inicial?.destaque_usuario_id ?? '')
+  const [recorrencia, setRecorrencia] = useState(inicial?.recorrencia ?? '')
+  const [recDia, setRecDia] = useState(String(inicial?.recorrencia_dia ?? 1))
+  const [recHora, setRecHora] = useState(inicial?.recorrencia_hora ?? '08:00')
+  const [contexto, setContexto] = useState(inicial?.contexto_rota ?? '')
+  const [naBase, setNaBase] = useState(inicial?.na_base ?? false)
+  const [categoria, setCategoria] = useState(inicial?.categoria ?? '')
+  const enqueteIni = inicial ? lerEnquete(inicial) : null
+  const quizIni = inicial ? lerQuiz(inicial) : null
+  const [temEnquete, setTemEnquete] = useState(!!enqueteIni)
+  const [enqPergunta, setEnqPergunta] = useState(enqueteIni?.pergunta ?? '')
+  const [enqOpcoes, setEnqOpcoes] = useState((enqueteIni?.opcoes ?? ['', '']).join('\n'))
+  const [enqMultipla, setEnqMultipla] = useState(enqueteIni?.multipla ?? false)
+  const [quiz, setQuiz] = useState<{ pergunta: string; opcoes: string; correta: number }[]>(
+    (quizIni ?? []).map((q) => ({ pergunta: q.pergunta, opcoes: q.opcoes.join('\n'), correta: q.correta })),
+  )
 
   const todos = destinosIniciais.some((d) => d.tipo === 'todos') || destinosIniciais.length === 0
   const [publico, setPublico] = useState<'todos' | 'setores' | 'pessoas'>(
@@ -158,6 +179,35 @@ export function ComunicadoForm({
       setErro('Selecione ao menos uma pessoa.')
       return
     }
+    if (tipo === 'reconhecimento' && !destaque) {
+      setErro('Escolha a pessoa em destaque.')
+      return
+    }
+    let enqueteJson: { pergunta: string; opcoes: string[]; multipla: boolean } | null = null
+    if (temEnquete) {
+      const opcoes = enqOpcoes.split('\n').map((o) => o.trim()).filter(Boolean)
+      if (!enqPergunta.trim() || opcoes.length < 2) {
+        setErro('A enquete precisa de pergunta e ao menos 2 opções (uma por linha).')
+        return
+      }
+      enqueteJson = { pergunta: enqPergunta.trim(), opcoes, multipla: enqMultipla }
+    }
+    let quizJson: PerguntaQuiz[] | null = null
+    if (quiz.length > 0) {
+      quizJson = quiz.map((q) => ({
+        pergunta: q.pergunta.trim(),
+        opcoes: q.opcoes.split('\n').map((o) => o.trim()).filter(Boolean),
+        correta: q.correta,
+      }))
+      if (quizJson.some((q) => !q.pergunta || q.opcoes.length < 2 || q.correta >= q.opcoes.length || q.correta < 0)) {
+        setErro('Cada pergunta precisa de texto, ao menos 2 opções e uma resposta correta válida.')
+        return
+      }
+    }
+    if (enqueteJson && quizJson) {
+      setErro('Use enquete OU perguntas de treinamento no mesmo aviso, não os dois.')
+      return
+    }
     const inicioIso = deInputLocal(inicio) ?? new Date().toISOString()
     const fimIso = deInputLocal(fim)
     if (fimIso && new Date(fimIso) <= new Date(inicioIso)) {
@@ -177,6 +227,15 @@ export function ComunicadoForm({
       fim_em: fimIso,
       prazo_ciencia_em: deInputLocal(prazo),
       link_video: video.trim() || null,
+      destaque_usuario_id: tipo === 'reconhecimento' ? destaque : null,
+      recorrencia: recorrencia || null,
+      recorrencia_dia: recorrencia === 'semanal' || recorrencia === 'mensal' ? Number(recDia) : null,
+      recorrencia_hora: recorrencia ? recHora : null,
+      contexto_rota: contexto || null,
+      na_base: naBase,
+      categoria: naBase ? categoria.trim() || 'Geral' : null,
+      enquete: enqueteJson as unknown as Json,
+      quiz: quizJson as unknown as Json,
       atualizado_em: new Date().toISOString(),
     }
 
@@ -299,6 +358,81 @@ export function ComunicadoForm({
         </label>
       </div>
 
+      {tipo === 'reconhecimento' && (
+        <label className={rotulo}>
+          🏆 Pessoa em destaque *
+          <select value={destaque} onChange={(e) => setDestaque(e.target.value)} className={input}>
+            <option value="">Selecione…</option>
+            {pessoas.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nome}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      <div className="space-y-3 rounded-md border border-white/10 p-3">
+        <label className="flex items-center gap-2 text-sm text-primary">
+          <input type="checkbox" checked={temEnquete} onChange={(e) => { setTemEnquete(e.target.checked); if (e.target.checked) setQuiz([]) }} />
+          📊 Incluir enquete (a equipe vota; você vê o resultado no relatório)
+        </label>
+        {temEnquete && (
+          <div className="grid gap-2">
+            <input value={enqPergunta} onChange={(e) => setEnqPergunta(e.target.value)} placeholder="Pergunta da enquete" className={input} />
+            <textarea value={enqOpcoes} onChange={(e) => setEnqOpcoes(e.target.value)} rows={4} placeholder="Uma opção por linha" className={input} />
+            <label className="flex items-center gap-2 text-xs text-muted">
+              <input type="checkbox" checked={enqMultipla} onChange={(e) => setEnqMultipla(e.target.checked)} />
+              Permitir mais de uma opção
+            </label>
+          </div>
+        )}
+
+        <div>
+          <p className="text-sm text-primary">🎓 Perguntas de treinamento (a pessoa só segue depois de responder)</p>
+          {quiz.map((q, i) => (
+            <div key={i} className="mt-2 grid gap-2 rounded-md border border-white/10 p-2">
+              <input
+                value={q.pergunta}
+                onChange={(e) => setQuiz((a) => a.map((x, j) => (j === i ? { ...x, pergunta: e.target.value } : x)))}
+                placeholder={`Pergunta ${i + 1}`}
+                className={input}
+              />
+              <textarea
+                value={q.opcoes}
+                onChange={(e) => setQuiz((a) => a.map((x, j) => (j === i ? { ...x, opcoes: e.target.value } : x)))}
+                rows={3}
+                placeholder="Uma opção por linha"
+                className={input}
+              />
+              <div className="flex items-center justify-between gap-2 text-xs text-muted">
+                <label className="flex items-center gap-2">
+                  Resposta correta (nº da opção):
+                  <input
+                    type="number"
+                    min={1}
+                    value={q.correta + 1}
+                    onChange={(e) => setQuiz((a) => a.map((x, j) => (j === i ? { ...x, correta: Math.max(0, Number(e.target.value) - 1) } : x)))}
+                    className="input-field w-16 rounded-md px-2 py-1 text-sm text-primary"
+                  />
+                </label>
+                <button onClick={() => setQuiz((a) => a.filter((_, j) => j !== i))} className="text-accent-danger">
+                  remover pergunta
+                </button>
+              </div>
+            </div>
+          ))}
+          {quiz.length < 3 && (
+            <button
+              onClick={() => { setTemEnquete(false); setQuiz((a) => [...a, { pergunta: '', opcoes: '', correta: 0 }]) }}
+              className="mt-2 text-xs text-accent-primary hover:underline"
+            >
+              + Adicionar pergunta (máx. 3)
+            </button>
+          )}
+        </div>
+      </div>
+
       <fieldset className="space-y-1.5">
         <legend className="text-xs text-muted">Como aparece</legend>
         {EXIBICOES.map((e) => (
@@ -361,6 +495,53 @@ export function ComunicadoForm({
         </label>
       </div>
 
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+        <label className={rotulo}>
+          Repetir
+          <select value={recorrencia} onChange={(e) => setRecorrencia(e.target.value)} className={input}>
+            <option value="">Não repetir</option>
+            <option value="diaria">Todo dia</option>
+            <option value="semanal">Toda semana</option>
+            <option value="mensal">Todo mês</option>
+          </select>
+        </label>
+        {recorrencia === 'semanal' && (
+          <label className={rotulo}>
+            Dia da semana
+            <select value={recDia} onChange={(e) => setRecDia(e.target.value)} className={input}>
+              {DIAS_SEMANA.map((d, i) => (
+                <option key={d} value={i}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {recorrencia === 'mensal' && (
+          <label className={rotulo}>
+            Dia do mês
+            <input type="number" min={1} max={31} value={recDia} onChange={(e) => setRecDia(e.target.value)} className={input} />
+          </label>
+        )}
+        {recorrencia && (
+          <label className={rotulo}>
+            A partir das
+            <input type="time" value={recHora} onChange={(e) => setRecHora(e.target.value)} className={input} />
+          </label>
+        )}
+        <label className={rotulo}>
+          Mostrar só na tela (opcional)
+          <select value={contexto} onChange={(e) => setContexto(e.target.value)} className={input}>
+            <option value="">Em qualquer tela</option>
+            {CONTEXTOS.map((c) => (
+              <option key={c.valor} value={c.valor}>
+                {c.rotulo}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <div className="flex flex-wrap gap-5 text-sm text-primary">
         <label className="flex items-center gap-1.5">
           <input type="checkbox" checked={exige} onChange={(e) => setExige(e.target.checked)} />
@@ -370,6 +551,21 @@ export function ComunicadoForm({
           <input type="checkbox" checked={fixado} onChange={(e) => setFixado(e.target.checked)} />
           📌 Fixar no topo do Newsroom
         </label>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-sm text-primary">
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={naBase} onChange={(e) => setNaBase(e.target.checked)} />
+          📚 Guardar na Base de conhecimento (fica pesquisável mesmo depois que o aviso acabar)
+        </label>
+        {naBase && (
+          <input
+            value={categoria}
+            onChange={(e) => setCategoria(e.target.value)}
+            placeholder="Categoria (ex.: Preços, Atendimento, CRM)"
+            className="input-field w-64 rounded-md px-2 py-1 text-sm"
+          />
+        )}
       </div>
 
       <div className="space-y-2">

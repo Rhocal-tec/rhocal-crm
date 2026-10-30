@@ -34,10 +34,25 @@ export function destinadoA(
   )
 }
 
-export function jaLeu(c: Comunicado, leituras: Leitura[], usuarioId: string): boolean {
+export function jaLeu(
+  c: Comunicado,
+  leituras: Leitura[],
+  usuarioId: string,
+  ocorrencia: string = '',
+): boolean {
   return leituras.some(
-    (l) => l.comunicado_id === c.id && l.usuario_id === usuarioId && l.versao === c.versao,
+    (l) =>
+      l.comunicado_id === c.id &&
+      l.usuario_id === usuarioId &&
+      l.versao === c.versao &&
+      (l.ocorrencia ?? '') === ocorrencia,
   )
+}
+
+// Aviso por contexto: sem rota = aparece em qualquer tela; com rota = só nessa tela.
+export function contextoOk(c: Comunicado, pathname: string): boolean {
+  if (!c.contexto_rota) return true
+  return pathname === c.contexto_rota || pathname.startsWith(`${c.contexto_rota}/`)
 }
 
 // Urgente primeiro; depois início mais recente.
