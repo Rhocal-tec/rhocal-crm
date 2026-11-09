@@ -43,8 +43,15 @@ export function KanbanColumn({
         <h2 className="font-heading text-base font-semibold uppercase tracking-wider text-primary">
           {STATUS_LABELS[status]}
         </h2>
-        <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-primary/70">
-          {pedidos.length}
+        <span className="flex items-center gap-1.5">
+          {pedidos.some((p) => p.urgente) && (status === 'PEDIDO' || status === 'EM_COTACAO') && (
+            <span className="rounded-full bg-accent-danger px-2 py-0.5 text-xs font-bold text-white">
+              🔴 {pedidos.filter((p) => p.urgente).length}
+            </span>
+          )}
+          <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-primary/70">
+            {pedidos.length}
+          </span>
         </span>
       </div>
       <div

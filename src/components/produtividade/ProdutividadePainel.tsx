@@ -337,6 +337,24 @@ export function ProdutividadePainel() {
     return { ano: hoje.getFullYear(), mes: hoje.getMonth() + 1 }
   })
   const { ano, mes } = periodo
+  // Intervalo opcional escolhido pelo gestor. null = mês selecionado (padrão).
+  const [intervalo, setIntervalo] = useState<{ de: string; ate: string } | null>(null)
+  const [rascunhoIntervalo, setRascunhoIntervalo] = useState({ de: '', ate: '' })
+  const intervaloValido = !!intervalo && !!intervalo.de && !!intervalo.ate && intervalo.ate >= intervalo.de
+  const personalizado = intervaloValido
+  const [limInicioMs, limFimMs] = useMemo(() => {
+    if (intervalo && intervaloValido) {
+      const ini = new Date(`${intervalo.de}T00:00:00`)
+      const fimDia = new Date(`${intervalo.ate}T00:00:00`)
+      fimDia.setDate(fimDia.getDate() + 1)
+      return [ini.getTime(), fimDia.getTime()]
+    }
+    const l = limitesDoMes(ano, mes)
+    return [l.inicio.getTime(), l.fim.getTime()]
+  }, [intervalo, intervaloValido, ano, mes])
+  const rotuloPeriodo = personalizado && intervalo
+    ? `${formatarDataSomente(intervalo.de)} a ${formatarDataSomente(intervalo.ate)}`
+    : `${MESES[mes - 1]}/${ano}`
 
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [pedidos, setPedidos] = useState<PedidoProdutividade[]>([])
@@ -374,7 +392,8 @@ export function ProdutividadePainel() {
       setCarregando(true)
       setErro(null)
       try {
-        const { inicio, fim } = limitesDoMes(ano, mes)
+        const inicio = new Date(limInicioMs)
+        const fim = new Date(limFimMs)
         const colunas = 'id, criado_por, criado_em, status'
 
         const [criadosNoMes, { mapa: mapaMarcos, completos }] = await Promise.all([
@@ -448,7 +467,7 @@ export function ProdutividadePainel() {
     return () => {
       ativo = false
     }
-  }, [supabase, empresaAtiva, ano, mes])
+  }, [supabase, empresaAtiva, limInicioMs, limFimMs])
 
   // Perfis carregados à parte: os nomes aparecem mesmo se a carga de vendas
   // falhar (ex: migração 0032 ainda não rodada).
@@ -482,7 +501,8 @@ export function ProdutividadePainel() {
     async function carregar() {
       setErroOportunidades(null)
       try {
-        const { inicio, fim } = limitesDoMes(ano, mes)
+        const inicio = new Date(limInicioMs)
+        const fim = new Date(limFimMs)
         const colunasBase = 'id, oportunidade_id, responsavel, situacao, data_prevista, criado_em, descricao, cliente_nome'
         // Com quem concluiu/criou (migração 0036). Se a coluna ainda não existir
         // no banco, cai para as colunas antigas em vez de quebrar o painel.
@@ -544,7 +564,7 @@ export function ProdutividadePainel() {
     return () => {
       ativo = false
     }
-  }, [supabase, empresaAtiva, ano, mes])
+  }, [supabase, empresaAtiva, limInicioMs, limFimMs])
 
   useEffect(() => {
     if (!empresaAtiva) return
@@ -580,12 +600,18 @@ export function ProdutividadePainel() {
   }, [supabase, empresaAtiva, ano, mes, versaoMetas])
 
   const { porFuncionario, equipe } = useMemo(() => {
-    const { inicio, fim } = limitesDoMes(ano, mes)
-    return agregarProdutividade({ pedidos, marcos, valorPorPedido, inicio, fim })
-  }, [pedidos, marcos, valorPorPedido, ano, mes])
+    return agregarProdutividade({
+      pedidos,
+      marcos,
+      valorPorPedido,
+      inicio: new Date(limInicioMs),
+      fim: new Date(limFimMs),
+    })
+  }, [pedidos, marcos, valorPorPedido, limInicioMs, limFimMs])
 
   const tarefas = useMemo(() => {
-    const { inicio, fim } = limitesDoMes(ano, mes)
+    const inicio = new Date(limInicioMs)
+    const fim = new Date(limFimMs)
     return agregarTarefasOportunidades({
       tarefasPeriodo,
       tarefasDeOportunidade,
@@ -593,15 +619,21 @@ export function ProdutividadePainel() {
       inicio,
       fim,
     })
-  }, [tarefasPeriodo, tarefasDeOportunidade, oportunidadesEmpresa, ano, mes])
+  }, [tarefasPeriodo, tarefasDeOportunidade, oportunidadesEmpresa, limInicioMs, limFimMs])
 
-  const metaGlobalLinha = metas.find((m) => m.funcionario_id === null) ?? null
+  // Metas são mensais: num intervalo personalizado ficam de fora (sem % de meta).
+  const metaGlobalLinha = personalizado ? null : (metas.find((m) => m.funcionario_id === null) ?? null)
   const metaGlobal = metaGlobalLinha?.valor_meta ?? 0
   const metaPessoalPorId = useMemo(
-    () => new Map(metas.filter((m) => m.funcionario_id).map((m) => [m.funcionario_id as string, m.valor_meta])),
-    [metas],
+    () =>
+      personalizado
+        ? new Map<string, number>()
+        : new Map(metas.filter((m) => m.funcionario_id).map((m) => [m.funcionario_id as string, m.valor_meta])),
+    [metas, personalizado],
   )
-  const dias = calcularDiasUteisMes(ano, mes, metaGlobalLinha?.dias_uteis_ajuste ?? null)
+  const dias: DiasUteisMes = personalizado
+    ? { total: 0, decorridos: 0, restantes: 0, ajustado: false }
+    : calcularDiasUteisMes(ano, mes, metaGlobalLinha?.dias_uteis_ajuste ?? null)
 
   // Vendedoras: só perfis do setor comercial e ativos — nunca gestor, compras
   // ou desativados, mesmo que tenham criado pedido/tarefa no mês (esses
@@ -646,21 +678,27 @@ export function ProdutividadePainel() {
             Calculado automaticamente a partir dos pedidos de {empresaAtiva?.nome_fantasia ?? '—'}.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => mudarMes(-1)}
+            onClick={() => {
+              setIntervalo(null)
+              mudarMes(-1)
+            }}
             className="rounded-md border border-white/10 bg-surface px-3 py-1.5 text-sm text-primary hover:bg-surface-alt"
             aria-label="Mês anterior"
           >
             ‹
           </button>
           <span className="min-w-[10rem] text-center font-heading text-lg font-semibold text-primary">
-            {MESES[mes - 1]}/{ano}
+            {personalizado ? rotuloPeriodo : `${MESES[mes - 1]}/${ano}`}
           </span>
           <button
             type="button"
-            onClick={() => mudarMes(1)}
+            onClick={() => {
+              setIntervalo(null)
+              mudarMes(1)
+            }}
             className="rounded-md border border-white/10 bg-surface px-3 py-1.5 text-sm text-primary hover:bg-surface-alt"
             aria-label="Próximo mês"
           >
@@ -676,14 +714,63 @@ export function ProdutividadePainel() {
           {ehGestor && (
             <button
               type="button"
+              disabled={personalizado}
+              title={personalizado ? 'Metas são mensais: volte ao mês para editar' : undefined}
               onClick={() => setEditandoMetas((v) => !v)}
-              className="ml-2 rounded-md bg-accent-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-accent-primary-dark"
+              className="ml-2 rounded-md bg-accent-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-accent-primary-dark disabled:opacity-50"
             >
               {editandoMetas ? 'Fechar metas' : 'Editar metas'}
             </button>
           )}
         </div>
       </div>
+
+      {ehGestor && (
+        <div className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-white/10 bg-surface p-3 text-sm">
+          <span className="text-xs text-muted">Intervalo de datas:</span>
+          <label className="flex flex-col gap-0.5 text-xs text-muted">
+            De
+            <input
+              type="date"
+              value={rascunhoIntervalo.de}
+              onChange={(e) => setRascunhoIntervalo((r) => ({ ...r, de: e.target.value }))}
+              className="input-field rounded-md px-2 py-1 text-sm text-primary"
+            />
+          </label>
+          <label className="flex flex-col gap-0.5 text-xs text-muted">
+            Até
+            <input
+              type="date"
+              value={rascunhoIntervalo.ate}
+              onChange={(e) => setRascunhoIntervalo((r) => ({ ...r, ate: e.target.value }))}
+              className="input-field rounded-md px-2 py-1 text-sm text-primary"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={!rascunhoIntervalo.de || !rascunhoIntervalo.ate || rascunhoIntervalo.ate < rascunhoIntervalo.de}
+            onClick={() => {
+              setEditandoMetas(false)
+              setIntervalo({ ...rascunhoIntervalo })
+            }}
+            className="rounded-md bg-accent-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            Aplicar
+          </button>
+          {personalizado && (
+            <button
+              type="button"
+              onClick={() => setIntervalo(null)}
+              className="rounded-md border border-white/15 px-3 py-1.5 text-sm text-primary/80 hover:bg-white/10"
+            >
+              Voltar ao mês
+            </button>
+          )}
+          {personalizado && (
+            <span className="text-xs text-muted">Mostrando {rotuloPeriodo}. Metas e dias úteis são mensais e ficam ocultos.</span>
+          )}
+        </div>
+      )}
 
       {erro && (
         <p className="mt-4 rounded-md border border-accent-danger/40 bg-accent-danger/10 px-3 py-2 text-sm text-accent-danger">
@@ -717,10 +804,10 @@ export function ProdutividadePainel() {
         </div>
       )}
 
-      {carregando && <p className="mt-4 text-sm text-muted">Carregando dados do mês…</p>}
+      {carregando && <p className="mt-4 text-sm text-muted">Carregando dados do período…</p>}
 
       <section className="mt-6 rounded-lg border border-white/10 bg-surface p-5">
-        <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">Resultado da empresa no mês</h2>
+        <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">Resultado da empresa no período</h2>
         <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-4">
           <div>
             <p className="text-xs text-muted">Meta da empresa</p>
@@ -809,7 +896,13 @@ export function ProdutividadePainel() {
             </div>
           </section>
 
-          {empresaAtiva && <CampanhasProdutividade empresaId={empresaAtiva.id} ano={ano} mes={mes} />}
+          {empresaAtiva && <CampanhasProdutividade
+              empresaId={empresaAtiva.id}
+              ano={ano}
+              mes={mes}
+              inicioCustom={personalizado ? new Date(limInicioMs) : undefined}
+              fimCustom={personalizado ? new Date(limFimMs) : undefined}
+            />}
 
           <section className="mt-6 rounded-lg border border-white/10 bg-surface p-5">
             <h2 className="font-heading text-lg font-semibold tracking-wide text-primary">
@@ -860,7 +953,7 @@ export function ProdutividadePainel() {
         <ProdutividadeImpressao
           empresaNome={empresaAtiva.nome_fantasia}
           logoPath={empresaAtiva.logo_path}
-          mesTexto={`${MESES[mes - 1]}/${ano}`}
+          mesTexto={rotuloPeriodo}
           metaGlobal={metaGlobal}
           equipe={equipe}
           equipeTarefas={tarefas.equipe}

@@ -161,6 +161,7 @@ export function NovoOrcamentoModal({
   const [erroCadastroOmie, setErroCadastroOmie] = useState<string | null>(null)
   const [sucessoCadastroOmie, setSucessoCadastroOmie] = useState<string | null>(null)
   const [orcamentoDireto, setOrcamentoDireto] = useState(false)
+  const [urgente, setUrgente] = useState(false)
   const [itens, setItens] = useState<ItemForm[]>([itemVazio()])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -173,6 +174,7 @@ export function NovoOrcamentoModal({
   }, [sucessoCadastroOmie])
 
   function resetar() {
+    setUrgente(false)
     setCnpj('')
     setBuscandoCnpj(false)
     setAvisoCnpj(null)
@@ -747,6 +749,8 @@ export function NovoOrcamentoModal({
         // "Converter em Pedido de Venda".
         status: orcamentoDireto ? 'PEDIDO_COTADO' : undefined,
         orcamento_direto: orcamentoDireto,
+        urgente: urgente && !orcamentoDireto,
+        urgente_em: urgente && !orcamentoDireto ? new Date().toISOString() : null,
         criado_por: user.id,
         empresa_id: empresaAtiva.id,
       })
@@ -791,6 +795,26 @@ export function NovoOrcamentoModal({
   return (
     <Modal open={open} onClose={fechar} title="Novo Orçamento" widthClassName="max-w-2xl">
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        <label
+          className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 ${
+            orcamentoDireto ? 'border-white/10 opacity-50' : 'border-accent-danger/40 bg-accent-danger/10'
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={urgente && !orcamentoDireto}
+            onChange={(e) => setUrgente(e.target.checked)}
+            disabled={salvando || orcamentoDireto}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-accent-danger"
+          />
+          <span>
+            <span className="block text-sm font-medium text-primary">🔴 URGENTE</span>
+            <span className="mt-0.5 block text-xs text-muted">
+              O Compras vê este orçamento em vermelho e na frente da fila de cotação.
+            </span>
+          </span>
+        </label>
+
         <label className="flex cursor-pointer items-start gap-3 rounded-md border border-accent-compras/30 bg-accent-compras/10 px-3 py-2.5">
           <input
             type="checkbox"

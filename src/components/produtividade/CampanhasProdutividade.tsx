@@ -39,10 +39,15 @@ export function CampanhasProdutividade({
   empresaId,
   ano,
   mes,
+  inicioCustom,
+  fimCustom,
 }: {
   empresaId: string
   ano: number
   mes: number
+  // Intervalo escolhido pelo gestor (substitui o mês quando informado).
+  inicioCustom?: Date
+  fimCustom?: Date
 }) {
   const [supabase] = useState(() => createClient())
   const [campanhas, setCampanhas] = useState<Campanha[]>([])
@@ -54,7 +59,15 @@ export function CampanhasProdutividade({
   const [semColunaPor, setSemColunaPor] = useState(false)
   const [aberta, setAberta] = useState<string | null>(null)
 
-  const { inicio, fim } = useMemo(() => limitesDoMes(ano, mes), [ano, mes])
+  const inicioMs = inicioCustom?.getTime()
+  const fimMs = fimCustom?.getTime()
+  const { inicio, fim } = useMemo(
+    () =>
+      inicioMs !== undefined && fimMs !== undefined
+        ? { inicio: new Date(inicioMs), fim: new Date(fimMs) }
+        : limitesDoMes(ano, mes),
+    [ano, mes, inicioMs, fimMs],
+  )
 
   useEffect(() => {
     let ativo = true

@@ -12,6 +12,7 @@ import ChamadasSemEmpresa from '@/components/painel/ChamadasSemEmpresa'
 import { ErrosRecentesSection } from '@/components/painel/ErrosRecentesSection'
 import { FiltroPeriodo } from '@/components/painel/FiltroPeriodo'
 import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras'
+import { TempoCotacaoCard, type LinhaCotacao } from '@/components/painel/TempoCotacaoCard'
 import {
   MotivosPerdaCard,
   type MotivoPerdaBarra,
@@ -75,6 +76,7 @@ export default function PainelPage() {
   const [paradosCount, setParadosCount] = useState(0)
   const [taxaConversao, setTaxaConversao] = useState<number | null>(null)
   const [tempoMedioPorEtapa, setTempoMedioPorEtapa] = useState<BarraDado[]>([])
+  const [linhasCotacao, setLinhasCotacao] = useState<LinhaCotacao[]>([])
   const [motivosPerda, setMotivosPerda] = useState<MotivoPerdaBarra[]>([])
 
   // Fase 32.2 — seção "Oportunidades" do painel.
@@ -224,6 +226,8 @@ export default function PainelPage() {
         // ignorados — só fecha o intervalo quando o status realmente muda.
         const idsTodos = listaPedidos.map((p) => p.id)
         const acumulador: Partial<Record<string, { totalMs: number; amostras: number }>> = {}
+        const linhasCot: LinhaCotacao[] = []
+        const STATUS_COTADO = ['PEDIDO_COTADO', 'APROVADO_CLIENTE', 'PEDIDO_EFETUADO', 'ENTREGUE']
 
         if (idsTodos.length > 0) {
           const { data: logs, error: erroLogs } = await supabase
@@ -245,6 +249,24 @@ export default function PainelPage() {
               depois: typeof depois === 'string' ? depois : null,
             })
             eventosPorPedido.set(log.registro_id, lista)
+          }
+
+          // Tempo de cotação: orçamento (criação) → 1ª vez que chegou a "cotado" ou além.
+          // Pedidos ainda sem cotação (em PEDIDO/EM_COTACAO) entram como "aguardando".
+          for (const p of listaPedidos) {
+            const evs = eventosPorPedido.get(p.id) ?? []
+            const cotado = evs.find((e) => e.depois && STATUS_COTADO.includes(e.depois))
+            const entrou = evs.find((e) => e.depois === 'EM_COTACAO')
+            if (!cotado && p.status !== 'PEDIDO' && p.status !== 'EM_COTACAO') continue
+            linhasCot.push({
+              id: p.id,
+              numero: p.numero,
+              clienteNome: p.cliente_nome,
+              criadoPorNome: nomePorId.get(p.criado_por) ?? 'Perfil removido',
+              orcamentoEm: p.criado_em,
+              entrouCotacaoEm: entrou?.data_hora ?? null,
+              cotadoEm: cotado?.data_hora ?? null,
+            })
           }
 
           for (const eventos of Array.from(eventosPorPedido.values())) {
@@ -282,7 +304,10 @@ export default function PainelPage() {
             chave: status,
             rotulo: STATUS_LABELS[status],
             valor: mediaDias,
-            rotuloValor: `${mediaDias.toFixed(1)} dias`,
+            rotuloValor:
+              status === 'EM_COTACAO'
+                ? `${(mediaDias * 24).toFixed(1)} h`
+                : `${mediaDias.toFixed(1)} dias`,
             corVar: STATUS_STRIPE_VAR[status],
           }
         })
@@ -294,6 +319,7 @@ export default function PainelPage() {
         setMotivosPerda(listaMotivos)
         setValorNegociacao(valorNegociacaoCalc)
         setTempoMedioPorEtapa(listaTempoMedio)
+        setLinhasCotacao(linhasCot)
       } catch (err) {
         console.error('Erro ao carregar painel:', err)
         if (ativo) setErro('Não foi possível carregar os dados do painel. Tente novamente.')
@@ -556,6 +582,10 @@ export default function PainelPage() {
             </p>
             <p className="mt-1 text-xs text-muted">Efetuados ÷ (Efetuados + Perdidos)</p>
           </div>
+        </div>
+
+        <div className="mt-6">
+          <TempoCotacaoCard linhas={linhasCotacao} />
         </div>
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">

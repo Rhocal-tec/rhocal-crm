@@ -4,6 +4,7 @@ import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { EmpresaProvider } from "@/contexts/EmpresaContext";
 import { NewsroomProvider } from "@/contexts/NewsroomContext";
+import { RepasseAlerta } from "@/components/cs/RepasseAlerta";
 
 // Títulos e números de pedido.
 const barlowCondensed = Barlow_Condensed({
@@ -42,7 +43,10 @@ export default function RootLayout({
       >
         <AuthProvider>
           <EmpresaProvider>
-            <NewsroomProvider>{children}</NewsroomProvider>
+            <NewsroomProvider>
+              {children}
+              <RepasseAlerta />
+            </NewsroomProvider>
           </EmpresaProvider>
         </AuthProvider>
       </body>

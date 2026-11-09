@@ -307,7 +307,16 @@ export function KanbanBoard({ setor }: { setor: SetorTipo }) {
             <KanbanColumn
               key={status}
               status={status}
-              pedidos={pedidos.filter((p) => p.status === status)}
+              pedidos={pedidos
+                .filter((p) => p.status === status)
+                .sort(
+                  (a, b) =>
+                    Number(b.urgente) - Number(a.urgente) ||
+                    (a.urgente
+                      ? new Date(a.urgente_em ?? a.criado_em).getTime() - new Date(b.urgente_em ?? b.criado_em).getTime()
+                      : 0) ||
+                    new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime(),
+                )}
               onAbrir={setPedidoAbertoId}
               podeArquivar={podeArquivar}
               onArquivar={handleArquivar}

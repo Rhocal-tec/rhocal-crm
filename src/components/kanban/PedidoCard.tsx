@@ -34,7 +34,9 @@ export function PedidoCard({
   // Cotação atrasada (EM_COTACAO, 2h+ sem movimentação) tem prioridade sobre
   // o alerta âmbar padrão de 3 dias enquanto o pedido estiver nessa coluna.
   const atrasada = cotacaoAtrasada(pedido.status, pedido.ultima_movimentacao)
-  const parado = !atrasada && estaParado(pedido.ultima_movimentacao)
+  // Urgente só importa enquanto a cotação não foi entregue.
+  const urgente = pedido.urgente && (pedido.status === 'PEDIDO' || pedido.status === 'EM_COTACAO')
+  const parado = !atrasada && !urgente && estaParado(pedido.ultima_movimentacao)
   const dias = diasSemMovimentacao(pedido.ultima_movimentacao)
   const horasAtraso = Math.floor(horasSemMovimentacao(pedido.ultima_movimentacao))
   // Sem movimentação de status ainda (pedido recém-criado): mostra quem criou.
@@ -53,7 +55,9 @@ export function PedidoCard({
       {...attributes}
       onClick={() => onAbrir(pedido.id)}
       className={`cursor-grab touch-none rounded-lg border p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing ${
-        atrasada
+        urgente
+          ? 'border-2 border-accent-danger bg-accent-danger/20 shadow-[0_0_12px_rgba(239,68,68,0.35)]'
+          : atrasada
           ? 'border-accent-danger/60 bg-accent-danger/10'
           : parado
             ? 'border-accent-alert/60 bg-accent-alert/10'
@@ -64,6 +68,11 @@ export function PedidoCard({
         <span className="font-mono text-sm font-semibold text-primary">
           Pedido #{pedido.numero}
         </span>
+        {urgente && (
+          <span className="inline-flex shrink-0 animate-pulse rounded-full bg-accent-danger px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+            🔴 Urgente
+          </span>
+        )}
         {pedido.orcamento_direto && (
           <span
             title="Orçamento direto — sem cotação do Compras"

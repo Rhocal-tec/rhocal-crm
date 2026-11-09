@@ -155,6 +155,8 @@ export interface Database {
           arquivado_motivo: ArquivoMotivo | null
           motivo_perda: string | null
           orcamento_direto: boolean
+          urgente: boolean
+          urgente_em: string | null
           omie_convertido_pedido: boolean
           criado_por: string
           criado_em: string
@@ -182,6 +184,8 @@ export interface Database {
           arquivado_motivo?: ArquivoMotivo | null
           motivo_perda?: string | null
           orcamento_direto?: boolean
+          urgente?: boolean
+          urgente_em?: string | null
           omie_convertido_pedido?: boolean
           criado_por: string
           criado_em?: string
@@ -209,6 +213,8 @@ export interface Database {
           arquivado_motivo?: ArquivoMotivo | null
           motivo_perda?: string | null
           orcamento_direto?: boolean
+          urgente?: boolean
+          urgente_em?: string | null
           omie_convertido_pedido?: boolean
           criado_por?: string
           criado_em?: string

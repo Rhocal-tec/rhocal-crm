@@ -269,6 +269,14 @@ export function PedidoDetalheModal({
     }
   }
 
+  async function alternarUrgente() {
+    if (!pedido) return
+    const novo = !pedido.urgente
+    const atualizacao = { urgente: novo, urgente_em: novo ? new Date().toISOString() : null }
+    const { error } = await supabase.from('pedidos').update(atualizacao).eq('id', pedido.id)
+    if (!error) setPedido({ ...pedido, ...atualizacao })
+  }
+
   async function salvarModoFaturamento(valor: string) {
     if (!pedido) return
     const novoValor = valor || null
@@ -337,8 +345,13 @@ export function PedidoDetalheModal({
       onClose={onClose}
       title={pedido ? `Pedido #${pedido.numero}` : 'Pedido'}
       titleExtra={
-        pedido && (pedido.orcamento_direto || pedido.omie_orcamento_id !== null) ? (
+        pedido && (pedido.orcamento_direto || pedido.omie_orcamento_id !== null || pedido.urgente) ? (
           <span className="flex items-center gap-2">
+            {pedido.urgente && (
+              <span className="inline-flex items-center rounded-full bg-accent-danger px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-white">
+                🔴 Urgente
+              </span>
+            )}
             {pedido.orcamento_direto && (
               <span
                 title="Orçamento direto — sem cotação do Compras"
@@ -463,6 +476,22 @@ export function PedidoDetalheModal({
               </button>
             )}
           </div>
+
+          {aba === 'dados' &&
+            (setor === 'comercial' || setor === 'gestor') &&
+            (pedido.status === 'PEDIDO' || pedido.status === 'EM_COTACAO') && (
+              <button
+                type="button"
+                onClick={alternarUrgente}
+                className={`mt-4 rounded-md border px-3 py-1.5 text-sm font-medium ${
+                  pedido.urgente
+                    ? 'border-accent-danger bg-accent-danger/15 text-accent-danger'
+                    : 'border-white/15 text-primary/80 hover:bg-white/10'
+                }`}
+              >
+                {pedido.urgente ? '🔴 Urgente — clique para remover' : 'Marcar como URGENTE'}
+              </button>
+            )}
 
           {aba === 'dados' && (
             <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
