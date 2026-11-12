@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { AbrirNoWhatsappButton } from '@/components/common/AbrirNoWhatsappButton'
 import { createClient } from '@/lib/supabase/client'
 import { MOTIVO_PERDA_OPCOES } from '@/lib/kanban/status'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
@@ -180,6 +181,16 @@ export function OportunidadeCard({
           Movido por {nomeUltimoResponsavel}
         </p>
       )}
+
+      <AbrirNoWhatsappButton
+        className="mt-2.5 block"
+        telefones={[
+          oportunidade.whatsapp_comprador,
+          oportunidade.whatsapp_empresa,
+          oportunidade.contato_telefone,
+          oportunidade.cliente_telefone,
+        ]}
+      />
 
       {acaoAberta === null && (
         <div className="mt-2.5 flex gap-2">

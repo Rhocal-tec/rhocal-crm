@@ -64,6 +64,20 @@ export function ClientesList({ setor }: { setor: SetorTipo }) {
     return () => clearTimeout(timeout)
   }, [mensagemImportacao])
 
+  // Deep link da ponte com o CRM WhatsApp: /clientes?id=<uuid> abre a ficha.
+  useEffect(() => {
+    if (loading || clientes.length === 0) return
+    const id = new URLSearchParams(window.location.search).get('id')
+    if (!id) return
+    const alvo = clientes.find((c) => c.id === id)
+    if (alvo) {
+      setClienteEditando(alvo)
+      setModalAberto(true)
+    }
+    // Só na primeira carga: depois o usuário navega livremente.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading])
+
   const clientesFiltrados = useMemo(() => {
     const termoBusca = termo.trim().toLowerCase()
     if (!termoBusca) return clientes

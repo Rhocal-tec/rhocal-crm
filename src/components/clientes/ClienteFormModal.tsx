@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { AbrirNoWhatsappButton } from '@/components/common/AbrirNoWhatsappButton'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useEmpresa } from '@/contexts/EmpresaContext'
@@ -530,7 +531,13 @@ export function ClienteFormModal({
           </div>
         )}
 
-        <div className="flex justify-end gap-2 border-t border-white/10 pt-4">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-white/10 pt-4">
+          {clienteExistente && (
+            <AbrirNoWhatsappButton
+              className="mr-auto"
+              telefones={[form.telefone, clienteExistente.telefone]}
+            />
+          )}
           <button
             type="button"
             onClick={fechar}
