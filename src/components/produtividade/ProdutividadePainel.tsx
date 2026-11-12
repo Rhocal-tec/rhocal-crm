@@ -38,6 +38,8 @@ import { GraficoBarras, type BarraDado } from '@/components/painel/GraficoBarras
 import { CampanhasProdutividade } from './CampanhasProdutividade'
 import { MetasEditor, type MetaLinha } from './MetasEditor'
 import { ProdutividadeImpressao } from './ProdutividadeImpressao'
+import { ResumoWhatsappEquipe, SecaoWhatsapp, useWhatsappProdutividade } from './WhatsappProdutividade'
+import type { RespostaWhatsappProdutividade } from '@/lib/produtividade/whatsapp'
 import type { Database } from '@/types/database'
 
 type Profile = Pick<Database['public']['Tables']['profiles']['Row'], 'id' | 'nome' | 'setor' | 'ativo'>
@@ -267,6 +269,9 @@ function CardVendedora({
   dias,
   t,
   marcosCompletos,
+  perfilId,
+  whatsapp,
+  carregandoWhatsapp,
 }: {
   nome: string
   m: MetricasProdutividade
@@ -275,6 +280,9 @@ function CardVendedora({
   dias: DiasUteisMes
   t: MetricasTarefas
   marcosCompletos: boolean
+  perfilId: string
+  whatsapp: RespostaWhatsappProdutividade | null
+  carregandoWhatsapp: boolean
 }) {
   const media = mediaDiaria(m.faturadoValor, dias)
   const necessario = necessarioPorDia(m.faturadoValor, metaPessoal, dias)
@@ -322,6 +330,7 @@ function CardVendedora({
       <div className="mt-2">
         <GrupoPedidos m={m} marcosCompletos={marcosCompletos} />
       </div>
+      <SecaoWhatsapp perfilId={perfilId} dados={whatsapp} carregando={carregandoWhatsapp} />
     </div>
   )
 }
@@ -355,6 +364,11 @@ export function ProdutividadePainel() {
   const rotuloPeriodo = personalizado && intervalo
     ? `${formatarDataSomente(intervalo.de)} a ${formatarDataSomente(intervalo.ate)}`
     : `${MESES[mes - 1]}/${ano}`
+
+  // Indicadores de WhatsApp: mesmo período da aba (fim do intervalo é exclusivo).
+  const deISO = dataISO(new Date(limInicioMs))
+  const ateISO = dataISO(new Date(limFimMs - 1))
+  const { dados: whatsapp, carregando: carregandoWhatsapp } = useWhatsappProdutividade(deISO, ateISO)
 
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [pedidos, setPedidos] = useState<PedidoProdutividade[]>([])
@@ -725,6 +739,8 @@ export function ProdutividadePainel() {
         </div>
       </div>
 
+      {ehGestor && <ResumoWhatsappEquipe dados={whatsapp} carregando={carregandoWhatsapp} />}
+
       {ehGestor && (
         <div className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-white/10 bg-surface p-3 text-sm">
           <span className="text-xs text-muted">Intervalo de datas:</span>
@@ -934,6 +950,9 @@ export function ProdutividadePainel() {
               dias={dias}
               t={v.t}
               marcosCompletos={marcosCompletos}
+              perfilId={v.id}
+              whatsapp={whatsapp}
+              carregandoWhatsapp={carregandoWhatsapp}
             />
           ))}
         </div>
