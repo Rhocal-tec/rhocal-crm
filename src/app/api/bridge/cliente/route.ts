@@ -1,83 +1,62 @@
 import { NextResponse } from 'next/server'
-import { timingSafeEqual, createHash } from 'crypto'
-import { createClient } from '@supabase/supabase-js'
 import { chaveTelefone } from '@/lib/bridge/telefone'
+import {
+  clienteAdmin,
+  montarClientes,
+  origemApp,
+  respostaNaoAutorizada,
+  segredoValido,
+  soDigitos,
+  variantesCnpj,
+} from '@/lib/bridge/servidor'
 import { OPORTUNIDADE_STATUS_LABELS } from '@/lib/oportunidades/status'
 import { STATUS_LABELS } from '@/lib/kanban/status'
 
 // Ponte servidor-a-servidor com o CRM WhatsApp: SOMENTE LEITURA, protegida
-// por BRIDGE_SECRET (header x-bridge-secret). Sem sessão de usuário — usa o
-// client admin (service role), por isso devolve só campos explicitamente
+// por BRIDGE_SECRET (header x-bridge-secret). Devolve só campos explicitamente
 // listados (nunca CPF, dados bancários nem dados de outros clientes).
 export const dynamic = 'force-dynamic'
 export const maxDuration = 15
 
-function segredoValido(recebido: string | null): boolean {
-  const esperado = process.env.BRIDGE_SECRET
-  if (!esperado || !recebido) return false
-  // Hash antes de comparar: tamanhos iguais, tempo constante.
-  const a = createHash('sha256').update(recebido).digest()
-  const b = createHash('sha256').update(esperado).digest()
-  return timingSafeEqual(a, b)
-}
-
-const soDigitos = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '')
-
-function variantesCnpj(d: string): string[] {
-  const v = [d]
-  if (d.length === 14) {
-    v.push(`${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`)
-  }
-  return v
-}
-
-type OppRow = {
-  id: string
-  numero: number
-  produto_servico: string | null
-  status: string
-  valor_estimado: number | null
-  temperatura: string | null
-  criado_por: string
-  ultima_movimentacao: string
-  criado_em: string
-}
-type PedRow = {
-  id: string
-  numero: number
-  status: string
-  valor_frete: number | null
-  criado_por: string
-  criado_em: string
-  ultima_movimentacao: string
-  entregue_em: string | null
-  pedido_itens: Array<{ preco_venda: number | null; quantidade: number; excluido: boolean }> | null
-}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export async function GET(request: Request) {
-  if (!segredoValido(request.headers.get('x-bridge-secret'))) {
-    return new NextResponse(null, { status: 401 })
-  }
+  if (!segredoValido(request.headers.get('x-bridge-secret'))) return respostaNaoAutorizada()
 
   const url = new URL(request.url)
   const phone = url.searchParams.get('phone')
+  const clienteId = url.searchParams.get('cliente_id')
   const cnpj = soDigitos(url.searchParams.get('cnpj'))
   const chave = chaveTelefone(phone)
-  if (!chave && cnpj.length < 11) {
+  const idValido = clienteId && UUID.test(clienteId) ? clienteId : null
+
+  if (!chave && cnpj.length < 11 && !idValido) {
     return NextResponse.json({ encontrado: false, clientes: [] })
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } },
-  )
-  const origem = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') || url.origin
+  const supabase = clienteAdmin()
+  const origem = origemApp(url)
 
   try {
+    // Busca direta por id: mesmo formato de resposta.
+    if (idValido) {
+      const clientes = await montarClientes(supabase, [idValido], origem)
+      return NextResponse.json({ encontrado: clientes.length > 0, clientes })
+    }
+
     const ids = new Set<string>()
     const cnpjsExtras = new Set<string>()
     const omieExtras = new Set<number>()
+    const nomesExtras = new Set<string>()
+    // Oportunidades/pedidos que bateram pelo telefone (para o "sem cadastro").
+    const oppsSolta: Array<{
+      id: string
+      numero: number
+      cliente_nome: string
+      status: string
+      produto_servico: string | null
+    }> = []
+    const pedsSolta: Array<{ id: string; numero: number; cliente_nome: string; status: string }> = []
 
     if (chave) {
       // Pré-filtro pelos 4 últimos dígitos (contíguos em qualquer formatação),
@@ -86,35 +65,46 @@ export async function GET(request: Request) {
       const padrao = `%${fim}`
       const bate = (v: string | null) => chaveTelefone(v) === chave
 
-      const [cli, opp, ped] = await Promise.all([
+      const [cli, extra, opp, ped] = await Promise.all([
         supabase.from('clientes').select('id, telefone').ilike('telefone', padrao).limit(200),
+        // Telefones adicionais (vinculados pelo CRM WhatsApp). Se a tabela
+        // ainda não existe, o erro é ignorado.
+        supabase.from('cliente_telefones').select('cliente_id, telefone').ilike('telefone', padrao).limit(200),
         supabase
           .from('oportunidades')
-          .select('cliente_cnpj, cliente_telefone, contato_telefone, whatsapp_empresa, whatsapp_comprador')
+          .select(
+            'id, numero, status, produto_servico, cliente_nome, cliente_cnpj, cliente_telefone, contato_telefone, whatsapp_empresa, whatsapp_comprador',
+          )
           .or(
             ['cliente_telefone', 'contato_telefone', 'whatsapp_empresa', 'whatsapp_comprador']
               .map((c) => `${c}.ilike.${padrao}`)
               .join(','),
           )
+          .order('criado_em', { ascending: false })
           .limit(200),
         supabase
           .from('pedidos')
-          .select('cliente_cnpj, cliente_omie_id, cliente_telefone')
+          .select('id, numero, status, cliente_nome, cliente_cnpj, cliente_omie_id, cliente_telefone')
           .ilike('cliente_telefone', padrao)
+          .order('criado_em', { ascending: false })
           .limit(200),
       ])
       for (const c of cli.data ?? []) if (bate(c.telefone)) ids.add(c.id)
+      for (const t of extra.data ?? []) if (bate(t.telefone)) ids.add(t.cliente_id)
       for (const o of opp.data ?? []) {
-        if ([o.cliente_telefone, o.contato_telefone, o.whatsapp_empresa, o.whatsapp_comprador].some(bate)) {
-          const d = soDigitos(o.cliente_cnpj)
-          if (d.length >= 11) cnpjsExtras.add(d)
-        }
+        if (![o.cliente_telefone, o.contato_telefone, o.whatsapp_empresa, o.whatsapp_comprador].some(bate)) continue
+        const d = soDigitos(o.cliente_cnpj)
+        if (d.length >= 11) cnpjsExtras.add(d)
+        if (o.cliente_nome) nomesExtras.add(o.cliente_nome)
+        oppsSolta.push(o)
       }
       for (const p of ped.data ?? []) {
         if (!bate(p.cliente_telefone)) continue
         const d = soDigitos(p.cliente_cnpj)
         if (d.length >= 11) cnpjsExtras.add(d)
         if (p.cliente_omie_id) omieExtras.add(p.cliente_omie_id)
+        if (p.cliente_nome) nomesExtras.add(p.cliente_nome)
+        pedsSolta.push(p)
       }
     }
     if (cnpj.length >= 11) cnpjsExtras.add(cnpj)
@@ -126,120 +116,51 @@ export async function GET(request: Request) {
       const { data } = await supabase.from('clientes').select('id').or(filtrosCliente.join(',')).limit(50)
       for (const c of data ?? []) ids.add(c.id)
     }
+    // Sem CNPJ/omie nos registros: tenta ligar pelo nome exato.
+    if (ids.size === 0 && nomesExtras.size) {
+      const { data } = await supabase
+        .from('clientes')
+        .select('id')
+        .in('razao_social', Array.from(nomesExtras).slice(0, 20))
+        .limit(10)
+      for (const c of data ?? []) ids.add(c.id)
+    }
 
-    if (ids.size === 0) return NextResponse.json({ encontrado: false, clientes: [] })
+    if (ids.size > 0) {
+      const clientes = await montarClientes(supabase, Array.from(ids), origem)
+      return NextResponse.json({ encontrado: clientes.length > 0, clientes })
+    }
 
-    const { data: clientesDb } = await supabase
-      .from('clientes')
-      .select('id, razao_social, nome_fantasia, cnpj, cidade, estado, omie_cliente_id')
-      .in('id', Array.from(ids).slice(0, 10))
+    // Nenhum cadastro em `clientes`: devolve o que existe em oportunidades/pedidos.
+    if (oppsSolta.length || pedsSolta.length) {
+      const nome = oppsSolta[0]?.cliente_nome ?? pedsSolta[0]?.cliente_nome ?? null
+      return NextResponse.json({
+        encontrado: true,
+        clientes: [
+          {
+            id: null,
+            sem_cadastro: true,
+            nome,
+            cnpj: null,
+            cidade: null,
+            oportunidades: oppsSolta.slice(0, 5).map((o) => ({
+              id: o.id,
+              titulo: o.produto_servico || `Oportunidade #${o.numero}`,
+              etapa: OPORTUNIDADE_STATUS_LABELS[o.status as keyof typeof OPORTUNIDADE_STATUS_LABELS] ?? o.status,
+              link: `${origem}/oportunidades`,
+            })),
+            orcamentos: pedsSolta.slice(0, 5).map((p) => ({
+              numero: p.numero,
+              status: STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status,
+              link: `${origem}/dashboard`,
+            })),
+            link: oppsSolta.length ? `${origem}/oportunidades` : `${origem}/dashboard`,
+          },
+        ],
+      })
+    }
 
-    const clientes = await Promise.all(
-      (clientesDb ?? []).map(async (c) => {
-        const cd = soDigitos(c.cnpj)
-        const porCnpjOpp = cd.length >= 11 ? variantesCnpj(cd).map((v) => `cliente_cnpj.eq.${v}`) : []
-        const nomeSeguro = c.razao_social.replace(/[,()"]/g, ' ')
-        const filtroOpp = [...porCnpjOpp, `cliente_nome.eq.${nomeSeguro}`].join(',')
-        const filtroPed = [
-          ...porCnpjOpp,
-          ...(c.omie_cliente_id ? [`cliente_omie_id.eq.${c.omie_cliente_id}`] : []),
-        ]
-
-        const [opps, peds, recompra] = await Promise.all([
-          supabase
-            .from('oportunidades')
-            .select('id, numero, produto_servico, status, valor_estimado, temperatura, criado_por, ultima_movimentacao, criado_em')
-            .or(filtroOpp)
-            .order('criado_em', { ascending: false })
-            .limit(30),
-          filtroPed.length
-            ? supabase
-                .from('pedidos')
-                .select('id, numero, status, valor_frete, criado_por, criado_em, ultima_movimentacao, entregue_em, pedido_itens(preco_venda, quantidade, excluido)')
-                .or(filtroPed.join(','))
-                .order('criado_em', { ascending: false })
-                .limit(30)
-            : Promise.resolve({ data: [] }),
-          c.omie_cliente_id
-            ? supabase
-                .from('v_recompra_priorizada')
-                .select('item_nome, data_prevista_recompra')
-                .eq('cliente_omie_codigo', String(c.omie_cliente_id))
-                .eq('status', 'pendente')
-                .order('data_prevista_recompra', { ascending: true })
-                .limit(5)
-            : Promise.resolve({ data: [] }),
-        ])
-
-        const oppsRows = (opps.data ?? []) as OppRow[]
-        const pedsRows = (peds.data ?? []) as unknown as PedRow[]
-        const rec = (recompra.data ?? []) as Array<{ item_nome: string; data_prevista_recompra: string }>
-
-        const valorPedido = (p: PedRow) =>
-          Math.round(
-            ((p.pedido_itens ?? [])
-              .filter((i) => !i.excluido)
-              .reduce((s, i) => s + (i.preco_venda ?? 0) * Number(i.quantidade), 0) +
-              Number(p.valor_frete ?? 0)) *
-              100,
-          ) / 100
-
-        const abertas = oppsRows.filter((o) => !['GANHO', 'PERDIDO', 'INATIVA'].includes(o.status))
-        const oppRecente = oppsRows[0]
-        const pedRecente = pedsRows[0]
-        const idVendedor =
-          oppRecente && pedRecente
-            ? oppRecente.criado_em > pedRecente.criado_em
-              ? oppRecente.criado_por
-              : pedRecente.criado_por
-            : (oppRecente ?? pedRecente)?.criado_por
-
-        let vendedor: { nome: string | null; email: string | null } | null = null
-        if (idVendedor) {
-          const [perfil, au] = await Promise.all([
-            supabase.from('profiles').select('nome').eq('id', idVendedor).maybeSingle(),
-            supabase.auth.admin.getUserById(idVendedor),
-          ])
-          vendedor = { nome: perfil.data?.nome ?? null, email: au.data?.user?.email ?? null }
-        }
-
-        const efetuado = pedsRows.find((p) => p.status === 'PEDIDO_EFETUADO' || p.status === 'ENTREGUE')
-
-        return {
-          id: c.id,
-          nome: c.nome_fantasia || c.razao_social,
-          cnpj: c.cnpj,
-          cidade: c.cidade ? (c.estado ? `${c.cidade}/${c.estado}` : c.cidade) : null,
-          temperatura: abertas.find((o) => o.temperatura)?.temperatura ?? oppRecente?.temperatura ?? null,
-          vendedor,
-          oportunidades: abertas.slice(0, 5).map((o) => ({
-            id: o.id,
-            titulo: o.produto_servico || `Oportunidade #${o.numero}`,
-            etapa: OPORTUNIDADE_STATUS_LABELS[o.status as keyof typeof OPORTUNIDADE_STATUS_LABELS] ?? o.status,
-            valor: o.valor_estimado,
-            atualizado_em: o.ultima_movimentacao,
-            link: `${origem}/oportunidades`,
-          })),
-          orcamentos: pedsRows.slice(0, 5).map((p) => ({
-            numero: p.numero,
-            valor: valorPedido(p),
-            status: STATUS_LABELS[p.status as keyof typeof STATUS_LABELS] ?? p.status,
-            // Validade padrão do orçamento (mesma regra do PDF): 7 dias.
-            validade: new Date(new Date(p.criado_em).getTime() + 7 * 86400000).toISOString().slice(0, 10),
-            link: `${origem}/dashboard`,
-          })),
-          ultimo_pedido: efetuado
-            ? { data: efetuado.entregue_em ?? efetuado.ultima_movimentacao, valor: valorPedido(efetuado) }
-            : null,
-          recompra: rec.length
-            ? { previsao: rec[0].data_prevista_recompra, itens: rec.map((r) => r.item_nome) }
-            : null,
-          link: `${origem}/clientes?id=${c.id}`,
-        }
-      }),
-    )
-
-    return NextResponse.json({ encontrado: clientes.length > 0, clientes })
+    return NextResponse.json({ encontrado: false, clientes: [] })
   } catch (err) {
     console.error('[bridge/cliente]', err instanceof Error ? err.message : err)
     return NextResponse.json({ erro: 'Falha ao consultar.' }, { status: 500 })

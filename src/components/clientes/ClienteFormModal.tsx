@@ -120,6 +120,33 @@ export function ClienteFormModal({
     setIdSalvoNestaSessao(null)
   }, [open, clienteExistente, cnpjInicial, razaoSocialInicial, telefoneInicial, contatoInicial])
 
+  // Telefones vinculados pelo CRM WhatsApp (tabela cliente_telefones, só leitura aqui).
+  const [telefonesWhats, setTelefonesWhats] = useState<string[]>([])
+  const clienteIdFicha = clienteExistente?.id ?? null
+  useEffect(() => {
+    setTelefonesWhats([])
+    if (!open || !clienteIdFicha) return
+    let cancelado = false
+    ;(async () => {
+      // Tabela fora dos tipos gerados; erro (ex: tabela ainda não criada) é ignorado.
+      const { data } = await (supabase as unknown as {
+        from: (t: string) => {
+          select: (c: string) => {
+            eq: (c: string, v: string) => { order: (c: string) => Promise<{ data: Array<{ telefone: string }> | null }> }
+          }
+        }
+      })
+        .from('cliente_telefones')
+        .select('telefone')
+        .eq('cliente_id', clienteIdFicha)
+        .order('criado_em')
+      if (!cancelado) setTelefonesWhats((data ?? []).map((t) => t.telefone))
+    })()
+    return () => {
+      cancelado = true
+    }
+  }, [open, clienteIdFicha, supabase])
+
   function atualizarCampo(campo: keyof FormState, valor: string) {
     setForm((atual) => ({ ...atual, [campo]: valor }))
   }
@@ -468,6 +495,22 @@ export function ClienteFormModal({
           </div>
         </div>
 
+        {telefonesWhats.length > 0 && (
+          <ul className="flex flex-wrap gap-2 text-sm">
+            {telefonesWhats.map((t) => (
+              <li
+                key={t}
+                className="flex items-center gap-2 rounded-md border border-white/10 bg-surface-alt px-2.5 py-1"
+              >
+                <span className="font-mono">{formatarTelefoneInput(t.replace(/^55/, ''))}</span>
+                <span className="rounded bg-accent-success/15 px-1.5 py-0.5 text-[11px] font-medium text-accent-success">
+                  WhatsApp (vinculado)
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <div className="grid grid-cols-4 gap-3">
           <div className="col-span-2">
             <label className="block text-sm font-medium text-primary/80">Bairro (opcional)</label>
@@ -535,7 +578,7 @@ export function ClienteFormModal({
           {clienteExistente && (
             <AbrirNoWhatsappButton
               className="mr-auto"
-              telefones={[form.telefone, clienteExistente.telefone]}
+              telefones={[form.telefone, clienteExistente.telefone, ...telefonesWhats]}
             />
           )}
           <button
