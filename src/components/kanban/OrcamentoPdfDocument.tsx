@@ -120,8 +120,28 @@ function criarStyles(corTexto: string, corLinha: string) {
     rodape: { marginTop: 28, paddingTop: 10, borderTopWidth: 0.5, borderTopColor: '#cccccc' },
     rodapeLinha: { fontSize: 8.5, color: '#555555', marginBottom: 2 },
     rodapeValidade: { fontSize: 8.5, color: '#555555', fontFamily: 'Helvetica-Oblique', marginTop: 5 },
+    siteBox: {
+      marginTop: 14,
+      padding: 9,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 0.75,
+      borderColor: corLinha,
+      borderRadius: 3,
+    },
+    siteQr: { width: 58, height: 58, marginRight: 12 },
+    siteTextos: { flex: 1 },
+    siteTitulo: { fontSize: 10, fontFamily: 'Helvetica-Bold', color: corTexto },
+    siteEndereco: { fontSize: 11, fontFamily: 'Helvetica-Bold', color: '#1a1a1a', marginTop: 2 },
+    siteLinha: { fontSize: 8.5, color: '#555555', marginTop: 2 },
   })
 }
+
+// Site RHOCAL + QR Code (public/rhocal-site-qr.png aponta para o site com
+// utm_source=orcamento). Só aparece nos orçamentos da RHOCAL — a MATSEG tem
+// outro site/identidade e não deve divulgar o da RHOCAL.
+const CNPJ_RHOCAL = '53.263.859/0001-50'
+const SITE_RHOCAL_EXIBIDO = 'www.rhocal.com.br'
 
 function combinarDetalhes(item: PedidoItem): string {
   return [
@@ -270,6 +290,21 @@ export function OrcamentoPdfDocument({
             <Text style={styles.faturamentoTexto}>
               Condição de pagamento: {pedido.modo_faturamento}
             </Text>
+          </View>
+        )}
+
+        {empresa.cnpj === CNPJ_RHOCAL && (
+          <View style={styles.siteBox} wrap={false}>
+            {/* eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image, não <img> do HTML */}
+            <Image style={styles.siteQr} src="/rhocal-site-qr.png" />
+            <View style={styles.siteTextos}>
+              <Text style={styles.siteTitulo}>Conheça o novo site da RHOCAL</Text>
+              <Text style={styles.siteEndereco}>{SITE_RHOCAL_EXIBIDO}</Text>
+              <Text style={styles.siteLinha}>
+                Consulta de CA grátis · catálogo de EPI · peça seu orçamento online
+              </Text>
+              <Text style={styles.siteLinha}>Aponte a câmera do celular para o QR Code.</Text>
+            </View>
           </View>
         )}
 
