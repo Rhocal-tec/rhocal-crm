@@ -137,10 +137,9 @@ function criarStyles(corTexto: string, corLinha: string) {
   })
 }
 
-// Site RHOCAL + QR Code (public/rhocal-site-qr.png aponta para o site com
-// utm_source=orcamento). Só aparece nos orçamentos da RHOCAL — a MATSEG tem
-// outro site/identidade e não deve divulgar o da RHOCAL.
-const CNPJ_RHOCAL = '53.263.859/0001-50'
+// Site + QR Code (public/rhocal-site-qr.png aponta para o site com
+// utm_source=orcamento). Aparece nos orçamentos das duas empresas (RHOCAL e
+// MATSEG), que divulgam o mesmo site.
 const SITE_RHOCAL_EXIBIDO = 'www.rhocal.com.br'
 
 function combinarDetalhes(item: PedidoItem): string {
@@ -293,20 +292,18 @@ export function OrcamentoPdfDocument({
           </View>
         )}
 
-        {empresa.cnpj === CNPJ_RHOCAL && (
-          <View style={styles.siteBox} wrap={false}>
-            {/* eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image, não <img> do HTML */}
-            <Image style={styles.siteQr} src="/rhocal-site-qr.png" />
-            <View style={styles.siteTextos}>
-              <Text style={styles.siteTitulo}>Conheça o novo site da RHOCAL</Text>
-              <Text style={styles.siteEndereco}>{SITE_RHOCAL_EXIBIDO}</Text>
-              <Text style={styles.siteLinha}>
-                Consulta de CA grátis · catálogo de EPI · peça seu orçamento online
-              </Text>
-              <Text style={styles.siteLinha}>Aponte a câmera do celular para o QR Code.</Text>
-            </View>
+        <View style={styles.siteBox} wrap={false}>
+          {/* eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image, não <img> do HTML */}
+          <Image style={styles.siteQr} src="/rhocal-site-qr.png" />
+          <View style={styles.siteTextos}>
+            <Text style={styles.siteTitulo}>Conheça o nosso novo site</Text>
+            <Text style={styles.siteEndereco}>{SITE_RHOCAL_EXIBIDO}</Text>
+            <Text style={styles.siteLinha}>
+              Consulta de CA grátis · catálogo de EPI · peça seu orçamento online
+            </Text>
+            <Text style={styles.siteLinha}>Aponte a câmera do celular para o QR Code.</Text>
           </View>
-        )}
+        </View>
 
         <View style={styles.rodape}>
           <Text style={styles.rodapeLinha}>Vendedor responsável: {nomeVendedor ?? '—'}</Text>
